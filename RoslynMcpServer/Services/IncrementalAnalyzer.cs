@@ -1,1 +1,301 @@
-using Microsoft.CodeAnalysis;\nusing Microsoft.CodeAnalysis.CSharp;\nusing Microsoft.CodeAnalysis.CSharp.Syntax;\nusing RoslynMcpServer.Models;\nusing System.Collections.Concurrent;\n\nnamespace RoslynMcpServer.Services\n{\n    public class FileAnalysisCache\n    {\n        public DateTime LastModified { get; set; }\n        public string FileHash { get; set; } = string.Empty;\n        public List<SymbolSearchResult> CachedSymbols { get; set; } = new();\n        public List<ComplexityResult> CachedComplexity { get; set; } = new();\n    }\n\n    public class IncrementalAnalyzer\n    {\n        private readonly Dictionary<string, FileAnalysisCache> _fileCache;\n        private readonly SemaphoreSlim _analysisLock;\n        \n        public IncrementalAnalyzer()\n        {\n            _fileCache = new Dictionary<string, FileAnalysisCache>();\n            _analysisLock = new SemaphoreSlim(Environment.ProcessorCount);\n        }\n        \n        public async Task<AnalysisResult> AnalyzeIncrementallyAsync(\n            Solution solution, IEnumerable<DocumentId>? changedDocuments = null)\n        {\n            var documentsToAnalyze = changedDocuments?.ToHashSet() ?? \n                solution.Projects.SelectMany(p => p.Documents).Select(d => d.Id).ToHashSet();\n            \n            var result = new AnalysisResult\n            {\n                AnalysisStartTime = DateTime.UtcNow\n            };\n            \n            var batchSize = Math.Max(1, Environment.ProcessorCount);\n            \n            // Process in batches to manage memory\n            await ProcessDocumentBatches(solution, documentsToAnalyze, batchSize, result);\n            \n            result.AnalysisEndTime = DateTime.UtcNow;\n            return result;\n        }\n        \n        private async Task ProcessDocumentBatches(\n            Solution solution, \n            HashSet<DocumentId> documentIds, \n            int batchSize, \n            AnalysisResult result)\n        {\n            var batches = documentIds.Batch(batchSize);\n            \n            foreach (var batch in batches)\n            {\n                await _analysisLock.WaitAsync();\n                try\n                {\n                    var tasks = batch.Select(docId => \n                        AnalyzeDocumentAsync(solution.GetDocument(docId), result));\n                    await Task.WhenAll(tasks);\n                    \n                    // Force garbage collection after each batch\n                    if (result.ProcessedDocuments % (batchSize * 10) == 0)\n                    {\n                        GC.Collect();\n                        GC.WaitForPendingFinalizers();\n                    }\n                }\n                finally\n                {\n                    _analysisLock.Release();\n                }\n            }\n        }\n        \n        private async Task AnalyzeDocumentAsync(Document? document, AnalysisResult result)\n        {\n            if (document?.FilePath == null) return;\n            \n            try\n            {\n                // Check if document needs analysis\n                if (!await ShouldAnalyzeDocument(document))\n                {\n                    // Use cached results\n                    if (_fileCache.TryGetValue(document.FilePath, out var cache))\n                    {\n                        result.Symbols.AddRange(cache.CachedSymbols);\n                        result.ComplexityIssues.AddRange(cache.CachedComplexity);\n                    }\n                    return;\n                }\n                \n                var syntaxTree = await document.GetSyntaxTreeAsync();\n                if (syntaxTree == null) return;\n                \n                var root = await syntaxTree.GetRootAsync();\n                var semanticModel = await document.GetSemanticModelAsync();\n                \n                if (semanticModel == null) return;\n                \n                // Analyze symbols\n                var symbols = ExtractSymbols(root, document, semanticModel);\n                result.Symbols.AddRange(symbols);\n                \n                // Analyze complexity\n                var complexityIssues = AnalyzeComplexity(root, document.FilePath);\n                result.ComplexityIssues.AddRange(complexityIssues);\n                \n                // Update cache\n                UpdateFileCache(document.FilePath, symbols, complexityIssues);\n                \n                result.ProcessedDocuments++;\n            }\n            catch (Exception)\n            {\n                // Log error but continue processing other documents\n            }\n        }\n        \n        private Task<bool> ShouldAnalyzeDocument(Document document)\n        {\n            if (document.FilePath == null) return Task.FromResult(false);\n            \n            if (!_fileCache.TryGetValue(document.FilePath, out var cache))\n                return Task.FromResult(true);\n            \n            try\n            {\n                var fileInfo = new FileInfo(document.FilePath);\n                if (!fileInfo.Exists)\n                    return Task.FromResult(false);\n                \n                // Check if file was modified\n                if (fileInfo.LastWriteTimeUtc > cache.LastModified)\n                    return Task.FromResult(true);\n                \n                // Could also check file hash for more accuracy\n                return Task.FromResult(false);\n            }\n            catch\n            {\n                return Task.FromResult(true); // If we can't check, analyze to be safe\n            }\n        }\n        \n        private List<SymbolSearchResult> ExtractSymbols(SyntaxNode root, Document document, SemanticModel semanticModel)\n        {\n            var symbols = new List<SymbolSearchResult>();\n            \n            foreach (var node in root.DescendantNodes())\n            {\n                var symbol = semanticModel.GetDeclaredSymbol(node);\n                if (symbol == null) continue;\n                \n                var location = node.GetLocation();\n                var lineSpan = location.GetLineSpan();\n                \n                symbols.Add(new SymbolSearchResult\n                {\n                    Name = symbol.Name,\n                    FullName = symbol.ToDisplayString(),\n                    Category = GetSymbolCategory(symbol),\n                    Location = $\"{document.Project.Name}:{Path.GetFileName(document.FilePath)}:{lineSpan.StartLinePosition.Line + 1}\",\n                    ProjectName = document.Project.Name,\n                    FilePath = document.FilePath ?? \"\",\n                    LineNumber = lineSpan.StartLinePosition.Line + 1,\n                    Summary = GetSymbolSummary(symbol),\n                    Accessibility = symbol.DeclaredAccessibility.ToString().ToLower(),\n                    SymbolKind = symbol.Kind,\n                    Namespace = symbol.ContainingNamespace?.ToDisplayString() ?? \"\"\n                });\n            }\n            \n            return symbols;\n        }\n        \n        private List<ComplexityResult> AnalyzeComplexity(SyntaxNode root, string filePath)\n        {\n            var complexityResults = new List<ComplexityResult>();\n            var methods = root.DescendantNodes().OfType<MethodDeclarationSyntax>();\n            \n            foreach (var method in methods)\n            {\n                var complexity = CalculateCyclomaticComplexity(method);\n                if (complexity >= 5) // Threshold\n                {\n                    var lineSpan = method.GetLocation().GetLineSpan();\n                    complexityResults.Add(new ComplexityResult\n                    {\n                        MethodName = method.Identifier.ValueText,\n                        FileName = Path.GetFileName(filePath),\n                        LineNumber = lineSpan.StartLinePosition.Line + 1,\n                        Complexity = complexity,\n                        ClassName = GetContainingClassName(method),\n                        Namespace = GetContainingNamespace(method)\n                    });\n                }\n            }\n            \n            return complexityResults;\n        }\n        \n        private int CalculateCyclomaticComplexity(MethodDeclarationSyntax method)\n        {\n            int complexity = 1; // Base complexity\n            \n            var decisionPoints = method.DescendantNodes().Where(node => \n                node.IsKind(SyntaxKind.IfStatement) ||\n                node.IsKind(SyntaxKind.WhileStatement) ||\n                node.IsKind(SyntaxKind.ForStatement) ||\n                node.IsKind(SyntaxKind.ForEachStatement) ||\n                node.IsKind(SyntaxKind.SwitchStatement) ||\n                node.IsKind(SyntaxKind.CatchClause));\n            \n            complexity += decisionPoints.Count();\n            \n            // Add complexity for logical operators\n            var logicalOperators = method.DescendantTokens().Where(token =>\n                token.IsKind(SyntaxKind.AmpersandAmpersandToken) ||\n                token.IsKind(SyntaxKind.BarBarToken));\n            \n            complexity += logicalOperators.Count();\n            \n            return complexity;\n        }\n        \n        private string GetContainingClassName(MethodDeclarationSyntax method)\n        {\n            var classDeclaration = method.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault();\n            return classDeclaration?.Identifier.ValueText ?? \"\";\n        }\n        \n        private string GetContainingNamespace(MethodDeclarationSyntax method)\n        {\n            var namespaceDeclaration = method.Ancestors().OfType<NamespaceDeclarationSyntax>().FirstOrDefault();\n            return namespaceDeclaration?.Name.ToString() ?? \"\";\n        }\n        \n        private string GetSymbolCategory(ISymbol symbol)\n        {\n            return symbol switch\n            {\n                INamedTypeSymbol namedType => namedType.TypeKind.ToString(),\n                IMethodSymbol => \"Method\",\n                IPropertySymbol => \"Property\",\n                IFieldSymbol => \"Field\",\n                IEventSymbol => \"Event\",\n                INamespaceSymbol => \"Namespace\",\n                _ => symbol.Kind.ToString()\n            };\n        }\n        \n        private string GetSymbolSummary(ISymbol symbol)\n        {\n            return symbol switch\n            {\n                IMethodSymbol method => $\"({string.Join(\", \", method.Parameters.Select(p => $\"{p.Type.Name} {p.Name}\"))})\",\n                IPropertySymbol property => $\": {property.Type.Name}\",\n                IFieldSymbol field => $\": {field.Type.Name}\",\n                INamedTypeSymbol type => $\"{type.TypeKind} with {type.GetMembers().Length} members\",\n                _ => \"\"\n            };\n        }\n        \n        private void UpdateFileCache(string filePath, List<SymbolSearchResult> symbols, List<ComplexityResult> complexityResults)\n        {\n            var cache = new FileAnalysisCache\n            {\n                LastModified = DateTime.UtcNow,\n                CachedSymbols = symbols,\n                CachedComplexity = complexityResults\n            };\n            \n            _fileCache[filePath] = cache;\n        }\n    }\n    \n    public static class EnumerableExtensions\n    {\n        public static IEnumerable<IEnumerable<T>> Batch<T>(this IEnumerable<T> source, int batchSize)\n        {\n            var batch = new List<T>(batchSize);\n            foreach (var item in source)\n            {\n                batch.Add(item);\n                if (batch.Count == batchSize)\n                {\n                    yield return batch;\n                    batch = new List<T>(batchSize);\n                }\n            }\n            \n            if (batch.Count > 0)\n                yield return batch;\n        }\n    }\n}"
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using RoslynMcpServer.Models;
+using System.Collections.Concurrent;
+
+namespace RoslynMcpServer.Services
+{
+    public class FileAnalysisCache
+    {
+        public DateTime LastModified { get; set; }
+        public string FileHash { get; set; } = string.Empty;
+        public List<SymbolSearchResult> CachedSymbols { get; set; } = new();
+        public List<ComplexityResult> CachedComplexity { get; set; } = new();
+    }
+
+    public class IncrementalAnalyzer
+    {
+        private readonly Dictionary<string, FileAnalysisCache> _fileCache;
+        private readonly SemaphoreSlim _analysisLock;
+
+        public IncrementalAnalyzer()
+        {
+            _fileCache = new Dictionary<string, FileAnalysisCache>();
+            _analysisLock = new SemaphoreSlim(Environment.ProcessorCount);
+        }
+
+        public async Task<AnalysisResult> AnalyzeIncrementallyAsync(
+            Solution solution, IEnumerable<DocumentId>? changedDocuments = null)
+        {
+            var documentsToAnalyze = changedDocuments?.ToHashSet() ?? 
+                solution.Projects.SelectMany(p => p.Documents).Select(d => d.Id).ToHashSet();
+
+            var result = new AnalysisResult
+            {
+                AnalysisStartTime = DateTime.UtcNow
+            };
+
+            var batchSize = Math.Max(1, Environment.ProcessorCount);
+
+            // Process in batches to manage memory
+            await ProcessDocumentBatches(solution, documentsToAnalyze, batchSize, result);
+
+            result.AnalysisEndTime = DateTime.UtcNow;
+            return result;
+        }
+
+        private async Task ProcessDocumentBatches(
+            Solution solution, 
+            HashSet<DocumentId> documentIds, 
+            int batchSize, 
+            AnalysisResult result)
+        {
+            var batches = documentIds.Batch(batchSize);
+
+            foreach (var batch in batches)
+            {
+                await _analysisLock.WaitAsync();
+                try
+                {
+                    var tasks = batch.Select(docId => 
+                        AnalyzeDocumentAsync(solution.GetDocument(docId), result));
+                    await Task.WhenAll(tasks);
+
+                    // Force garbage collection after each batch
+                    if (result.ProcessedDocuments % (batchSize * 10) == 0)
+                    {
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
+                    }
+                }
+                finally
+                {
+                    _analysisLock.Release();
+                }
+            }
+        }
+
+        private async Task AnalyzeDocumentAsync(Document? document, AnalysisResult result)
+        {
+            if (document?.FilePath == null) return;
+
+            try
+            {
+                // Check if document needs analysis
+                if (!await ShouldAnalyzeDocument(document))
+                {
+                    // Use cached results
+                    if (_fileCache.TryGetValue(document.FilePath, out var cache))
+                    {
+                        result.Symbols.AddRange(cache.CachedSymbols);
+                        result.ComplexityIssues.AddRange(cache.CachedComplexity);
+                    }
+                    return;
+                }
+
+                var syntaxTree = await document.GetSyntaxTreeAsync();
+                if (syntaxTree == null) return;
+
+                var root = await syntaxTree.GetRootAsync();
+                var semanticModel = await document.GetSemanticModelAsync();
+
+                if (semanticModel == null) return;
+
+                // Analyze symbols
+                var symbols = ExtractSymbols(root, document, semanticModel);
+                result.Symbols.AddRange(symbols);
+
+                // Analyze complexity
+                var complexityIssues = AnalyzeComplexity(root, document.FilePath);
+                result.ComplexityIssues.AddRange(complexityIssues);
+
+                // Update cache
+                UpdateFileCache(document.FilePath, symbols, complexityIssues);
+
+                result.ProcessedDocuments++;
+            }
+            catch (Exception)
+            {
+                // Log error but continue processing other documents
+            }
+        }
+
+        private Task<bool> ShouldAnalyzeDocument(Document document)
+        {
+            if (document.FilePath == null) return Task.FromResult(false);
+
+            if (!_fileCache.TryGetValue(document.FilePath, out var cache))
+                return Task.FromResult(true);
+
+            try
+            {
+                var fileInfo = new FileInfo(document.FilePath);
+                if (!fileInfo.Exists)
+                    return Task.FromResult(false);
+
+                // Check if file was modified
+                if (fileInfo.LastWriteTimeUtc > cache.LastModified)
+                    return Task.FromResult(true);
+
+                // Could also check file hash for more accuracy
+                return Task.FromResult(false);
+            }
+            catch
+            {
+                return Task.FromResult(true); // If we can't check, analyze to be safe
+            }
+        }
+
+        private List<SymbolSearchResult> ExtractSymbols(SyntaxNode root, Document document, SemanticModel semanticModel)
+        {
+            var symbols = new List<SymbolSearchResult>();
+
+            foreach (var node in root.DescendantNodes())
+            {
+                var symbol = semanticModel.GetDeclaredSymbol(node);
+                if (symbol == null) continue;
+
+                var location = node.GetLocation();
+                var lineSpan = location.GetLineSpan();
+
+                symbols.Add(new SymbolSearchResult
+                {
+                    Name = symbol.Name,
+                    FullName = symbol.ToDisplayString(),
+                    Category = GetSymbolCategory(symbol),
+                    Location = $"{document.Project.Name}:{Path.GetFileName(document.FilePath)}:{lineSpan.StartLinePosition.Line + 1}",
+                    ProjectName = document.Project.Name,
+                    FilePath = document.FilePath ?? "",
+                    LineNumber = lineSpan.StartLinePosition.Line + 1,
+                    Summary = GetSymbolSummary(symbol),
+                    Accessibility = symbol.DeclaredAccessibility.ToString().ToLower(),
+                    SymbolKind = symbol.Kind,
+                    Namespace = symbol.ContainingNamespace?.ToDisplayString() ?? ""
+                });
+            }
+
+            return symbols;
+        }
+
+        private List<ComplexityResult> AnalyzeComplexity(SyntaxNode root, string filePath)
+        {
+            var complexityResults = new List<ComplexityResult>();
+            var methods = root.DescendantNodes().OfType<MethodDeclarationSyntax>();
+
+            foreach (var method in methods)
+            {
+                var complexity = CalculateCyclomaticComplexity(method);
+                if (complexity >= 5) // Threshold
+                {
+                    var lineSpan = method.GetLocation().GetLineSpan();
+                    complexityResults.Add(new ComplexityResult
+                    {
+                        MethodName = method.Identifier.ValueText,
+                        FileName = Path.GetFileName(filePath),
+                        LineNumber = lineSpan.StartLinePosition.Line + 1,
+                        Complexity = complexity,
+                        ClassName = GetContainingClassName(method),
+                        Namespace = GetContainingNamespace(method)
+                    });
+                }
+            }
+
+            return complexityResults;
+        }
+
+        private int CalculateCyclomaticComplexity(MethodDeclarationSyntax method)
+        {
+            int complexity = 1; // Base complexity
+
+            var decisionPoints = method.DescendantNodes().Where(node => 
+                node.IsKind(SyntaxKind.IfStatement) ||
+                node.IsKind(SyntaxKind.WhileStatement) ||
+                node.IsKind(SyntaxKind.ForStatement) ||
+                node.IsKind(SyntaxKind.ForEachStatement) ||
+                node.IsKind(SyntaxKind.SwitchStatement) ||
+                node.IsKind(SyntaxKind.CatchClause));
+
+            complexity += decisionPoints.Count();
+
+            // Add complexity for logical operators
+            var logicalOperators = method.DescendantTokens().Where(token =>
+                token.IsKind(SyntaxKind.AmpersandAmpersandToken) ||
+                token.IsKind(SyntaxKind.BarBarToken));
+
+            complexity += logicalOperators.Count();
+
+            return complexity;
+        }
+
+        private string GetContainingClassName(MethodDeclarationSyntax method)
+        {
+            var classDeclaration = method.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault();
+            return classDeclaration?.Identifier.ValueText ?? "";
+        }
+
+        private string GetContainingNamespace(MethodDeclarationSyntax method)
+        {
+            var namespaceDeclaration = method.Ancestors().OfType<NamespaceDeclarationSyntax>().FirstOrDefault();
+            return namespaceDeclaration?.Name.ToString() ?? "";
+        }
+
+        private string GetSymbolCategory(ISymbol symbol)
+        {
+            return symbol switch
+            {
+                INamedTypeSymbol namedType => namedType.TypeKind.ToString(),
+                IMethodSymbol => "Method",
+                IPropertySymbol => "Property",
+                IFieldSymbol => "Field",
+                IEventSymbol => "Event",
+                INamespaceSymbol => "Namespace",
+                _ => symbol.Kind.ToString()
+            };
+        }
+
+        private string GetSymbolSummary(ISymbol symbol)
+        {
+            return symbol switch
+            {
+                IMethodSymbol method => $"({string.Join(", ", method.Parameters.Select(p => $"{p.Type.Name} {p.Name}"))})",
+                IPropertySymbol property => $": {property.Type.Name}",
+                IFieldSymbol field => $": {field.Type.Name}",
+                INamedTypeSymbol type => $"{type.TypeKind} with {type.GetMembers().Length} members",
+                _ => ""
+            };
+        }
+
+        private void UpdateFileCache(string filePath, List<SymbolSearchResult> symbols, List<ComplexityResult> complexityResults)
+        {
+            var cache = new FileAnalysisCache
+            {
+                LastModified = DateTime.UtcNow,
+                CachedSymbols = symbols,
+                CachedComplexity = complexityResults
+            };
+
+            _fileCache[filePath] = cache;
+        }
+    }
+
+    public static class EnumerableExtensions
+    {
+        public static IEnumerable<IEnumerable<T>> Batch<T>(this IEnumerable<T> source, int batchSize)
+        {
+            var batch = new List<T>(batchSize);
+            foreach (var item in source)
+            {
+                batch.Add(item);
+                if (batch.Count == batchSize)
+                {
+                    yield return batch;
+                    batch = new List<T>(batchSize);
+                }
+            }
+
+            if (batch.Count > 0)
+                yield return batch;
+        }
+    }
+}
