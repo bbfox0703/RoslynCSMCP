@@ -16,7 +16,12 @@
       "Bash(exit 0)",
       "Bash(powershell:*)",
       "Bash(timeout 2 tail:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd comprehensive upgrade completion report\n\nDocument the entire .NET 10 upgrade process including:\n- All package upgrades \\(11 packages\\)\n- Problems encountered and solutions\n- Test results and validation\n- Code changes summary\n- Future recommendations\n\nUpgrade Status: ✅ SUCCESS\n- 0 errors, 2 warnings\n- All functionality verified\n- MCP server tested and working\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd comprehensive upgrade completion report\n\nDocument the entire .NET 10 upgrade process including:\n- All package upgrades \\(11 packages\\)\n- Problems encountered and solutions\n- Test results and validation\n- Code changes summary\n- Future recommendations\n\nUpgrade Status: ✅ SUCCESS\n- 0 errors, 2 warnings\n- All functionality verified\n- MCP server tested and working\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(ls:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }
