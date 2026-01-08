@@ -18,7 +18,7 @@ A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn
 
 ### Common Requirements
 - **.NET 10.0 SDK or later** - [Download](https://dotnet.microsoft.com/download/dotnet/10.0)
-- **Visual Studio 2022** or **VS Code** (recommended for development)
+- **Visual Studio 2026** or **VS Code** (recommended for development)
 - **Git** (for cloning the repository)
 
 ### Platform-Specific Requirements
@@ -510,10 +510,6 @@ RoslynMCP/
 - **[CLAUDE_CLI_INTEGRATION.md](CLAUDE_CLI_INTEGRATION.md)** - Comprehensive Claude CLI integration guide
 - **[UPGRADE_COMPLETE.md](UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
 ### Development Setup
 
 1. Fork the repository
@@ -534,6 +530,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
+- Fork from [RoslynMCP](https://github.com/carquiza/RoslynMCP), originally by [Chris Arquiza](https://github.com/carquiza). For personal playground.
 - Built with [Roslyn](https://github.com/dotnet/roslyn) - The .NET Compiler Platform
 - Uses [Model Context Protocol](https://modelcontextprotocol.io) for Claude integration
 - Powered by [.NET 10.0](https://dotnet.microsoft.com/download/dotnet/10.0)
