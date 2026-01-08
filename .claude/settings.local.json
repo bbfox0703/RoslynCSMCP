@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(dotnet:*)",
+      "WebSearch",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd CodeAnalysisService implementation and upgrade assessment\n\n- Implement missing CodeAnalysisService with Solution loading and dependency analysis\n- Create comprehensive .NET 10 upgrade assessment report\n- Fix compilation errors with thread-safe counter implementation\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git tag:*)",
+      "Bash(git checkout:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nPhase 1: Upgrade TargetFramework to net10.0\n\n- Update from net8.0 to net10.0\n- Build successful with 0 errors, 4 warnings\n- Warnings are expected and will be resolved in next phases\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  }
+}
