@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "roslyn": {
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "${ROSLYN_MCP_PATH:-./RoslynMcpServer}"
+      ],
+      "env": {
+        "DOTNET_ENVIRONMENT": "Production",
+        "LOG_LEVEL": "Information"
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # Roslyn MCP Server
 
-A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn compiler platform to provide Claude Desktop with code analysis and navigation capabilities for C# codebases.
+A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn compiler platform to provide **Claude Desktop** and **Claude CLI (Claude Code)** with code analysis and navigation capabilities for C# codebases.
 
 ## Features
 
@@ -14,9 +14,9 @@ A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn
 
 ## Prerequisites
 
-- .NET 8.0 SDK or later
+- .NET 10.0 SDK or later
 - Visual Studio 2022 or VS Code (recommended for development)
-- Claude Desktop application
+- **Claude Desktop** application OR **Claude CLI** (Claude Code)
 
 ## Installation
 
@@ -88,6 +88,63 @@ Add the following to your `claude_desktop_config.json` file:
 ```
 
 **Important**: Replace `/path/to/RoslynMCP/RoslynMcpServer` with the actual absolute path to your project directory.
+
+## Claude CLI (Claude Code) Configuration
+
+RoslynMCP also works seamlessly with Claude CLI! Choose your preferred setup method:
+
+### Quick Setup (Recommended)
+
+#### Windows
+```powershell
+.\setup-claude-cli.ps1
+```
+
+#### Linux/macOS
+```bash
+chmod +x setup-claude-cli.sh
+./setup-claude-cli.sh
+```
+
+### Manual Setup
+
+#### User Scope (Available in all projects)
+```bash
+# Configure for personal use across all projects
+claude mcp add --transport stdio roslyn --scope user \
+  --env DOTNET_ENVIRONMENT=Production \
+  --env LOG_LEVEL=Information \
+  -- dotnet run --project /path/to/RoslynMcpServer
+```
+
+#### Project Scope (Team-shared via .mcp.json)
+```bash
+# Configure for team collaboration (recommended for shared projects)
+claude mcp add --transport stdio roslyn --scope project \
+  -- dotnet run --project /path/to/RoslynMcpServer
+```
+
+### Verify Configuration
+```bash
+# List all configured MCP servers
+claude mcp list
+
+# Check RoslynMCP details
+claude mcp get roslyn
+```
+
+### Claude CLI Usage
+After configuration, start Claude CLI and use natural language:
+```bash
+claude
+
+> Search for all classes implementing IRepository in MySolution.sln
+> Find all references to UserService in MySolution.sln
+> Analyze code complexity in src/Services/*.cs
+> Show me the dependency graph for this solution
+```
+
+📚 **For detailed Claude CLI integration guide**, see [CLAUDE_CLI_INTEGRATION.md](CLAUDE_CLI_INTEGRATION.md)
 
 ## Usage
 

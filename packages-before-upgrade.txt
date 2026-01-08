@@ -1,0 +1,15 @@
+  正在判斷要還原的專案...
+  所有專案都在最新狀態，可進行還原。
+專案 'RoslynMcpServer' 有以下套件參考
+   [net8.0]: 
+   最上層套件                                                  已要求               已解析            
+   > Microsoft.Build.Locator                              1.6.10            1.6.10         
+   > Microsoft.CodeAnalysis.CSharp                        4.8.0             4.8.0          
+   > Microsoft.CodeAnalysis.CSharp.Workspaces             4.8.0             4.8.0          
+   > Microsoft.CodeAnalysis.Workspaces.MSBuild            4.8.0             4.8.0          
+   > Microsoft.Extensions.Caching.Memory                  9.0.6             9.0.6          
+   > Microsoft.Extensions.Caching.StackExchangeRedis      9.0.6             9.0.6          
+   > Microsoft.Extensions.Hosting                         8.0.0             8.0.0          
+   > ModelContextProtocol                                 0.3.0-preview.1   0.3.0-preview.1
+   > System.Text.Json                                     9.0.6             9.0.6          
+

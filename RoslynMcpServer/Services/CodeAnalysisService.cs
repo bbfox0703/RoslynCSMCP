@@ -45,16 +45,21 @@ namespace RoslynMcpServer.Services
                 _logger.LogInformation("Loading solution from {SolutionPath}", solutionPath);
 
                 // Create or reuse workspace
-                var workspace = _workspaces.GetOrAdd(solutionPath, _ => MSBuildWorkspace.Create());
-
-                // Handle workspace failures
-                workspace.WorkspaceFailed += (sender, args) =>
+                var workspace = _workspaces.GetOrAdd(solutionPath, _ =>
                 {
-                    if (args.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
+                    var ws = MSBuildWorkspace.Create();
+
+                    // Handle workspace failures (Roslyn 5.0+ API)
+                    ws.RegisterWorkspaceFailedHandler(args =>
                     {
-                        _logger.LogWarning("Workspace failure: {Message}", args.Diagnostic.Message);
-                    }
-                };
+                        if (args.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
+                        {
+                            _logger.LogWarning("Workspace failure: {Message}", args.Diagnostic.Message);
+                        }
+                    });
+
+                    return ws;
+                });
 
                 // Load solution
                 var solution = await workspace.OpenSolutionAsync(solutionPath);
