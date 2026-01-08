@@ -113,12 +113,12 @@ The codebase follows a layered architecture:
 - Complexity = 1 + decision points (if/while/for/foreach/switch/catch) + logical operators (&&/||)
 - Default threshold is 5, configurable via tool parameter
 
-### Missing Implementation Note
-
-The `CodeAnalysisService` class is referenced in Program.cs:45 and CodeNavigationTools.cs but NOT YET IMPLEMENTED. Tools that depend on it (AnalyzeDependencies, parts of AnalyzeCodeComplexity) will fail at runtime until this service is created. It should handle:
-- Solution loading via MSBuildWorkspace
-- GetSolutionAsync caching
-- Dependency graph analysis
+**CodeAnalysisService** (Services/CodeAnalysisService.cs)
+- Manages MSBuildWorkspace instances and solution loading
+- Provides `GetSolutionAsync` with 5-minute memory caching
+- Implements `AnalyzeDependenciesAsync` for dependency graph analysis
+- Handles workspace lifecycle and disposal
+- One workspace per solution path, reused across calls
 
 ## Development Guidelines
 
