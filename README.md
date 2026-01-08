@@ -38,7 +38,7 @@ A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/carquiza/RoslynMCP.git
+git clone https://github.com/bbfox0703/RoslynMCP.git
 cd RoslynMCP
 ```
 
