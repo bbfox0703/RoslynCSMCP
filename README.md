@@ -496,10 +496,11 @@ RoslynMCP/
 │   ├── setup-claude-cli.sh       # Linux/macOS setup for Claude CLI
 │   ├── claude-desktop-config.example.json # Example Claude Desktop config
 │   └── claude-cli-config.example.json     # Example Claude CLI config
+├── docs/                         # documents
+│   ├── CLAUDE_CLI_INTEGRATION.md     # Detailed Claude CLI integration guide
+│   └── UPGRADE_COMPLETE.md           # .NET 10 upgrade documentation
 ├── .mcp.json                     # Project-scope MCP config (Claude CLI)
 ├── CLAUDE.md                     # Architecture documentation for Claude Code
-├── CLAUDE_CLI_INTEGRATION.md     # Detailed Claude CLI integration guide
-├── UPGRADE_COMPLETE.md           # .NET 10 upgrade documentation
 └── README.md                     # This file
 ```
 
