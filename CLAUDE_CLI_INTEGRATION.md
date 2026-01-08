@@ -1,23 +1,6 @@
 # Claude CLI (Claude Code) 集成評估
 
-**評估日期**: 2026-01-08
-**專案**: RoslynMCP Server
-**目標**: 讓 Claude CLI 也能使用 RoslynMCP 伺服器
-
 ---
-
-## 📊 評估結論
-
-✅ **完全可行** - RoslynMCP 可以**不需修改任何程式碼**就直接在 Claude CLI 中使用！
-
-**原因**:
-- RoslynMCP 使用標準 MCP stdio transport
-- Claude CLI 完全支援 stdio MCP 伺服器
-- 只需要配置文件和設置說明
-
----
-
-## 🔍 當前狀態分析
 
 ### RoslynMCP 伺服器特性
 - **傳輸協議**: stdio (標準輸入/輸出)
@@ -216,19 +199,6 @@ MAX_MCP_OUTPUT_TOKENS=50000 claude
 ```
 
 ---
-
-## 📋 需要的修改清單
-
-### ✅ 無需程式碼修改
-
-RoslynMCP 已經完全相容，無需任何程式碼變更！
-
-### 📄 需要新增的文件
-
-1. **`.mcp.json`** - 專案範圍配置（已自動生成）
-2. **`CLAUDE_CLI_INTEGRATION.md`** - 本文件
-3. **更新 `README.md`** - 添加 Claude CLI 使用說明
-4. **更新 `CLAUDE.md`** - 添加 CLI 集成資訊
 
 ### 🔧 可選的改進
 
@@ -520,28 +490,3 @@ MAX_MCP_OUTPUT_TOKENS=100000 claude
 ### MCP 協議
 - [ModelContextProtocol 官方文檔](https://modelcontextprotocol.io/)
 - [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)
-
----
-
-## 🎉 結論
-
-**RoslynMCP 已經可以直接在 Claude CLI 中使用！**
-
-### 優勢總結
-
-✅ **零程式碼修改** - 現有實作完全相容
-✅ **靈活配置** - 支援用戶/專案/本地三種範圍
-✅ **團隊友好** - 可通過 .mcp.json 共享配置
-✅ **完整功能** - 5 個 MCP 工具全部可用
-✅ **效能優異** - .NET 10 + Roslyn 5.0 最佳化
-
-### 下一步行動
-
-1. **立即可用**: 建立 `.mcp.json` 並測試
-2. **文檔完善**: 更新 README 和 CLAUDE.md
-3. **可選改進**: 建立設置腳本和測試
-
----
-
-**評估完成日期**: 2026-01-08
-**評估結論**: ✅ **強烈推薦集成** - 無技術障礙，即時可用
