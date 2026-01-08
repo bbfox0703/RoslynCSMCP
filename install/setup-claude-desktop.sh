@@ -54,9 +54,9 @@ done
 echo -e "${CYAN}=== Roslyn MCP Server Setup for Claude Desktop ===${NC}"
 echo
 
-# Get current directory
+# Get script directory and project path
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_PATH="$SCRIPT_DIR/RoslynMcpServer"
+PROJECT_PATH="$(cd "$SCRIPT_DIR/.." && pwd)/RoslynMcpServer"
 
 echo -e "${GREEN}Project location: $PROJECT_PATH${NC}"
 echo

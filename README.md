@@ -73,13 +73,13 @@ Press `Ctrl+C` to stop the server after verifying it starts successfully.
 
 #### Windows
 ```powershell
-.\setup-claude-desktop.ps1
+.\install\setup-claude-desktop.ps1
 ```
 
 #### Linux/macOS
 ```bash
-chmod +x setup-claude-desktop.sh
-./setup-claude-desktop.sh
+chmod +x install/setup-claude-desktop.sh
+./install/setup-claude-desktop.sh
 ```
 
 The automated scripts will:
@@ -123,7 +123,7 @@ Add the following to your `claude_desktop_config.json`:
 - Windows example: `C:\\Users\\YourName\\Projects\\RoslynMCP\\RoslynMcpServer`
 - macOS/Linux example: `/Users/YourName/Projects/RoslynMCP/RoslynMcpServer`
 
-See [claude-desktop-config.example.json](claude-desktop-config.example.json) for a complete example.
+See [claude-desktop-config.example.json](install/claude-desktop-config.example.json) for a complete example.
 
 #### 3. Restart Claude Desktop
 
@@ -168,43 +168,43 @@ npm install -g @anthropics/claude-cli
 
 #### Windows
 ```powershell
-.\setup-claude-cli.ps1
+.\install\setup-claude-cli.ps1
 ```
 
 Options:
 ```powershell
 # Interactive mode (choose scope: user/project/local)
-.\setup-claude-cli.ps1
+.\install\setup-claude-cli.ps1
 
 # User scope (available in all your projects)
-.\setup-claude-cli.ps1 -Scope user
+.\install\setup-claude-cli.ps1 -Scope user
 
 # Project scope (team-shared via .mcp.json)
-.\setup-claude-cli.ps1 -Scope project
+.\install\setup-claude-cli.ps1 -Scope project
 
 # Skip build step
-.\setup-claude-cli.ps1 -SkipBuild
+.\install\setup-claude-cli.ps1 -SkipBuild
 ```
 
 #### Linux/macOS
 ```bash
-chmod +x setup-claude-cli.sh
-./setup-claude-cli.sh
+chmod +x install/setup-claude-cli.sh
+./install/setup-claude-cli.sh
 ```
 
 Options:
 ```bash
 # Interactive mode
-./setup-claude-cli.sh
+./install/setup-claude-cli.sh
 
 # User scope
-./setup-claude-cli.sh --scope user
+./install/setup-claude-cli.sh --scope user
 
 # Project scope
-./setup-claude-cli.sh --scope project
+./install/setup-claude-cli.sh --scope project
 
 # Skip build
-./setup-claude-cli.sh --skip-build
+./install/setup-claude-cli.sh --skip-build
 ```
 
 ### Manual Setup
@@ -253,7 +253,7 @@ claude mcp add --transport stdio roslyn --scope local \
   -- dotnet run --project ./RoslynMcpServer
 ```
 
-See [claude-cli-config.example.json](claude-cli-config.example.json) for a complete configuration example.
+See [claude-cli-config.example.json](install/claude-cli-config.example.json) for a complete configuration example.
 
 ### Verification
 
@@ -468,9 +468,9 @@ dotnet --version
 
 ```bash
 # Make scripts executable
-chmod +x setup-claude-desktop.sh
-chmod +x setup-claude-cli.sh
-chmod +x test-installation.sh
+chmod +x install/setup-claude-desktop.sh
+chmod +x install/setup-claude-cli.sh
+chmod +x RoslynMcpServer/test-installation.sh
 ```
 
 ## Project Structure
@@ -489,12 +489,13 @@ RoslynMCP/
 │   │   └── SecurityValidator.cs
 │   └── Models/
 │       └── SearchModels.cs       # DTOs for tool results
-├── setup-claude-desktop.ps1      # Windows automated setup for Claude Desktop
-├── setup-claude-desktop.sh       # Linux/macOS setup for Claude Desktop
-├── setup-claude-cli.ps1          # Windows automated setup for Claude CLI
-├── setup-claude-cli.sh           # Linux/macOS setup for Claude CLI
-├── claude-desktop-config.example.json # Example Claude Desktop config
-├── claude-cli-config.example.json     # Example Claude CLI config
+├── install/                      # Installation and setup scripts
+│   ├── setup-claude-desktop.ps1  # Windows automated setup for Claude Desktop
+│   ├── setup-claude-desktop.sh   # Linux/macOS setup for Claude Desktop
+│   ├── setup-claude-cli.ps1      # Windows automated setup for Claude CLI
+│   ├── setup-claude-cli.sh       # Linux/macOS setup for Claude CLI
+│   ├── claude-desktop-config.example.json # Example Claude Desktop config
+│   └── claude-cli-config.example.json     # Example Claude CLI config
 ├── .mcp.json                     # Project-scope MCP config (Claude CLI)
 ├── CLAUDE.md                     # Architecture documentation for Claude Code
 ├── CLAUDE_CLI_INTEGRATION.md     # Detailed Claude CLI integration guide

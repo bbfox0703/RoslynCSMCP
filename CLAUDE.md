@@ -34,8 +34,8 @@ npx @modelcontextprotocol/inspector dotnet run --project ./RoslynMcpServer
 
 ### Testing
 The project uses automated setup and test scripts:
-- **Windows**: `.\setup-claude-desktop.ps1` (builds, configures, and tests the server)
-- **Linux/macOS**: `./setup-claude-desktop.sh` and `./test-installation.sh`
+- **Windows**: `.\install\setup-claude-desktop.ps1` (builds, configures, and tests the server)
+- **Linux/macOS**: `./install/setup-claude-desktop.sh` and `./RoslynMcpServer/test-installation.sh`
 
 ### Important: MSBuild Registration
 The server requires MSBuild to be registered before any Roslyn workspace operations. This happens automatically in Program.cs:12-33 via `MSBuildLocator.RegisterDefaults()`. This MUST occur before creating any Roslyn workspaces.
