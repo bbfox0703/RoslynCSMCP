@@ -29,9 +29,9 @@ Examples:
 Write-Host "=== RoslynMCP Setup for Claude CLI ===" -ForegroundColor Cyan
 Write-Host
 
-# Get current directory
-$currentDir = Get-Location
-$projectPath = Join-Path $currentDir "RoslynMcpServer"
+# Get script directory and project path
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectPath = Join-Path (Split-Path -Parent $scriptDir) "RoslynMcpServer"
 
 Write-Host "Project location: $projectPath" -ForegroundColor Green
 Write-Host "Configuration scope: $Scope" -ForegroundColor Green
