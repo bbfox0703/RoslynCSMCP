@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(dotnet:*)",
+      "WebSearch",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd CodeAnalysisService implementation and upgrade assessment\n\n- Implement missing CodeAnalysisService with Solution loading and dependency analysis\n- Create comprehensive .NET 10 upgrade assessment report\n- Fix compilation errors with thread-safe counter implementation\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git tag:*)",
+      "Bash(git checkout:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nPhase 1: Upgrade TargetFramework to net10.0\n\n- Update from net8.0 to net10.0\n- Build successful with 0 errors, 4 warnings\n- Warnings are expected and will be resolved in next phases\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nPhase 2: Upgrade low-risk packages to .NET 10 versions\n\nUpgraded packages:\n- Microsoft.Build.Locator: 1.6.10 → 1.11.2\n- Microsoft.Extensions.Hosting: 8.0.0 → 10.0.1\n- Microsoft.Extensions.Caching.Memory: 9.0.6 → 10.0.1  \n- Microsoft.Extensions.Caching.StackExchangeRedis: 9.0.6 → 10.0.1\n- System.Text.Json: 9.0.6 → 10.0.1\n\nBuild successful with 0 errors, 4 warnings unchanged.\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nPhase 3: Upgrade Roslyn packages to 5.0.0\n\nUpgraded packages:\n- Microsoft.CodeAnalysis.CSharp: 4.8.0 → 5.0.0\n- Microsoft.CodeAnalysis.CSharp.Workspaces: 4.8.0 → 5.0.0\n- Microsoft.CodeAnalysis.Workspaces.MSBuild: 4.8.0 → 5.0.0\n\nFixes:\n- Add Microsoft.Build.Framework with ExcludeAssets=\"runtime\" PrivateAssets=\"all\"\n- Update deprecated API: Workspace.WorkspaceFailed → RegisterWorkspaceFailedHandler\n- This aligns with Roslyn 5.0+ API changes\n\nBuild successful with 0 errors, 2 warnings.\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nPhase 4: Upgrade ModelContextProtocol to 0.5.0-preview.1\n\nUpgraded package:\n- ModelContextProtocol: 0.3.0-preview.1 → 0.5.0-preview.1\n\nMCP API is fully compatible - no code changes required.\nBuild successful with 0 errors, 2 warnings.\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(timeout 5 dotnet run:*)",
+      "Bash(exit 0)",
+      "Bash(powershell:*)",
+      "Bash(timeout 2 tail:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd comprehensive upgrade completion report\n\nDocument the entire .NET 10 upgrade process including:\n- All package upgrades \\(11 packages\\)\n- Problems encountered and solutions\n- Test results and validation\n- Code changes summary\n- Future recommendations\n\nUpgrade Status: ✅ SUCCESS\n- 0 errors, 2 warnings\n- All functionality verified\n- MCP server tested and working\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  }
+}

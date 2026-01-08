@@ -1,1 +1,407 @@
-using Microsoft.CodeAnalysis;\nusing Microsoft.CodeAnalysis.CSharp;\nusing Microsoft.CodeAnalysis.CSharp.Syntax;\nusing Microsoft.Extensions.DependencyInjection;\nusing Microsoft.Extensions.Logging;\nusing ModelContextProtocol.Server;\nusing RoslynMcpServer.Models;\nusing RoslynMcpServer.Services;\nusing System.ComponentModel;\nusing System.Text;\n\nnamespace RoslynMcpServer.Tools\n{\n    [McpServerToolType]\n    public class CodeNavigationTools\n    {\n        [McpServerTool, Description(\"Search for symbols in C# code using wildcard patterns (* and ?)\")]\n        public static async Task<string> SearchSymbols(\n            [Description(\"Wildcard pattern to search for (e.g., 'User*', '*Service', 'Get*User')\")] string pattern,\n            [Description(\"Path to solution file (.sln)\")] string solutionPath,\n            [Description(\"Symbol types to include: class,interface,method,property,field (comma-separated)\")] string symbolTypes = \"class,interface,method,property\",\n            [Description(\"Whether to ignore case in search\")] bool ignoreCase = true,\n            IServiceProvider? serviceProvider = null)\n        {\n            try\n            {\n                var validator = serviceProvider?.GetService<SecurityValidator>();\n                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();\n                \n                // Validate inputs\n                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)\n                {\n                    return \"Error: Invalid solution path provided.\";\n                }\n                \n                var sanitizedPattern = validator?.SanitizeSearchPattern(pattern) ?? pattern;\n                \n                // Perform search with timeout\n                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));\n                var searchService = serviceProvider?.GetService<SymbolSearchService>();\n                if (searchService == null)\n                {\n                    return \"Error: Symbol search service not available.\";\n                }\n                \n                var results = await searchService.SearchSymbolsAsync(\n                    sanitizedPattern, solutionPath, symbolTypes, ignoreCase);\n                \n                return FormatSearchResults(results);\n            }\n            catch (OperationCanceledException)\n            {\n                return \"Error: Search operation timed out. The codebase may be too large or complex.\";\n            }\n            catch (FileNotFoundException)\n            {\n                return \"Error: Solution file not found. Please check the path and try again.\";\n            }\n            catch (UnauthorizedAccessException)\n            {\n                return \"Error: Access denied. Please check file permissions.\";\n            }\n            catch (Exception ex)\n            {\n                // Log full error details but return safe message\n                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();\n                logger?.LogError(ex, \"Unexpected error during symbol search\");\n                \n                return \"Error: An unexpected error occurred during the search operation.\";\n            }\n        }\n\n        [McpServerTool, Description(\"Find all references to a specific symbol\")]\n        public static async Task<string> FindReferences(\n            [Description(\"Exact symbol name to find references for\")] string symbolName,\n            [Description(\"Path to solution file (.sln)\")] string solutionPath,\n            [Description(\"Include symbol definition in results\")] bool includeDefinition = true,\n            IServiceProvider? serviceProvider = null)\n        {\n            try\n            {\n                var validator = serviceProvider?.GetService<SecurityValidator>();\n                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)\n                {\n                    return \"Error: Invalid solution path provided.\";\n                }\n                \n                var searchService = serviceProvider?.GetService<SymbolSearchService>();\n                if (searchService == null)\n                {\n                    return \"Error: Symbol search service not available.\";\n                }\n                \n                var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);\n                return FormatReferenceResults(results);\n            }\n            catch (Exception ex)\n            {\n                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();\n                logger?.LogError(ex, \"Error finding references for symbol: {SymbolName}\", symbolName);\n                return \"Error: An unexpected error occurred while finding references.\";\n            }\n        }\n\n        [McpServerTool, Description(\"Get detailed information about a specific symbol\")]\n        public static async Task<string> GetSymbolInfo(\n            [Description(\"Exact symbol name or full qualified name\")] string symbolName,\n            [Description(\"Path to solution file (.sln)\")] string solutionPath,\n            IServiceProvider? serviceProvider = null)\n        {\n            try\n            {\n                var validator = serviceProvider?.GetService<SecurityValidator>();\n                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)\n                {\n                    return \"Error: Invalid solution path provided.\";\n                }\n                \n                var searchService = serviceProvider?.GetService<SymbolSearchService>();\n                if (searchService == null)\n                {\n                    return \"Error: Symbol search service not available.\";\n                }\n                \n                var info = await searchService.GetSymbolInfoAsync(symbolName, solutionPath);\n                return FormatSymbolInfo(info);\n            }\n            catch (Exception ex)\n            {\n                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();\n                logger?.LogError(ex, \"Error getting symbol info for: {SymbolName}\", symbolName);\n                return \"Error: An unexpected error occurred while getting symbol information.\";\n            }\n        }\n\n        [McpServerTool, Description(\"Analyze project dependencies and symbol usage patterns\")]\n        public static async Task<string> AnalyzeDependencies(\n            [Description(\"Path to solution file (.sln)\")] string solutionPath,\n            [Description(\"Maximum depth for dependency analysis\")] int maxDepth = 3,\n            IServiceProvider? serviceProvider = null)\n        {\n            try\n            {\n                var validator = serviceProvider?.GetService<SecurityValidator>();\n                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)\n                {\n                    return \"Error: Invalid solution path provided.\";\n                }\n                \n                var analysisService = serviceProvider?.GetService<CodeAnalysisService>();\n                if (analysisService == null)\n                {\n                    return \"Error: Code analysis service not available.\";\n                }\n                \n                var dependencies = await analysisService.AnalyzeDependenciesAsync(solutionPath, maxDepth);\n                return FormatDependencyAnalysis(dependencies);\n            }\n            catch (Exception ex)\n            {\n                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();\n                logger?.LogError(ex, \"Error analyzing dependencies\");\n                return \"Error: An unexpected error occurred during dependency analysis.\";\n            }\n        }\n\n        [McpServerTool, Description(\"Analyze code complexity and identify high-complexity methods\")]\n        public static async Task<string> AnalyzeCodeComplexity(\n            [Description(\"Path to solution file\")] string solutionPath,\n            [Description(\"Complexity threshold (1-10)\")] int threshold = 5,\n            IServiceProvider? serviceProvider = null)\n        {\n            try\n            {\n                var validator = serviceProvider?.GetService<SecurityValidator>();\n                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)\n                {\n                    return \"Error: Invalid solution path provided.\";\n                }\n                \n                var analysisService = serviceProvider?.GetService<CodeAnalysisService>();\n                if (analysisService == null)\n                {\n                    return \"Error: Code analysis service not available.\";\n                }\n                \n                var solution = await analysisService.GetSolutionAsync(solutionPath);\n                var complexityResults = new List<ComplexityResult>();\n                \n                foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))\n                {\n                    var compilation = await project.GetCompilationAsync();\n                    if (compilation == null) continue;\n                    \n                    foreach (var tree in compilation.SyntaxTrees)\n                    {\n                        var root = await tree.GetRootAsync();\n                        var methods = root.DescendantNodes().OfType<MethodDeclarationSyntax>();\n                        \n                        foreach (var method in methods)\n                        {\n                            var complexity = CalculateCyclomaticComplexity(method);\n                            if (complexity >= threshold)\n                            {\n                                var lineSpan = method.GetLocation().GetLineSpan();\n                                complexityResults.Add(new ComplexityResult\n                                {\n                                    MethodName = method.Identifier.ValueText,\n                                    FileName = Path.GetFileName(tree.FilePath),\n                                    LineNumber = lineSpan.StartLinePosition.Line + 1,\n                                    Complexity = complexity,\n                                    ClassName = GetContainingClassName(method),\n                                    Namespace = GetContainingNamespace(method)\n                                });\n                            }\n                        }\n                    }\n                }\n                \n                return FormatComplexityResults(complexityResults);\n            }\n            catch (Exception ex)\n            {\n                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();\n                logger?.LogError(ex, \"Error analyzing code complexity\");\n                return \"Error: An unexpected error occurred during complexity analysis.\";\n            }\n        }\n\n        private static string FormatSearchResults(IEnumerable<SymbolSearchResult> results)\n        {\n            var grouped = results.GroupBy(r => r.Category);\n            var output = new StringBuilder();\n            \n            output.AppendLine($\"Found {results.Count()} symbols:\\n\");\n            \n            foreach (var group in grouped.OrderBy(g => g.Key))\n            {\n                output.AppendLine($\"**{group.Key}** ({group.Count()}):\");\n                foreach (var result in group.Take(20)) // Limit results\n                {\n                    output.AppendLine($\"  • `{result.Name}` in {result.Location}\");\n                    if (!string.IsNullOrEmpty(result.Summary))\n                        output.AppendLine($\"    {result.Summary}\");\n                }\n                if (group.Count() > 20)\n                    output.AppendLine($\"    ... and {group.Count() - 20} more\");\n                output.AppendLine();\n            }\n            \n            return output.ToString();\n        }\n\n        private static string FormatReferenceResults(IEnumerable<ReferenceResult> results)\n        {\n            var output = new StringBuilder();\n            output.AppendLine($\"Found {results.Count()} references:\\n\");\n            \n            var groupedByFile = results.GroupBy(r => r.DocumentPath);\n            \n            foreach (var fileGroup in groupedByFile.OrderBy(g => g.Key))\n            {\n                output.AppendLine($\"**{Path.GetFileName(fileGroup.Key)}** ({fileGroup.Count()} references):\");\n                \n                foreach (var reference in fileGroup.OrderBy(r => r.LineNumber))\n                {\n                    var refType = reference.IsDefinition ? \"Definition\" : reference.ReferenceKind;\n                    output.AppendLine($\"  • Line {reference.LineNumber}: {refType}\");\n                    output.AppendLine($\"    `{reference.LineText.Trim()}`\");\n                }\n                output.AppendLine();\n            }\n            \n            return output.ToString();\n        }\n\n        private static string FormatSymbolInfo(RoslynMcpServer.Models.SymbolInfo? info)\n        {\n            if (info == null)\n                return \"Symbol not found.\";\n            \n            var output = new StringBuilder();\n            output.AppendLine($\"**{info.Name}** ({info.Kind})\");\n            output.AppendLine($\"Full Name: `{info.FullName}`\");\n            output.AppendLine($\"Accessibility: {info.Accessibility}\");\n            \n            if (!string.IsNullOrEmpty(info.Namespace))\n                output.AppendLine($\"Namespace: {info.Namespace}\");\n            \n            if (!string.IsNullOrEmpty(info.DeclaringType))\n                output.AppendLine($\"Declaring Type: {info.DeclaringType}\");\n            \n            if (!string.IsNullOrEmpty(info.ReturnType))\n                output.AppendLine($\"Return Type: {info.ReturnType}\");\n            \n            if (info.Parameters.Any())\n            {\n                output.AppendLine(\"Parameters:\");\n                foreach (var param in info.Parameters)\n                    output.AppendLine($\"  • {param}\");\n            }\n            \n            if (info.Attributes.Any())\n            {\n                output.AppendLine(\"Attributes:\");\n                foreach (var attr in info.Attributes)\n                    output.AppendLine($\"  • {attr}\");\n            }\n            \n            if (!string.IsNullOrEmpty(info.SourceLocation))\n                output.AppendLine($\"Location: {info.SourceLocation}\");\n            \n            return output.ToString();\n        }\n\n        private static string FormatDependencyAnalysis(DependencyAnalysis analysis)\n        {\n            var output = new StringBuilder();\n            output.AppendLine($\"**Dependency Analysis for {analysis.ProjectName}**\\n\");\n            \n            output.AppendLine($\"Symbol Summary:\");\n            output.AppendLine($\"  • Total Symbols: {analysis.TotalSymbols}\");\n            output.AppendLine($\"  • Public Symbols: {analysis.PublicSymbols}\");\n            output.AppendLine($\"  • Internal Symbols: {analysis.InternalSymbols}\");\n            output.AppendLine();\n            \n            if (analysis.Dependencies.Any())\n            {\n                output.AppendLine(\"Dependencies:\");\n                var groupedDeps = analysis.Dependencies.GroupBy(d => d.Type);\n                foreach (var group in groupedDeps)\n                {\n                    output.AppendLine($\"  **{group.Key}** ({group.Count()}):\");\n                    foreach (var dep in group.Take(10))\n                        output.AppendLine($\"    • {dep.Name}\");\n                    if (group.Count() > 10)\n                        output.AppendLine($\"    ... and {group.Count() - 10} more\");\n                }\n                output.AppendLine();\n            }\n            \n            if (analysis.NamespaceUsages.Any())\n            {\n                output.AppendLine(\"Top Namespace Usages:\");\n                foreach (var usage in analysis.NamespaceUsages.OrderByDescending(n => n.UsageCount).Take(10))\n                    output.AppendLine($\"  • {usage.Namespace}: {usage.UsageCount} usages\");\n            }\n            \n            return output.ToString();\n        }\n\n        private static string FormatComplexityResults(List<ComplexityResult> results)\n        {\n            var output = new StringBuilder();\n            output.AppendLine($\"**Code Complexity Analysis**\\n\");\n            output.AppendLine($\"Found {results.Count} methods with high complexity:\\n\");\n            \n            foreach (var result in results.OrderByDescending(r => r.Complexity).Take(20))\n            {\n                output.AppendLine($\"**{result.ClassName}.{result.MethodName}** (Complexity: {result.Complexity})\");\n                output.AppendLine($\"  Location: {result.FileName}:{result.LineNumber}\");\n                if (!string.IsNullOrEmpty(result.Namespace))\n                    output.AppendLine($\"  Namespace: {result.Namespace}\");\n                output.AppendLine();\n            }\n            \n            if (results.Count > 20)\n                output.AppendLine($\"... and {results.Count - 20} more methods with high complexity\");\n            \n            return output.ToString();\n        }\n\n        private static int CalculateCyclomaticComplexity(MethodDeclarationSyntax method)\n        {\n            int complexity = 1; // Base complexity\n            \n            var decisionPoints = method.DescendantNodes().Where(node => \n                node.IsKind(SyntaxKind.IfStatement) ||\n                node.IsKind(SyntaxKind.WhileStatement) ||\n                node.IsKind(SyntaxKind.ForStatement) ||\n                node.IsKind(SyntaxKind.ForEachStatement) ||\n                node.IsKind(SyntaxKind.SwitchStatement) ||\n                node.IsKind(SyntaxKind.CatchClause));\n            \n            complexity += decisionPoints.Count();\n            \n            // Add complexity for logical operators\n            var logicalOperators = method.DescendantTokens().Where(token =>\n                token.IsKind(SyntaxKind.AmpersandAmpersandToken) ||\n                token.IsKind(SyntaxKind.BarBarToken));\n            \n            complexity += logicalOperators.Count();\n            \n            return complexity;\n        }\n\n        private static string GetContainingClassName(MethodDeclarationSyntax method)\n        {\n            var classDeclaration = method.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault();\n            return classDeclaration?.Identifier.ValueText ?? \"\";\n        }\n\n        private static string GetContainingNamespace(MethodDeclarationSyntax method)\n        {\n            var namespaceDeclaration = method.Ancestors().OfType<NamespaceDeclarationSyntax>().FirstOrDefault();\n            return namespaceDeclaration?.Name.ToString() ?? \"\";\n        }\n    }\n}"
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Server;
+using RoslynMcpServer.Models;
+using RoslynMcpServer.Services;
+using System.ComponentModel;
+using System.Text;
+
+namespace RoslynMcpServer.Tools
+{
+    [McpServerToolType]
+    public class CodeNavigationTools
+    {
+        [McpServerTool, Description("Search for symbols in C# code using wildcard patterns (* and ?)")]
+        public static async Task<string> SearchSymbols(
+            [Description("Wildcard pattern to search for (e.g., 'User*', '*Service', 'Get*User')")] string pattern,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Symbol types to include: class,interface,method,property,field (comma-separated)")] string symbolTypes = "class,interface,method,property",
+            [Description("Whether to ignore case in search")] bool ignoreCase = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                
+                // Validate inputs
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+                
+                var sanitizedPattern = validator?.SanitizeSearchPattern(pattern) ?? pattern;
+                
+                // Perform search with timeout
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+                var searchService = serviceProvider?.GetService<SymbolSearchService>();
+                if (searchService == null)
+                {
+                    return "Error: Symbol search service not available.";
+                }
+                
+                var results = await searchService.SearchSymbolsAsync(
+                    sanitizedPattern, solutionPath, symbolTypes, ignoreCase);
+                
+                return FormatSearchResults(results);
+            }
+            catch (OperationCanceledException)
+            {
+                return "Error: Search operation timed out. The codebase may be too large or complex.";
+            }
+            catch (FileNotFoundException)
+            {
+                return "Error: Solution file not found. Please check the path and try again.";
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return "Error: Access denied. Please check file permissions.";
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Unexpected error during symbol search");
+                
+                return "Error: An unexpected error occurred during the search operation.";
+            }
+        }
+
+        [McpServerTool, Description("Find all references to a specific symbol")]
+        public static async Task<string> FindReferences(
+            [Description("Exact symbol name to find references for")] string symbolName,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Include symbol definition in results")] bool includeDefinition = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+                
+                var searchService = serviceProvider?.GetService<SymbolSearchService>();
+                if (searchService == null)
+                {
+                    return "Error: Symbol search service not available.";
+                }
+                
+                var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
+                return FormatReferenceResults(results);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding references for symbol: {SymbolName}", symbolName);
+                return "Error: An unexpected error occurred while finding references.";
+            }
+        }
+
+        [McpServerTool, Description("Get detailed information about a specific symbol")]
+        public static async Task<string> GetSymbolInfo(
+            [Description("Exact symbol name or full qualified name")] string symbolName,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+                
+                var searchService = serviceProvider?.GetService<SymbolSearchService>();
+                if (searchService == null)
+                {
+                    return "Error: Symbol search service not available.";
+                }
+                
+                var info = await searchService.GetSymbolInfoAsync(symbolName, solutionPath);
+                return FormatSymbolInfo(info);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting symbol info for: {SymbolName}", symbolName);
+                return "Error: An unexpected error occurred while getting symbol information.";
+            }
+        }
+
+        [McpServerTool, Description("Analyze project dependencies and symbol usage patterns")]
+        public static async Task<string> AnalyzeDependencies(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Maximum depth for dependency analysis")] int maxDepth = 3,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+                
+                var analysisService = serviceProvider?.GetService<CodeAnalysisService>();
+                if (analysisService == null)
+                {
+                    return "Error: Code analysis service not available.";
+                }
+                
+                var dependencies = await analysisService.AnalyzeDependenciesAsync(solutionPath, maxDepth);
+                return FormatDependencyAnalysis(dependencies);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error analyzing dependencies");
+                return "Error: An unexpected error occurred during dependency analysis.";
+            }
+        }
+
+        [McpServerTool, Description("Analyze code complexity and identify high-complexity methods")]
+        public static async Task<string> AnalyzeCodeComplexity(
+            [Description("Path to solution file")] string solutionPath,
+            [Description("Complexity threshold (1-10)")] int threshold = 5,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+                
+                var analysisService = serviceProvider?.GetService<CodeAnalysisService>();
+                if (analysisService == null)
+                {
+                    return "Error: Code analysis service not available.";
+                }
+                
+                var solution = await analysisService.GetSolutionAsync(solutionPath);
+                var complexityResults = new List<ComplexityResult>();
+                
+                foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
+                {
+                    var compilation = await project.GetCompilationAsync();
+                    if (compilation == null) continue;
+                    
+                    foreach (var tree in compilation.SyntaxTrees)
+                    {
+                        var root = await tree.GetRootAsync();
+                        var methods = root.DescendantNodes().OfType<MethodDeclarationSyntax>();
+                        
+                        foreach (var method in methods)
+                        {
+                            var complexity = CalculateCyclomaticComplexity(method);
+                            if (complexity >= threshold)
+                            {
+                                var lineSpan = method.GetLocation().GetLineSpan();
+                                complexityResults.Add(new ComplexityResult
+                                {
+                                    MethodName = method.Identifier.ValueText,
+                                    FileName = Path.GetFileName(tree.FilePath),
+                                    LineNumber = lineSpan.StartLinePosition.Line + 1,
+                                    Complexity = complexity,
+                                    ClassName = GetContainingClassName(method),
+                                    Namespace = GetContainingNamespace(method)
+                                });
+                            }
+                        }
+                    }
+                }
+                
+                return FormatComplexityResults(complexityResults);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error analyzing code complexity");
+                return "Error: An unexpected error occurred during complexity analysis.";
+            }
+        }
+
+        private static string FormatSearchResults(IEnumerable<SymbolSearchResult> results)
+        {
+            var grouped = results.GroupBy(r => r.Category);
+            var output = new StringBuilder();
+            
+            output.AppendLine($"Found {results.Count()} symbols:\n");
+            
+            foreach (var group in grouped.OrderBy(g => g.Key))
+            {
+                output.AppendLine($"**{group.Key}** ({group.Count()}):");
+                foreach (var result in group.Take(20)) // Limit results
+                {
+                    output.AppendLine($"  • `{result.Name}` in {result.Location}");
+                    if (!string.IsNullOrEmpty(result.Summary))
+                        output.AppendLine($"    {result.Summary}");
+                }
+                if (group.Count() > 20)
+                    output.AppendLine($"    ... and {group.Count() - 20} more");
+                output.AppendLine();
+            }
+            
+            return output.ToString();
+        }
+
+        private static string FormatReferenceResults(IEnumerable<ReferenceResult> results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"Found {results.Count()} references:\n");
+            
+            var groupedByFile = results.GroupBy(r => r.DocumentPath);
+            
+            foreach (var fileGroup in groupedByFile.OrderBy(g => g.Key))
+            {
+                output.AppendLine($"**{Path.GetFileName(fileGroup.Key)}** ({fileGroup.Count()} references):");
+                
+                foreach (var reference in fileGroup.OrderBy(r => r.LineNumber))
+                {
+                    var refType = reference.IsDefinition ? "Definition" : reference.ReferenceKind;
+                    output.AppendLine($"  • Line {reference.LineNumber}: {refType}");
+                    output.AppendLine($"    `{reference.LineText.Trim()}`");
+                }
+                output.AppendLine();
+            }
+            
+            return output.ToString();
+        }
+
+        private static string FormatSymbolInfo(RoslynMcpServer.Models.SymbolInfo? info)
+        {
+            if (info == null)
+                return "Symbol not found.";
+            
+            var output = new StringBuilder();
+            output.AppendLine($"**{info.Name}** ({info.Kind})");
+            output.AppendLine($"Full Name: `{info.FullName}`");
+            output.AppendLine($"Accessibility: {info.Accessibility}");
+            
+            if (!string.IsNullOrEmpty(info.Namespace))
+                output.AppendLine($"Namespace: {info.Namespace}");
+            
+            if (!string.IsNullOrEmpty(info.DeclaringType))
+                output.AppendLine($"Declaring Type: {info.DeclaringType}");
+            
+            if (!string.IsNullOrEmpty(info.ReturnType))
+                output.AppendLine($"Return Type: {info.ReturnType}");
+            
+            if (info.Parameters.Any())
+            {
+                output.AppendLine("Parameters:");
+                foreach (var param in info.Parameters)
+                    output.AppendLine($"  • {param}");
+            }
+            
+            if (info.Attributes.Any())
+            {
+                output.AppendLine("Attributes:");
+                foreach (var attr in info.Attributes)
+                    output.AppendLine($"  • {attr}");
+            }
+            
+            if (!string.IsNullOrEmpty(info.SourceLocation))
+                output.AppendLine($"Location: {info.SourceLocation}");
+            
+            return output.ToString();
+        }
+
+        private static string FormatDependencyAnalysis(DependencyAnalysis analysis)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"**Dependency Analysis for {analysis.ProjectName}**\n");
+            
+            output.AppendLine($"Symbol Summary:");
+            output.AppendLine($"  • Total Symbols: {analysis.TotalSymbols}");
+            output.AppendLine($"  • Public Symbols: {analysis.PublicSymbols}");
+            output.AppendLine($"  • Internal Symbols: {analysis.InternalSymbols}");
+            output.AppendLine();
+            
+            if (analysis.Dependencies.Any())
+            {
+                output.AppendLine("Dependencies:");
+                var groupedDeps = analysis.Dependencies.GroupBy(d => d.Type);
+                foreach (var group in groupedDeps)
+                {
+                    output.AppendLine($"  **{group.Key}** ({group.Count()}):");
+                    foreach (var dep in group.Take(10))
+                        output.AppendLine($"    • {dep.Name}");
+                    if (group.Count() > 10)
+                        output.AppendLine($"    ... and {group.Count() - 10} more");
+                }
+                output.AppendLine();
+            }
+            
+            if (analysis.NamespaceUsages.Any())
+            {
+                output.AppendLine("Top Namespace Usages:");
+                foreach (var usage in analysis.NamespaceUsages.OrderByDescending(n => n.UsageCount).Take(10))
+                    output.AppendLine($"  • {usage.Namespace}: {usage.UsageCount} usages");
+            }
+            
+            return output.ToString();
+        }
+
+        private static string FormatComplexityResults(List<ComplexityResult> results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"**Code Complexity Analysis**\n");
+            output.AppendLine($"Found {results.Count} methods with high complexity:\n");
+            
+            foreach (var result in results.OrderByDescending(r => r.Complexity).Take(20))
+            {
+                output.AppendLine($"**{result.ClassName}.{result.MethodName}** (Complexity: {result.Complexity})");
+                output.AppendLine($"  Location: {result.FileName}:{result.LineNumber}");
+                if (!string.IsNullOrEmpty(result.Namespace))
+                    output.AppendLine($"  Namespace: {result.Namespace}");
+                output.AppendLine();
+            }
+            
+            if (results.Count > 20)
+                output.AppendLine($"... and {results.Count - 20} more methods with high complexity");
+            
+            return output.ToString();
+        }
+
+        private static int CalculateCyclomaticComplexity(MethodDeclarationSyntax method)
+        {
+            int complexity = 1; // Base complexity
+            
+            var decisionPoints = method.DescendantNodes().Where(node => 
+                node.IsKind(SyntaxKind.IfStatement) ||
+                node.IsKind(SyntaxKind.WhileStatement) ||
+                node.IsKind(SyntaxKind.ForStatement) ||
+                node.IsKind(SyntaxKind.ForEachStatement) ||
+                node.IsKind(SyntaxKind.SwitchStatement) ||
+                node.IsKind(SyntaxKind.CatchClause));
+            
+            complexity += decisionPoints.Count();
+            
+            var logicalOperators = method.DescendantTokens().Where(token =>
+                token.IsKind(SyntaxKind.AmpersandAmpersandToken) ||
+                token.IsKind(SyntaxKind.BarBarToken));
+            
+            complexity += logicalOperators.Count();
+            
+            return complexity;
+        }
+
+        private static string GetContainingClassName(MethodDeclarationSyntax method)
+        {
+            var classDeclaration = method.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault();
+            return classDeclaration?.Identifier.ValueText ?? "";
+        }
+
+        private static string GetContainingNamespace(MethodDeclarationSyntax method)
+        {
+            var namespaceDeclaration = method.Ancestors().OfType<NamespaceDeclarationSyntax>().FirstOrDefault();
+            return namespaceDeclaration?.Name.ToString() ?? "";
+        }
+    }
+}

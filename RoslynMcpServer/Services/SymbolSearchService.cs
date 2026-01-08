@@ -1,1 +1,370 @@
-using Microsoft.CodeAnalysis;\nusing Microsoft.CodeAnalysis.FindSymbols;\nusing Microsoft.Extensions.Caching.Memory;\nusing Microsoft.Extensions.Logging;\nusing RoslynMcpServer.Models;\nusing System.Text.RegularExpressions;\nusing MsSymbolInfo = Microsoft.CodeAnalysis.SymbolInfo;\nusing SymbolInfo = RoslynMcpServer.Models.SymbolInfo;\n\nnamespace RoslynMcpServer.Services\n{\n    public class SymbolSearchService\n    {\n        private readonly CodeAnalysisService _codeAnalysis;\n        private readonly ILogger<SymbolSearchService> _logger;\n        private readonly IMemoryCache _cache;\n\n        public SymbolSearchService(CodeAnalysisService codeAnalysis, \n            ILogger<SymbolSearchService> logger, IMemoryCache cache)\n        {\n            _codeAnalysis = codeAnalysis;\n            _logger = logger;\n            _cache = cache;\n        }\n\n        public async Task<IEnumerable<SymbolSearchResult>> SearchSymbolsAsync(\n            string pattern, string solutionPath, string symbolTypes, bool ignoreCase)\n        {\n            var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);\n            var typeFilter = ParseSymbolTypes(symbolTypes);\n            var regex = CreateWildcardRegex(pattern, ignoreCase);\n            \n            var results = new List<SymbolSearchResult>();\n            \n            // Search across all projects in parallel\n            var searchTasks = solution.Projects\n                .Where(p => p.SupportsCompilation)\n                .Select(project => SearchProjectSymbolsAsync(project, regex, typeFilter));\n            \n            var projectResults = await Task.WhenAll(searchTasks);\n            \n            foreach (var projectResult in projectResults)\n                results.AddRange(projectResult);\n            \n            // Sort by relevance score\n            return results\n                .OrderByDescending(r => CalculateRelevanceScore(r, pattern))\n                .ThenBy(r => r.Name);\n        }\n\n        private async Task<IEnumerable<SymbolSearchResult>> SearchProjectSymbolsAsync(\n            Project project, Regex pattern, HashSet<SymbolKind> typeFilter)\n        {\n            var results = new List<SymbolSearchResult>();\n            \n            try\n            {\n                var compilation = await project.GetCompilationAsync();\n                if (compilation == null) return results;\n                \n                var symbols = GetFilteredSymbols(compilation, typeFilter);\n                \n                foreach (var symbol in symbols)\n                {\n                    if (pattern.IsMatch(symbol.Name) || pattern.IsMatch(symbol.ToDisplayString()))\n                    {\n                        results.Add(CreateSearchResult(symbol, project));\n                    }\n                }\n            }\n            catch (Exception ex)\n            {\n                _logger.LogError(ex, \"Error searching project: {ProjectName}\", project.Name);\n            }\n            \n            return results;\n        }\n\n        private Regex CreateWildcardRegex(string pattern, bool ignoreCase)\n        {\n            // Convert wildcard pattern to regex\n            var regexPattern = Regex.Escape(pattern)\n                .Replace(\"\\\\*\", \".*\")\n                .Replace(\"\\\\?\", \".\");\n            \n            var options = RegexOptions.Compiled;\n            if (ignoreCase) options |= RegexOptions.IgnoreCase;\n            \n            return new Regex($\"^{regexPattern}$\", options);\n        }\n\n        private HashSet<SymbolKind> ParseSymbolTypes(string symbolTypes)\n        {\n            var types = new HashSet<SymbolKind>();\n            \n            foreach (var type in symbolTypes.Split(',', StringSplitOptions.RemoveEmptyEntries))\n            {\n                switch (type.Trim().ToLower())\n                {\n                    case \"class\": \n                    case \"interface\": \n                    case \"struct\": \n                    case \"enum\": \n                        types.Add(SymbolKind.NamedType); \n                        break;\n                    case \"method\": types.Add(SymbolKind.Method); break;\n                    case \"property\": types.Add(SymbolKind.Property); break;\n                    case \"field\": types.Add(SymbolKind.Field); break;\n                    case \"event\": types.Add(SymbolKind.Event); break;\n                    case \"namespace\": types.Add(SymbolKind.Namespace); break;\n                }\n            }\n            \n            return types;\n        }\n\n        private IEnumerable<ISymbol> GetFilteredSymbols(Compilation compilation, HashSet<SymbolKind> typeFilter)\n        {\n            return GetAllSymbolsRecursive(compilation.GlobalNamespace)\n                .Where(s => typeFilter.Contains(s.Kind));\n        }\n\n        private IEnumerable<ISymbol> GetAllSymbolsRecursive(INamespaceSymbol namespaceSymbol)\n        {\n            foreach (var member in namespaceSymbol.GetMembers())\n            {\n                yield return member;\n\n                switch (member)\n                {\n                    case INamespaceSymbol nestedNamespace:\n                        foreach (var nested in GetAllSymbolsRecursive(nestedNamespace))\n                            yield return nested;\n                        break;\n                    \n                    case INamedTypeSymbol namedType:\n                        foreach (var typeMember in namedType.GetMembers())\n                            yield return typeMember;\n                        break;\n                }\n            }\n        }\n\n        private SymbolSearchResult CreateSearchResult(ISymbol symbol, Project project)\n        {\n            var location = symbol.Locations.FirstOrDefault();\n            var lineNumber = location?.GetLineSpan().StartLinePosition.Line + 1 ?? 0;\n            \n            return new SymbolSearchResult\n            {\n                Name = symbol.Name,\n                FullName = symbol.ToDisplayString(),\n                Category = GetSymbolCategory(symbol),\n                Location = $\"{project.Name}:{Path.GetFileName(location?.SourceTree?.FilePath)}:{lineNumber}\",\n                ProjectName = project.Name,\n                FilePath = location?.SourceTree?.FilePath ?? \"\",\n                LineNumber = lineNumber,\n                Summary = GetSymbolSummary(symbol),\n                Accessibility = symbol.DeclaredAccessibility.ToString().ToLower(),\n                SymbolKind = symbol.Kind,\n                Namespace = symbol.ContainingNamespace?.ToDisplayString() ?? \"\"\n            };\n        }\n\n        private string GetSymbolCategory(ISymbol symbol)\n        {\n            return symbol switch\n            {\n                INamedTypeSymbol namedType => namedType.TypeKind.ToString(),\n                IMethodSymbol => \"Method\",\n                IPropertySymbol => \"Property\",\n                IFieldSymbol => \"Field\",\n                IEventSymbol => \"Event\",\n                INamespaceSymbol => \"Namespace\",\n                _ => symbol.Kind.ToString()\n            };\n        }\n\n        private string GetSymbolSummary(ISymbol symbol)\n        {\n            return symbol switch\n            {\n                IMethodSymbol method => $\"({string.Join(\", \", method.Parameters.Select(p => $\"{p.Type.Name} {p.Name}\"))})\",\n                IPropertySymbol property => $\": {property.Type.Name}\",\n                IFieldSymbol field => $\": {field.Type.Name}\",\n                INamedTypeSymbol type => $\"{type.TypeKind} with {type.GetMembers().Length} members\",\n                _ => \"\"\n            };\n        }\n\n        private double CalculateRelevanceScore(SymbolSearchResult result, string searchPattern)\n        {\n            double score = 0;\n            \n            // Exact match gets highest score\n            if (result.Name.Equals(searchPattern.Replace(\"*\", \"\").Replace(\"?\", \"\"), \n                StringComparison.OrdinalIgnoreCase))\n                score += 100;\n            \n            // Prefix match\n            if (result.Name.StartsWith(searchPattern.Replace(\"*\", \"\"), \n                StringComparison.OrdinalIgnoreCase))\n                score += 50;\n            \n            // Length penalty (shorter names are more relevant)\n            score -= result.Name.Length * 0.1;\n            \n            // Public accessibility bonus\n            if (result.Accessibility == \"public\")\n                score += 10;\n            \n            return score;\n        }\n\n        public async Task<IEnumerable<ReferenceResult>> FindReferencesAsync(\n            string symbolName, string solutionPath, bool includeDefinition)\n        {\n            var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);\n            var targetSymbols = await FindSymbolsByNameAsync(solution, symbolName);\n            \n            var allReferences = new List<ReferenceResult>();\n            \n            foreach (var symbol in targetSymbols)\n            {\n                var references = await SymbolFinder.FindReferencesAsync(symbol, solution);\n                \n                foreach (var referencedSymbol in references)\n                {\n                    foreach (var location in referencedSymbol.Locations)\n                    {\n                        // Check if this location is a definition by comparing with the symbol's definition locations\n                        var isDefinition = referencedSymbol.Definition.Locations.Any(defLoc => \n                            defLoc.SourceTree == location.Location.SourceTree && \n                            defLoc.SourceSpan == location.Location.SourceSpan);\n                        \n                        if (!includeDefinition && isDefinition)\n                            continue;\n                        \n                        var reference = await CreateReferenceResultAsync(location, symbol, isDefinition);\n                        if (reference != null)\n                            allReferences.Add(reference);\n                    }\n                }\n            }\n            \n            return allReferences\n                .GroupBy(r => $\"{r.DocumentPath}:{r.LineNumber}\")\n                .Select(g => g.First()) // Remove duplicates\n                .OrderBy(r => r.DocumentPath)\n                .ThenBy(r => r.LineNumber);\n        }\n\n        private async Task<IEnumerable<ISymbol>> FindSymbolsByNameAsync(Solution solution, string symbolName)\n        {\n            var symbols = new List<ISymbol>();\n            \n            foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))\n            {\n                var compilation = await project.GetCompilationAsync();\n                if (compilation != null)\n                {\n                    var projectSymbols = GetAllSymbolsRecursive(compilation.GlobalNamespace)\n                        .Where(s => s.Name.Equals(symbolName, StringComparison.OrdinalIgnoreCase));\n                    symbols.AddRange(projectSymbols);\n                }\n            }\n            \n            return symbols;\n        }\n\n        private async Task<ReferenceResult?> CreateReferenceResultAsync(\n            ReferenceLocation location, ISymbol symbol, bool isDefinition)\n        {\n            if (location.Document == null) return null;\n            \n            var document = location.Document;\n            var sourceText = await document.GetTextAsync();\n            var lineSpan = location.Location.GetLineSpan();\n            \n            // Get surrounding context\n            var lineNumber = lineSpan.StartLinePosition.Line;\n            var line = sourceText.Lines[lineNumber];\n            var contextStart = Math.Max(0, lineNumber - 2);\n            var contextEnd = Math.Min(sourceText.Lines.Count - 1, lineNumber + 2);\n            \n            var context = sourceText.Lines\n                .Skip(contextStart)\n                .Take(contextEnd - contextStart + 1)\n                .Select((l, i) => $\"{contextStart + i + 1,4}: {l}\")\n                .ToList();\n            \n            return new ReferenceResult\n            {\n                SymbolName = symbol.Name,\n                DocumentPath = document.FilePath ?? \"\",\n                ProjectName = document.Project.Name,\n                LineNumber = lineNumber + 1,\n                ColumnNumber = lineSpan.StartLinePosition.Character + 1,\n                LineText = line.ToString(),\n                Context = context,\n                IsDefinition = isDefinition,\n                ReferenceKind = DetermineReferenceKind(location.Location, symbol)\n            };\n        }\n\n        private string DetermineReferenceKind(Location location, ISymbol symbol)\n        {\n            // This is a simplified implementation\n            // A more sophisticated version would analyze the syntax context\n            return symbol.Kind switch\n            {\n                SymbolKind.Method => \"Method Call\",\n                SymbolKind.Property => \"Property Access\",\n                SymbolKind.Field => \"Field Access\",\n                SymbolKind.NamedType => \"Type Reference\",\n                _ => \"Reference\"\n            };\n        }\n\n        public async Task<SymbolInfo?> GetSymbolInfoAsync(string symbolName, string solutionPath)\n        {\n            var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);\n            var symbols = await FindSymbolsByNameAsync(solution, symbolName);\n            var symbol = symbols.FirstOrDefault();\n            \n            if (symbol == null) return null;\n            \n            var info = new SymbolInfo\n            {\n                Name = symbol.Name,\n                FullName = symbol.ToDisplayString(),\n                Kind = symbol.Kind.ToString(),\n                Accessibility = symbol.DeclaredAccessibility.ToString(),\n                DeclaringType = symbol.ContainingType?.Name ?? \"\",\n                Namespace = symbol.ContainingNamespace?.ToDisplayString() ?? \"\",\n                Assembly = symbol.ContainingAssembly?.Name ?? \"\",\n                Documentation = symbol.GetDocumentationCommentXml() ?? \"\"\n            };\n            \n            // Add method-specific information\n            if (symbol is IMethodSymbol method)\n            {\n                info.Parameters = method.Parameters.Select(p => $\"{p.Type.Name} {p.Name}\").ToList();\n                info.ReturnType = method.ReturnType.Name;\n            }\n            \n            // Add property-specific information\n            if (symbol is IPropertySymbol property)\n            {\n                info.ReturnType = property.Type.Name;\n            }\n            \n            // Add attributes\n            info.Attributes = symbol.GetAttributes()\n                .Select(attr => attr.AttributeClass?.Name ?? \"\")\n                .Where(name => !string.IsNullOrEmpty(name))\n                .ToList();\n            \n            // Add source location\n            var location = symbol.Locations.FirstOrDefault();\n            if (location != null && location.SourceTree != null)\n            {\n                var lineSpan = location.GetLineSpan();\n                info.SourceLocation = $\"{Path.GetFileName(location.SourceTree.FilePath)}:{lineSpan.StartLinePosition.Line + 1}\";\n            }\n            \n            return info;\n        }\n    }\n}"
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FindSymbols;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
+using RoslynMcpServer.Models;
+using System.Text.RegularExpressions;
+using MsSymbolInfo = Microsoft.CodeAnalysis.SymbolInfo;
+using SymbolInfo = RoslynMcpServer.Models.SymbolInfo;
+
+namespace RoslynMcpServer.Services
+{
+    public class SymbolSearchService
+    {
+        private readonly CodeAnalysisService _codeAnalysis;
+        private readonly ILogger<SymbolSearchService> _logger;
+        private readonly IMemoryCache _cache;
+
+        public SymbolSearchService(CodeAnalysisService codeAnalysis, 
+            ILogger<SymbolSearchService> logger, IMemoryCache cache)
+        {
+            _codeAnalysis = codeAnalysis;
+            _logger = logger;
+            _cache = cache;
+        }
+
+        public async Task<IEnumerable<SymbolSearchResult>> SearchSymbolsAsync(
+            string pattern, string solutionPath, string symbolTypes, bool ignoreCase)
+        {
+            var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
+            var typeFilter = ParseSymbolTypes(symbolTypes);
+            var regex = CreateWildcardRegex(pattern, ignoreCase);
+            
+            var results = new List<SymbolSearchResult>();
+            
+            // Search across all projects in parallel
+            var searchTasks = solution.Projects
+                .Where(p => p.SupportsCompilation)
+                .Select(project => SearchProjectSymbolsAsync(project, regex, typeFilter));
+            
+            var projectResults = await Task.WhenAll(searchTasks);
+            
+            foreach (var projectResult in projectResults)
+                results.AddRange(projectResult);
+            
+            // Sort by relevance score
+            return results
+                .OrderByDescending(r => CalculateRelevanceScore(r, pattern))
+                .ThenBy(r => r.Name);
+        }
+
+        private async Task<IEnumerable<SymbolSearchResult>> SearchProjectSymbolsAsync(
+            Project project, Regex pattern, HashSet<SymbolKind> typeFilter)
+        {
+            var results = new List<SymbolSearchResult>();
+            
+            try
+            {
+                var compilation = await project.GetCompilationAsync();
+                if (compilation == null) return results;
+                
+                var symbols = GetFilteredSymbols(compilation, typeFilter);
+                
+                foreach (var symbol in symbols)
+                {
+                    if (pattern.IsMatch(symbol.Name) || pattern.IsMatch(symbol.ToDisplayString()))
+                    {
+                        results.Add(CreateSearchResult(symbol, project));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching project: {ProjectName}", project.Name);
+            }
+            
+            return results;
+        }
+
+        private Regex CreateWildcardRegex(string pattern, bool ignoreCase)
+        {
+            // Convert wildcard pattern to regex
+            var regexPattern = Regex.Escape(pattern)
+                .Replace("\\*", ".*")
+                .Replace("\\?", ".");
+            
+            var options = RegexOptions.Compiled;
+            if (ignoreCase) options |= RegexOptions.IgnoreCase;
+            
+            return new Regex($"^{regexPattern}$", options);
+        }
+
+        private HashSet<SymbolKind> ParseSymbolTypes(string symbolTypes)
+        {
+            var types = new HashSet<SymbolKind>();
+            
+            foreach (var type in symbolTypes.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                switch (type.Trim().ToLower())
+                {
+                    case "class": 
+                    case "interface": 
+                    case "struct": 
+                    case "enum": 
+                        types.Add(SymbolKind.NamedType); 
+                        break;
+                    case "method": types.Add(SymbolKind.Method); break;
+                    case "property": types.Add(SymbolKind.Property); break;
+                    case "field": types.Add(SymbolKind.Field); break;
+                    case "event": types.Add(SymbolKind.Event); break;
+                    case "namespace": types.Add(SymbolKind.Namespace); break;
+                }
+            }
+            
+            return types;
+        }
+
+        private IEnumerable<ISymbol> GetFilteredSymbols(Compilation compilation, HashSet<SymbolKind> typeFilter)
+        {
+            return GetAllSymbolsRecursive(compilation.GlobalNamespace)
+                .Where(s => typeFilter.Contains(s.Kind));
+        }
+
+        private IEnumerable<ISymbol> GetAllSymbolsRecursive(INamespaceSymbol namespaceSymbol)
+        {
+            foreach (var member in namespaceSymbol.GetMembers())
+            {
+                yield return member;
+
+                switch (member)
+                {
+                    case INamespaceSymbol nestedNamespace:
+                        foreach (var nested in GetAllSymbolsRecursive(nestedNamespace))
+                            yield return nested;
+                        break;
+                    
+                    case INamedTypeSymbol namedType:
+                        foreach (var typeMember in namedType.GetMembers())
+                            yield return typeMember;
+                        break;
+                }
+            }
+        }
+
+        private SymbolSearchResult CreateSearchResult(ISymbol symbol, Project project)
+        {
+            var location = symbol.Locations.FirstOrDefault();
+            var lineNumber = location?.GetLineSpan().StartLinePosition.Line + 1 ?? 0;
+            
+            return new SymbolSearchResult
+            {
+                Name = symbol.Name,
+                FullName = symbol.ToDisplayString(),
+                Category = GetSymbolCategory(symbol),
+                Location = $"{project.Name}:{Path.GetFileName(location?.SourceTree?.FilePath)}:{lineNumber}",
+                ProjectName = project.Name,
+                FilePath = location?.SourceTree?.FilePath ?? "",
+                LineNumber = lineNumber,
+                Summary = GetSymbolSummary(symbol),
+                Accessibility = symbol.DeclaredAccessibility.ToString().ToLower(),
+                SymbolKind = symbol.Kind,
+                Namespace = symbol.ContainingNamespace?.ToDisplayString() ?? ""
+            };
+        }
+
+        private string GetSymbolCategory(ISymbol symbol)
+        {
+            return symbol switch
+            {
+                INamedTypeSymbol namedType => namedType.TypeKind.ToString(),
+                IMethodSymbol => "Method",
+                IPropertySymbol => "Property",
+                IFieldSymbol => "Field",
+                IEventSymbol => "Event",
+                INamespaceSymbol => "Namespace",
+                _ => symbol.Kind.ToString()
+            };
+        }
+
+        private string GetSymbolSummary(ISymbol symbol)
+        {
+            return symbol switch
+            {
+                IMethodSymbol method => $"({string.Join(", ", method.Parameters.Select(p => $"{p.Type.Name} {p.Name}"))})",
+                IPropertySymbol property => $": {property.Type.Name}",
+                IFieldSymbol field => $": {field.Type.Name}",
+                INamedTypeSymbol type => $"{type.TypeKind} with {type.GetMembers().Length} members",
+                _ => ""
+            };
+        }
+
+        private double CalculateRelevanceScore(SymbolSearchResult result, string searchPattern)
+        {
+            double score = 0;
+            
+            // Exact match gets highest score
+            if (result.Name.Equals(searchPattern.Replace("*", "").Replace("?", ""), 
+                StringComparison.OrdinalIgnoreCase))
+                score += 100;
+            
+            // Prefix match
+            if (result.Name.StartsWith(searchPattern.Replace("*", ""), 
+                StringComparison.OrdinalIgnoreCase))
+                score += 50;
+            
+            // Length penalty (shorter names are more relevant)
+            score -= result.Name.Length * 0.1;
+            
+            // Public accessibility bonus
+            if (result.Accessibility == "public")
+                score += 10;
+            
+            return score;
+        }
+
+        public async Task<IEnumerable<ReferenceResult>> FindReferencesAsync(
+            string symbolName, string solutionPath, bool includeDefinition)
+        {
+            var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
+            var targetSymbols = await FindSymbolsByNameAsync(solution, symbolName);
+            
+            var allReferences = new List<ReferenceResult>();
+            
+            foreach (var symbol in targetSymbols)
+            {
+                var references = await SymbolFinder.FindReferencesAsync(symbol, solution);
+                
+                foreach (var referencedSymbol in references)
+                {
+                    foreach (var location in referencedSymbol.Locations)
+                    {
+                        // Check if this location is a definition by comparing with the symbol's definition locations
+                        var isDefinition = referencedSymbol.Definition.Locations.Any(defLoc => 
+                            defLoc.SourceTree == location.Location.SourceTree && 
+                            defLoc.SourceSpan == location.Location.SourceSpan);
+                        
+                        if (!includeDefinition && isDefinition)
+                            continue;
+                        
+                        var reference = await CreateReferenceResultAsync(location, symbol, isDefinition);
+                        if (reference != null)
+                            allReferences.Add(reference);
+                    }
+                }
+            }
+            
+            return allReferences
+                .GroupBy(r => $"{r.DocumentPath}:{r.LineNumber}")
+                .Select(g => g.First()) // Remove duplicates
+                .OrderBy(r => r.DocumentPath)
+                .ThenBy(r => r.LineNumber);
+        }
+
+        private async Task<IEnumerable<ISymbol>> FindSymbolsByNameAsync(Solution solution, string symbolName)
+        {
+            var symbols = new List<ISymbol>();
+            
+            foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
+            {
+                var compilation = await project.GetCompilationAsync();
+                if (compilation != null)
+                {
+                    var projectSymbols = GetAllSymbolsRecursive(compilation.GlobalNamespace)
+                        .Where(s => s.Name.Equals(symbolName, StringComparison.OrdinalIgnoreCase));
+                    symbols.AddRange(projectSymbols);
+                }
+            }
+            
+            return symbols;
+        }
+
+        private async Task<ReferenceResult?> CreateReferenceResultAsync(
+            ReferenceLocation location, ISymbol symbol, bool isDefinition)
+        {
+            if (location.Document == null) return null;
+            
+            var document = location.Document;
+            var sourceText = await document.GetTextAsync();
+            var lineSpan = location.Location.GetLineSpan();
+            
+            // Get surrounding context
+            var lineNumber = lineSpan.StartLinePosition.Line;
+            var line = sourceText.Lines[lineNumber];
+            var contextStart = Math.Max(0, lineNumber - 2);
+            var contextEnd = Math.Min(sourceText.Lines.Count - 1, lineNumber + 2);
+            
+            var context = sourceText.Lines
+                .Skip(contextStart)
+                .Take(contextEnd - contextStart + 1)
+                .Select((l, i) => $"{contextStart + i + 1,4}: {l}")
+                .ToList();
+            
+            return new ReferenceResult
+            {
+                SymbolName = symbol.Name,
+                DocumentPath = document.FilePath ?? "",
+                ProjectName = document.Project.Name,
+                LineNumber = lineNumber + 1,
+                ColumnNumber = lineSpan.StartLinePosition.Character + 1,
+                LineText = line.ToString(),
+                Context = context,
+                IsDefinition = isDefinition,
+                ReferenceKind = DetermineReferenceKind(location.Location, symbol)
+            };
+        }
+
+        private string DetermineReferenceKind(Location location, ISymbol symbol)
+        {
+            // This is a simplified implementation
+            // A more sophisticated version would analyze the syntax context
+            return symbol.Kind switch
+            {
+                SymbolKind.Method => "Method Call",
+                SymbolKind.Property => "Property Access",
+                SymbolKind.Field => "Field Access",
+                SymbolKind.NamedType => "Type Reference",
+                _ => "Reference"
+            };
+        }
+
+        public async Task<SymbolInfo?> GetSymbolInfoAsync(string symbolName, string solutionPath)
+        {
+            var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
+            var symbols = await FindSymbolsByNameAsync(solution, symbolName);
+            var symbol = symbols.FirstOrDefault();
+            
+            if (symbol == null) return null;
+            
+            var info = new SymbolInfo
+            {
+                Name = symbol.Name,
+                FullName = symbol.ToDisplayString(),
+                Kind = symbol.Kind.ToString(),
+                Accessibility = symbol.DeclaredAccessibility.ToString(),
+                DeclaringType = symbol.ContainingType?.Name ?? "",
+                Namespace = symbol.ContainingNamespace?.ToDisplayString() ?? "",
+                Assembly = symbol.ContainingAssembly?.Name ?? "",
+                Documentation = symbol.GetDocumentationCommentXml() ?? ""
+            };
+            
+            // Add method-specific information
+            if (symbol is IMethodSymbol method)
+            {
+                info.Parameters = method.Parameters.Select(p => $"{p.Type.Name} {p.Name}").ToList();
+                info.ReturnType = method.ReturnType.Name;
+            }
+            
+            // Add property-specific information
+            if (symbol is IPropertySymbol property)
+            {
+                info.ReturnType = property.Type.Name;
+            }
+            
+            // Add attributes
+            info.Attributes = symbol.GetAttributes()
+                .Select(attr => attr.AttributeClass?.Name ?? "")
+                .Where(name => !string.IsNullOrEmpty(name))
+                .ToList();
+            
+            // Add source location
+            var location = symbol.Locations.FirstOrDefault();
+            if (location != null && location.SourceTree != null)
+            {
+                var lineSpan = location.GetLineSpan();
+                info.SourceLocation = $"{Path.GetFileName(location.SourceTree.FilePath)}:{lineSpan.StartLinePosition.Line + 1}";
+            }
+            
+            return info;
+        }
+    }
+}
