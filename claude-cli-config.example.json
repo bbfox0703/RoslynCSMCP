@@ -1,0 +1,17 @@
+{
+  "$schema": "https://modelcontextprotocol.io/schema/mcp-config.json",
+  "mcpServers": {
+    "roslyn": {
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "/absolute/path/to/RoslynMCP/RoslynMcpServer"
+      ],
+      "env": {
+        "DOTNET_ENVIRONMENT": "Production",
+        "LOG_LEVEL": "Information"
+      }
+    }
+  }
+}

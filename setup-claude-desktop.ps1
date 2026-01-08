@@ -11,7 +11,7 @@ if ($Help) {
     Write-Host @"
 Roslyn MCP Server Setup Script
 
-Usage: .\setup.ps1 [options]
+Usage: .\setup-claude-desktop.ps1 [options]
 
 Options:
   -ClaudeConfigPath <path>   Specify custom path to Claude Desktop config file
@@ -19,9 +19,9 @@ Options:
   -Help                      Show this help message
 
 Examples:
-  .\setup.ps1                                    # Auto-detect config path and build
-  .\setup.ps1 -SkipBuild                        # Skip building step
-  .\setup.ps1 -ClaudeConfigPath "C:\custom\config.json"  # Custom config path
+  .\setup-claude-desktop.ps1                                    # Auto-detect config path and build
+  .\setup-claude-desktop.ps1 -SkipBuild                        # Skip building step
+  .\setup-claude-desktop.ps1 -ClaudeConfigPath "C:\custom\config.json"  # Custom config path
 "@
     exit 0
 }
