@@ -1,4 +1,2 @@
-claude mcp add --transport stdio roslyn --scope user \
-    --env DOTNET_ENVIRONMENT=Production \
-    --env LOG_LEVEL=Information \
-    -- dotnet run --project d:\tools\RoslynCSMCP\RoslynMcpServer
+claude mcp add --transport stdio roslyn --scope user --env DOTNET_ENVIRONMENT=Development --env LOG_LEVEL=Information -- dotnet run --project D:\Github\RoslynCSMCP\RoslynMcpServer\bin\Debug\net10.0\RoslynMcpServer
+
