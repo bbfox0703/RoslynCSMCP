@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.Extensions.Logging;
 using RoslynMcpServer.Models;
 using System.Collections.Concurrent;
 
@@ -18,11 +19,13 @@ namespace RoslynMcpServer.Services
     {
         private readonly Dictionary<string, FileAnalysisCache> _fileCache;
         private readonly SemaphoreSlim _analysisLock;
+        private readonly ILogger<IncrementalAnalyzer> _logger;
 
-        public IncrementalAnalyzer()
+        public IncrementalAnalyzer(ILogger<IncrementalAnalyzer> logger)
         {
             _fileCache = new Dictionary<string, FileAnalysisCache>();
             _analysisLock = new SemaphoreSlim(Environment.ProcessorCount);
+            _logger = logger;
         }
 
         public async Task<AnalysisResult> AnalyzeIncrementallyAsync(
@@ -115,9 +118,10 @@ namespace RoslynMcpServer.Services
 
                 result.ProcessedDocuments++;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // Log error but continue processing other documents
+                _logger.LogError(ex, "Error analyzing document {DocumentPath}", document.FilePath);
             }
         }
 
@@ -141,8 +145,9 @@ namespace RoslynMcpServer.Services
                 // Could also check file hash for more accuracy
                 return Task.FromResult(false);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogWarning(ex, "Cannot check file timestamp for {FilePath}, will analyze to be safe", document.FilePath);
                 return Task.FromResult(true); // If we can't check, analyze to be safe
             }
         }

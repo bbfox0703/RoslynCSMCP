@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
 namespace RoslynMcpServer.Services
@@ -14,10 +15,12 @@ namespace RoslynMcpServer.Services
     public class FilePersistentCache : IPersistentCache
     {
         private readonly string _cacheDirectory;
+        private readonly ILogger<FilePersistentCache>? _logger;
 
-        public FilePersistentCache(string cacheDirectory = "cache")
+        public FilePersistentCache(string cacheDirectory = "cache", ILogger<FilePersistentCache>? logger = null)
         {
             _cacheDirectory = cacheDirectory;
+            _logger = logger;
             Directory.CreateDirectory(_cacheDirectory);
         }
 
@@ -32,8 +35,9 @@ namespace RoslynMcpServer.Services
                 var json = await File.ReadAllTextAsync(filePath);
                 return JsonSerializer.Deserialize<T>(json);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger?.LogWarning(ex, "Failed to deserialize cache entry for key: {Key}", key);
                 return default;
             }
         }

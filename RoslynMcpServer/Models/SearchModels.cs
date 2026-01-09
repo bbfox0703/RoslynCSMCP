@@ -2,6 +2,15 @@ using Microsoft.CodeAnalysis;
 
 namespace RoslynMcpServer.Models
 {
+    /// <summary>
+    /// Represents a warning or partial failure during an operation
+    /// </summary>
+    public class OperationWarning
+    {
+        public string Context { get; set; } = string.Empty;  // What operation failed
+        public string Message { get; set; } = string.Empty;  // Error message
+        public string? Details { get; set; }                 // Additional details (optional)
+    }
     public class SymbolSearchResult
     {
         public string Name { get; set; } = string.Empty;
@@ -54,6 +63,11 @@ namespace RoslynMcpServer.Models
         public int TotalSymbols { get; set; }
         public int PublicSymbols { get; set; }
         public int InternalSymbols { get; set; }
+
+        // Partial failure tracking
+        public int AnalyzedProjects { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
     }
 
     public class ProjectDependency
@@ -117,6 +131,11 @@ namespace RoslynMcpServer.Models
         public List<string> Namespaces { get; set; } = new();
         public List<string> UsingStatements { get; set; } = new();
         public List<TypeOutline> Types { get; set; } = new();
+
+        // Partial failure tracking
+        public int FailedTypes { get; set; }
+        public int FailedMembers { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
     }
 
     public class TypeOutline
@@ -241,5 +260,28 @@ namespace RoslynMcpServer.Models
         public List<string> AttributeArguments { get; set; } = new();  // Constructor arguments
         public Dictionary<string, string> NamedArguments { get; set; } = new();  // Named arguments
         public string Signature { get; set; } = string.Empty;  // Full signature of the target
+    }
+
+    /// <summary>
+    /// Wrapper for attribute search results with failure tracking
+    /// </summary>
+    public class AttributeSearchResults
+    {
+        public List<AttributeUsageResult> Usages { get; set; } = new();
+        public int SuccessCount { get; set; }
+        public int FailureCount { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Wrapper for compilation errors with failure tracking
+    /// </summary>
+    public class CompilationErrorResults
+    {
+        public List<CompilationError> Errors { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int FailedProjects { get; set; }
+        public int FailedDiagnostics { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
     }
 }
