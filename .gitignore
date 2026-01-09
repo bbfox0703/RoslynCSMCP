@@ -433,3 +433,4 @@ nul
 
 # repos specified
 .claude/settings.local.json
+/.claude

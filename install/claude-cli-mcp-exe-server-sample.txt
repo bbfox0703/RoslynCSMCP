@@ -1,1 +1,13 @@
-claude mcp add --transport stdio roslyn --scope user --env DOTNET_ENVIRONMENT=Production --env LOG_LEVEL=Information -- d:\tools\RoslynCSMCP\RoslynMcpServer\RoslynMcpServer.exe
+# Windows 11 - Using compiled .exe (Production mode)
+# Replace the path with your actual RoslynCSMCP location
+
+# Method 1: Using Release build (recommended for production)
+claude mcp add roslyn --scope user --transport stdio --env DOTNET_ENVIRONMENT=Production --env LOG_LEVEL=Information -- D:\Github\RoslynCSMCP\RoslynMcpServer\bin\Release\net10.0\RoslynMcpServer.exe
+
+# Method 2: Using Debug build (for debugging)
+# claude mcp add roslyn --scope user --transport stdio --env DOTNET_ENVIRONMENT=Development --env LOG_LEVEL=Information -- D:\Github\RoslynCSMCP\RoslynMcpServer\bin\Debug\net10.0\RoslynMcpServer.exe
+
+# Note:
+# - Build the project first: dotnet build -c Release (or -c Debug)
+# - The .exe path should point to the compiled executable in bin\Release\net10.0\ or bin\Debug\net10.0\
+# - Use absolute paths (e.g., D:\Github\RoslynCSMCP\...) not relative paths
