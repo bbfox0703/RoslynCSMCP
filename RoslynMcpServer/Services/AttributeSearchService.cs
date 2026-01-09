@@ -24,7 +24,7 @@ namespace RoslynMcpServer.Services
         /// <summary>
         /// Find all usages of a specific attribute across the solution
         /// </summary>
-        public async Task<List<AttributeUsageResult>> FindAttributeUsagesAsync(
+        public async Task<AttributeSearchResults> FindAttributeUsagesAsync(
             string attributeName,
             string solutionPath,
             string targetType = "all")
@@ -39,6 +39,7 @@ namespace RoslynMcpServer.Services
             }
 
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
+            var searchResults = new AttributeSearchResults();
             var results = new List<AttributeUsageResult>();
 
             // Normalize attribute name (remove "Attribute" suffix if present for comparison)
@@ -105,13 +106,34 @@ namespace RoslynMcpServer.Services
                         if (usageResult != null)
                         {
                             results.Add(usageResult);
+                            searchResults.SuccessCount++;
+                        }
+                        else
+                        {
+                            searchResults.FailureCount++;
+                            searchResults.Warnings.Add(new OperationWarning
+                            {
+                                Context = $"Attribute on {targetSymbol.Name}",
+                                Message = $"Failed to extract attribute usage details for {targetSymbol.Name}",
+                                Details = $"File: {syntaxTree.FilePath}"
+                            });
                         }
                     }
                 }
             }
 
-            _logger.LogInformation("Found {Count} attribute usages", results.Count);
-            return results.OrderBy(r => r.ProjectName).ThenBy(r => r.TargetName).ToList();
+            searchResults.Usages = results.OrderBy(r => r.ProjectName).ThenBy(r => r.TargetName).ToList();
+
+            _logger.LogInformation("Found {Count} attribute usages ({Success} successful, {Failed} failed)",
+                results.Count, searchResults.SuccessCount, searchResults.FailureCount);
+
+            if (searchResults.FailureCount > 0)
+            {
+                _logger.LogWarning("{FailureCount} attribute usages failed to extract details",
+                    searchResults.FailureCount);
+            }
+
+            return searchResults;
         }
 
         /// <summary>

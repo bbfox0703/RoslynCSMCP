@@ -108,6 +108,8 @@ namespace RoslynMcpServer.Services
             var totalSymbols = 0;
             var publicSymbols = 0;
             var internalSymbols = 0;
+            var analyzedProjects = 0;
+            var failedProjects = 0;
 
             // Analyze all projects in parallel
             var tasks = solution.Projects
@@ -120,10 +122,18 @@ namespace RoslynMcpServer.Services
                         Interlocked.Add(ref totalSymbols, total);
                         Interlocked.Add(ref publicSymbols, pubCount);
                         Interlocked.Add(ref internalSymbols, intCount);
+                        Interlocked.Increment(ref analyzedProjects);
                     }
                     catch (Exception ex)
                     {
+                        Interlocked.Increment(ref failedProjects);
                         _logger.LogError(ex, "Error analyzing project {ProjectName}", project.Name);
+                        analysis.Warnings.Add(new OperationWarning
+                        {
+                            Context = $"Project: {project.Name}",
+                            Message = $"Failed to analyze project: {ex.Message}",
+                            Details = null
+                        });
                     }
                 });
 
@@ -156,6 +166,16 @@ namespace RoslynMcpServer.Services
                 })
                 .OrderByDescending(d => d.UsageCount)
                 .ToList();
+
+            // Set project analysis counts
+            analysis.AnalyzedProjects = analyzedProjects;
+            analysis.FailedProjects = failedProjects;
+
+            if (failedProjects > 0)
+            {
+                _logger.LogWarning("{FailedProjects} projects failed to analyze out of {TotalProjects}",
+                    failedProjects, analyzedProjects + failedProjects);
+            }
 
             return analysis;
         }

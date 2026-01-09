@@ -507,8 +507,9 @@ namespace RoslynMcpServer.Services
 
                 return result.ToString();
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogDebug(ex, "Could not extract documentation comments");
                 return string.Empty;
             }
         }

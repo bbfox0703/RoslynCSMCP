@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Text.RegularExpressions;
 
 namespace RoslynMcpServer.Services
@@ -6,6 +7,12 @@ namespace RoslynMcpServer.Services
     {
         private readonly HashSet<string> _allowedExtensions = new() { ".sln", ".csproj" };
         private readonly Regex _safePath = new(@"^[a-zA-Z]:[\\/][^<>:|?*]+$");
+        private readonly ILogger<SecurityValidator> _logger;
+
+        public SecurityValidator(ILogger<SecurityValidator> logger)
+        {
+            _logger = logger;
+        }
         
         public bool ValidateSolutionPath(string path)
         {
@@ -30,8 +37,9 @@ namespace RoslynMcpServer.Services
             {
                 return File.Exists(path);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogWarning(ex, "Error validating path: {Path}", path);
                 return false;
             }
         }

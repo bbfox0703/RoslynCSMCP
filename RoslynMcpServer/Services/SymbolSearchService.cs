@@ -379,9 +379,10 @@ namespace RoslynMcpServer.Services
 
                 return false;
             }
-            catch
+            catch (Exception ex)
             {
                 // If we can't determine, assume it's not a write
+                _logger.LogDebug(ex, "Could not determine if reference is write access, assuming read");
                 return false;
             }
         }

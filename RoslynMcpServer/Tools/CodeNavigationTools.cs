@@ -1463,8 +1463,10 @@ namespace RoslynMcpServer.Tools
             return count;
         }
 
-        private static string FormatAttributeUsages(List<AttributeUsageResult> results, string attributeName, string targetType)
+        private static string FormatAttributeUsages(AttributeSearchResults searchResults, string attributeName, string targetType)
         {
+            var results = searchResults.Usages;
+
             if (!results.Any())
                 return $"No usages of [{attributeName}] attribute found" +
                        (targetType != "all" ? $" on {targetType} targets." : ".");
@@ -1477,7 +1479,22 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine($"Filter: {targetType} targets only\n");
             }
 
-            output.AppendLine($"Found {results.Count} usage{(results.Count > 1 ? "s" : "")}:\n");
+            output.AppendLine($"Found {results.Count} usage{(results.Count > 1 ? "s" : "")} ({searchResults.SuccessCount} successful, {searchResults.FailureCount} failed):\n");
+
+            // Show warnings if any
+            if (searchResults.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in searchResults.Warnings.Take(5))
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                if (searchResults.Warnings.Count > 5)
+                {
+                    output.AppendLine($"   ... and {searchResults.Warnings.Count - 5} more warnings");
+                }
+                output.AppendLine();
+            }
 
             // Group by target type
             var groupedByType = results.GroupBy(r => r.TargetType).OrderBy(g => g.Key);

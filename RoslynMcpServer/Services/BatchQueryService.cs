@@ -334,8 +334,9 @@ namespace RoslynMcpServer.Services
             {
                 return (T)Convert.ChangeType(value, typeof(T));
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogDebug(ex, "Failed to convert parameter '{Key}' to type {Type}, using default value", key, typeof(T).Name);
                 return defaultValue;
             }
         }
