@@ -935,13 +935,30 @@ namespace RoslynMcpServer.Tools
         {
             var output = new StringBuilder();
             output.AppendLine($"**Dependency Analysis for {analysis.ProjectName}**\n");
-            
+
             output.AppendLine($"Symbol Summary:");
             output.AppendLine($"  • Total Symbols: {analysis.TotalSymbols}");
             output.AppendLine($"  • Public Symbols: {analysis.PublicSymbols}");
             output.AppendLine($"  • Internal Symbols: {analysis.InternalSymbols}");
+            output.AppendLine($"  • Projects Analyzed: {analysis.AnalyzedProjects}");
+            output.AppendLine($"  • Projects Failed: {analysis.FailedProjects}");
             output.AppendLine();
-            
+
+            // Show warnings if any
+            if (analysis.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in analysis.Warnings.Take(5))
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                if (analysis.Warnings.Count > 5)
+                {
+                    output.AppendLine($"   ... and {analysis.Warnings.Count - 5} more warnings");
+                }
+                output.AppendLine();
+            }
+
             if (analysis.Dependencies.Any())
             {
                 output.AppendLine("Dependencies:");
@@ -1023,14 +1040,31 @@ namespace RoslynMcpServer.Tools
             return namespaceDeclaration?.Name.ToString() ?? "";
         }
 
-        private static string FormatCompilationErrors(List<CompilationError> errors, string severityFilter)
+        private static string FormatCompilationErrors(CompilationErrorResults errorResults, string severityFilter)
         {
+            var errors = errorResults.Errors;
+
             if (!errors.Any())
                 return $"No compilation {severityFilter.ToLower()} issues found. Solution builds successfully!";
 
             var output = new StringBuilder();
             output.AppendLine($"**Compilation Diagnostics** (Severity: {severityFilter})\n");
-            output.AppendLine($"Found {errors.Count} issue{(errors.Count > 1 ? "s" : "")}:\n");
+            output.AppendLine($"Found {errors.Count} issue{(errors.Count > 1 ? "s" : "")} ({errorResults.AnalyzedProjects} projects analyzed, {errorResults.FailedProjects} projects failed, {errorResults.FailedDiagnostics} diagnostics failed):\n");
+
+            // Show warnings if any
+            if (errorResults.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in errorResults.Warnings.Take(5))
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                if (errorResults.Warnings.Count > 5)
+                {
+                    output.AppendLine($"   ... and {errorResults.Warnings.Count - 5} more warnings");
+                }
+                output.AppendLine();
+            }
 
             // Group by severity
             var groupedBySeverity = errors.GroupBy(e => e.Severity).OrderBy(g => g.Key);
@@ -1089,7 +1123,24 @@ namespace RoslynMcpServer.Tools
             output.AppendLine($"  • Code Lines: {outline.CodeLines} ({outline.CodeLines * 100.0 / outline.TotalLines:F1}%)");
             output.AppendLine($"  • Comment Lines: {outline.CommentLines} ({outline.CommentLines * 100.0 / outline.TotalLines:F1}%)");
             output.AppendLine($"  • Blank Lines: {outline.BlankLines} ({outline.BlankLines * 100.0 / outline.TotalLines:F1}%)");
+            output.AppendLine($"  • Types Found: {outline.Types.Count} ({outline.FailedTypes} failed)");
+            output.AppendLine($"  • Members Found: {outline.Types.Sum(t => t.Members.Count)} ({outline.FailedMembers} failed)");
             output.AppendLine();
+
+            // Show warnings if any
+            if (outline.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in outline.Warnings.Take(5))
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                if (outline.Warnings.Count > 5)
+                {
+                    output.AppendLine($"   ... and {outline.Warnings.Count - 5} more warnings");
+                }
+                output.AppendLine();
+            }
 
             // Using statements
             if (outline.UsingStatements.Any())

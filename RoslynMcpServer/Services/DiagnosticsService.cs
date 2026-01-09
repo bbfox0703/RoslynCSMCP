@@ -24,8 +24,8 @@ namespace RoslynMcpServer.Services
         /// <param name="severity">Filter by severity: "Error", "Warning", "Info", or "All"</param>
         /// <param name="projectFilter">Optional project name filter (supports wildcards * and ?)</param>
         /// <param name="errorCodes">Optional array of specific error codes to include (e.g., ["CS0103", "CS0246"])</param>
-        /// <returns>List of compilation errors/warnings</returns>
-        public async Task<List<CompilationError>> GetCompilationErrorsAsync(
+        /// <returns>Compilation errors/warnings with failure tracking</returns>
+        public async Task<CompilationErrorResults> GetCompilationErrorsAsync(
             string solutionPath,
             string severity = "All",
             string? projectFilter = null,
@@ -40,7 +40,11 @@ namespace RoslynMcpServer.Services
                 throw new ArgumentException("Invalid solution path", nameof(solutionPath));
             }
 
+            var errorResults = new CompilationErrorResults();
             var results = new List<CompilationError>();
+            var analyzedProjects = 0;
+            var failedProjects = 0;
+            var failedDiagnostics = 0;
             var properties = new Dictionary<string, string>
             {
                 ["CheckForSystemRuntimeDependency"] = "true"
@@ -91,6 +95,13 @@ namespace RoslynMcpServer.Services
                     if (compilation == null)
                     {
                         _logger.LogWarning("Could not get compilation for project: {ProjectName}", project.Name);
+                        failedProjects++;
+                        errorResults.Warnings.Add(new OperationWarning
+                        {
+                            Context = $"Project: {project.Name}",
+                            Message = "Could not get compilation for project",
+                            Details = null
+                        });
                         continue;
                     }
 
@@ -120,19 +131,45 @@ namespace RoslynMcpServer.Services
                         {
                             results.Add(error);
                         }
+                        else
+                        {
+                            failedDiagnostics++;
+                        }
                     }
 
                     _logger.LogDebug("Found {Count} diagnostics in {ProjectName}",
                         filteredDiagnostics.Count(), project.Name);
+                    analyzedProjects++;
                 }
                 catch (Exception ex)
                 {
+                    failedProjects++;
                     _logger.LogError(ex, "Error analyzing project {ProjectName}", project.Name);
+                    errorResults.Warnings.Add(new OperationWarning
+                    {
+                        Context = $"Project: {project.Name}",
+                        Message = $"Failed to analyze project: {ex.Message}",
+                        Details = null
+                    });
                 }
             }
 
-            _logger.LogInformation("Total compilation diagnostics found: {Count}", results.Count);
-            return results;
+            // Populate results
+            errorResults.Errors = results;
+            errorResults.AnalyzedProjects = analyzedProjects;
+            errorResults.FailedProjects = failedProjects;
+            errorResults.FailedDiagnostics = failedDiagnostics;
+
+            _logger.LogInformation("Total compilation diagnostics found: {Count} ({AnalyzedProjects} projects analyzed, {FailedProjects} projects failed, {FailedDiagnostics} diagnostics failed)",
+                results.Count, analyzedProjects, failedProjects, failedDiagnostics);
+
+            if (failedProjects > 0 || failedDiagnostics > 0)
+            {
+                _logger.LogWarning("Some failures occurred: {FailedProjects} projects failed, {FailedDiagnostics} diagnostics failed to convert",
+                    failedProjects, failedDiagnostics);
+            }
+
+            return errorResults;
         }
 
         /// <summary>

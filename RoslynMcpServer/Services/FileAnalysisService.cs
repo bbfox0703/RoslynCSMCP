@@ -71,12 +71,19 @@ namespace RoslynMcpServer.Services
                            n is EnumDeclarationSyntax ||
                            n is RecordDeclarationSyntax);
 
+            var failedTypes = 0;
+            var failedMembers = 0;
             foreach (var typeDecl in typeDeclarations)
             {
-                var typeOutline = ExtractTypeOutline(typeDecl);
+                var (typeOutline, memberFailures) = ExtractTypeOutline(typeDecl);
                 if (typeOutline != null)
                 {
                     types.Add(typeOutline);
+                    failedMembers += memberFailures;
+                }
+                else
+                {
+                    failedTypes++;
                 }
             }
 
@@ -90,11 +97,19 @@ namespace RoslynMcpServer.Services
                 BlankLines = blankLines,
                 Namespaces = namespaces,
                 UsingStatements = usingStatements,
-                Types = types
+                Types = types,
+                FailedTypes = failedTypes,
+                FailedMembers = failedMembers
             };
 
-            _logger.LogInformation("File outline extracted: {TypeCount} types, {TotalLines} lines",
-                types.Count, lines.Length);
+            _logger.LogInformation("File outline extracted: {TypeCount} types ({FailedTypes} failed), {MemberCount} members ({FailedMembers} failed), {TotalLines} lines",
+                types.Count, failedTypes, types.Sum(t => t.Members.Count), failedMembers, lines.Length);
+
+            if (failedTypes > 0 || failedMembers > 0)
+            {
+                _logger.LogWarning("{FailedTypes} types and {FailedMembers} members failed to extract outlines",
+                    failedTypes, failedMembers);
+            }
 
             return result;
         }
@@ -149,7 +164,7 @@ namespace RoslynMcpServer.Services
         /// <summary>
         /// Extract type outline from type declaration syntax
         /// </summary>
-        private TypeOutline? ExtractTypeOutline(SyntaxNode typeDecl)
+        private (TypeOutline? typeOutline, int failedMembers) ExtractTypeOutline(SyntaxNode typeDecl)
         {
             try
             {
@@ -226,9 +241,9 @@ namespace RoslynMcpServer.Services
                 var documentation = ExtractDocumentation(typeDecl);
 
                 // Extract members
-                var members = ExtractMembers(typeDecl);
+                var (members, failedMemberCount) = ExtractMembers(typeDecl);
 
-                return new TypeOutline
+                var typeOutline = new TypeOutline
                 {
                     Name = name,
                     FullName = string.IsNullOrEmpty(namespaceName) ? name : $"{namespaceName}.{name}",
@@ -241,20 +256,23 @@ namespace RoslynMcpServer.Services
                     Documentation = documentation,
                     Members = members
                 };
+
+                return (typeOutline, failedMemberCount);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error extracting type outline");
-                return null;
+                return (null, 0);
             }
         }
 
         /// <summary>
         /// Extract members from type declaration
         /// </summary>
-        private List<MemberOutline> ExtractMembers(SyntaxNode typeDecl)
+        private (List<MemberOutline> members, int failedCount) ExtractMembers(SyntaxNode typeDecl)
         {
             var members = new List<MemberOutline>();
+            var failedMembers = 0;
 
             var memberNodes = typeDecl.ChildNodes()
                 .Where(n => n is MethodDeclarationSyntax ||
@@ -270,9 +288,13 @@ namespace RoslynMcpServer.Services
                 {
                     members.Add(memberOutline);
                 }
+                else
+                {
+                    failedMembers++;
+                }
             }
 
-            return members;
+            return (members, failedMembers);
         }
 
         /// <summary>
