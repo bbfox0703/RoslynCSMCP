@@ -1,7 +1,7 @@
 # .NET 10 升級評估報告
 
 生成日期：2026-01-08
-專案：RoslynMCP Server
+專案：RoslynCSMCP Server
 當前目標框架：.NET 8.0
 建議目標框架：.NET 10.0
 

@@ -1,5 +1,5 @@
-# RoslynMCP Setup Script for Claude CLI
-# This script helps configure RoslynMCP for Claude Code CLI
+# RoslynCSMCP Setup Script for Claude CLI
+# This script helps configure RoslynCSMCP for Claude Code CLI
 
 param(
     [ValidateSet("user", "project", "local")]
@@ -9,7 +9,7 @@ param(
 
 if ($Help) {
     Write-Host @"
-RoslynMCP Setup Script for Claude CLI
+RoslynCSMCP Setup Script for Claude CLI
 
 Usage: .\setup-claude-cli.ps1 [-Scope <user|project|local>] [-Help]
 
@@ -26,7 +26,7 @@ Examples:
     exit 0
 }
 
-Write-Host "=== RoslynMCP Setup for Claude CLI ===" -ForegroundColor Cyan
+Write-Host "=== RoslynCSMCP Setup for Claude CLI ===" -ForegroundColor Cyan
 Write-Host
 
 # Get script directory and project path
@@ -65,7 +65,7 @@ try {
 
 # Build project
 Write-Host
-Write-Host "3. Building RoslynMCP..." -ForegroundColor Yellow
+Write-Host "3. Building RoslynCSMCP..." -ForegroundColor Yellow
 Push-Location $projectPath
 try {
     dotnet build -c Release | Out-Null
@@ -130,7 +130,7 @@ try {
 Write-Host
 Write-Host "=== Setup Complete ===" -ForegroundColor Cyan
 Write-Host
-Write-Host "✓ RoslynMCP is configured for Claude CLI!" -ForegroundColor Green
+Write-Host "✓ RoslynCSMCP is configured for Claude CLI!" -ForegroundColor Green
 Write-Host
 Write-Host "Scope: $Scope" -ForegroundColor Yellow
 
@@ -149,12 +149,12 @@ switch ($Scope) {
 Write-Host
 Write-Host "Next steps:" -ForegroundColor Yellow
 Write-Host "1. Run 'claude' to start Claude CLI"
-Write-Host "2. Use RoslynMCP tools to analyze C# code:"
+Write-Host "2. Use RoslynCSMCP tools to analyze C# code:"
 Write-Host "   > Search for all classes in MySolution.sln"
 Write-Host "   > Find references to UserService in MySolution.sln"
 Write-Host "   > Analyze dependencies for MySolution.sln"
 Write-Host
 Write-Host "Verify configuration:" -ForegroundColor Yellow
 Write-Host "  claude mcp list      # List all MCP servers"
-Write-Host "  claude mcp get roslyn # Show RoslynMCP details"
+Write-Host "  claude mcp get roslyn # Show RoslynCSMCP details"
 Write-Host

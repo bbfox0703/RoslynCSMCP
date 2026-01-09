@@ -2,7 +2,7 @@
 
 **文檔版本**: 1.0
 **建立日期**: 2026-01-09
-**目標**: 減少 Claude 使用 RoslynMCP 時的 token 消耗
+**目標**: 減少 Claude 使用 RoslynCSMCP 時的 token 消耗
 
 ---
 

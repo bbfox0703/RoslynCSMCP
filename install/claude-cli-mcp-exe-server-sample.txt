@@ -1,1 +1,1 @@
-claude mcp add --transport stdio roslyn --scope user --env DOTNET_ENVIRONMENT=Production --env LOG_LEVEL=Information -- d:\tools\RoslynMCP\RoslynMcpServer\RoslynMcpServer.exe
+claude mcp add --transport stdio roslyn --scope user --env DOTNET_ENVIRONMENT=Production --env LOG_LEVEL=Information -- d:\tools\RoslynCSMCP\RoslynMcpServer\RoslynMcpServer.exe
