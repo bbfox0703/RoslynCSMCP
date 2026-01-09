@@ -14,6 +14,45 @@ A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn
 - **Performance Optimized** - Multi-level caching (Memory, Redis, File system) and incremental analysis for large codebases
 - **Security Hardened** - Input validation, path sanitization, and safe file operations
 
+## 🎯 What is RoslynCSMCP?
+
+RoslynCSMCP is a **specialized application** built on top of Microsoft's MCP SDK, not a replacement for it.
+
+### Relationship with Microsoft MCP C# SDK
+
+| Component | Role | What It Provides |
+|-----------|------|------------------|
+| **Microsoft MCP C# SDK** | 🔧 Infrastructure | MCP protocol implementation, transport layer, serialization |
+| **RoslynCSMCP (This Project)** | 🎯 Application | 19 ready-to-use C# code analysis tools powered by Roslyn |
+
+**Analogy**:
+- Microsoft MCP SDK = Kitchen equipment (stove, refrigerator, knives)
+- RoslynCSMCP = A restaurant with complete menu (using that equipment to serve specific dishes)
+
+### Why You Need RoslynCSMCP
+
+**Without RoslynCSMCP**:
+- You only have the MCP SDK framework
+- You need to develop all 19 code analysis tools yourself (weeks of work)
+- You need to implement token optimization strategies
+- You need to design output formats for Claude
+
+**With RoslynCSMCP**:
+- ✅ Install and configure in 5 minutes
+- ✅ Get 19 production-ready tools immediately
+- ✅ Benefit from 60-98% token savings optimizations
+- ✅ Use Claude-optimized output formats
+
+### What Makes RoslynCSMCP Unique
+
+1. **Roslyn Integration**: Deep integration with Microsoft's Roslyn compiler platform for semantic code analysis
+2. **19 Specialized Tools**: From symbol search to test discovery, compilation errors to class hierarchies
+3. **Token Optimization**: Intelligent filtering and output formatting reduces token usage by 60-98%
+4. **Production Ready**: Security validation, multi-level caching, incremental analysis
+5. **Claude Native**: Designed specifically for Claude Desktop and Claude CLI workflows
+
+**Bottom Line**: Microsoft provides the foundation (SDK), RoslynCSMCP provides the complete, ready-to-use C# code analysis solution.
+
 ## Prerequisites
 
 ### Common Requirements
@@ -323,7 +362,7 @@ Identify complex methods in src/Services/*.cs with threshold 10
 
 ## Available MCP Tools
 
-The server exposes 17 MCP tools organized in four phases:
+The server exposes 19 MCP tools organized in four phases:
 
 ### Core Analysis Tools
 
@@ -460,6 +499,26 @@ The server exposes 17 MCP tools organized in four phases:
     - Use case: "Find tests for UserService" → See complete test coverage with 28 tests in 800 tokens
 
 📚 **[Phase 4 Week 2 Usage Examples](docs/PHASE4_WEEK2_USAGE_EXAMPLES.md)** - Navigation and testing features
+
+17. **GetClassHierarchy** - Get complete class hierarchy showing ancestors and descendants
+    - Shows inheritance chain (base classes and interfaces)
+    - Displays derived types (classes that inherit from or implement the type)
+    - Configurable direction (ancestors/descendants/both)
+    - Recursive traversal with max depth control
+    - Visual tree structure with type information
+    - **Token savings: 60-70%** vs reading multiple files to understand hierarchy
+    - Use case: "Get hierarchy for UserService" → See complete inheritance tree with ancestors and descendants
+
+18. **FindAttributeUsages** - Find all usages of specific attributes across the solution
+    - Discovers all types/members decorated with an attribute
+    - Supports all attribute targets (class, method, property, field, parameter, etc.)
+    - Shows attribute arguments (positional and named)
+    - Filter by target type for focused results
+    - Groups by target type and project
+    - **Token savings: 80-90%** vs searching and reading files manually
+    - Use case: "Find all [Obsolete] attributes" → Identify all deprecated code quickly
+
+📚 **[Phase 4 Week 3 Usage Examples](docs/PHASE4_WEEK3_USAGE_EXAMPLES.md)** - Hierarchy and attribute analysis
 
 ## Development and Testing
 

@@ -1,0 +1,325 @@
+# =============================================================================
+# Docker Compose Configuration for Claude CLI
+# =============================================================================
+# This configuration runs RoslynCSMCP server in a Docker container for use
+# with Claude CLI (command-line interface).
+#
+# Prerequisites:
+#   1. Docker Desktop or Docker Engine installed and running
+#   2. Claude CLI installed
+#   3. Solution files accessible on host machine
+#
+# Quick Start:
+#   1. Update volume paths below (WORKSPACE_PATH and LOGS_PATH)
+#   2. Build: docker-compose -f docker-compose.claude-cli.yml build
+#   3. Configure Claude CLI (see instructions below)
+#   4. Start: docker-compose -f docker-compose.claude-cli.yml up -d
+#
+# =============================================================================
+
+services:
+  roslynmcp:
+    # Build configuration
+    build:
+      context: ./RoslynMcpServer
+      dockerfile: Dockerfile
+      args:
+        # Switch between Production and Development
+        # Production (default): Minimal logging, optimized
+        # Development: Verbose logging, debug output
+        ENVIRONMENT: Production
+        # To use Development mode, change to:
+        # ENVIRONMENT: Development
+
+    image: roslynmcp:latest
+    container_name: roslynmcp-cli
+
+    # stdin/stdout must be enabled for MCP protocol
+    stdin_open: true
+    tty: false  # Important: false for MCP stdio transport
+
+    # Environment Variables
+    # =====================
+    environment:
+      # .NET Environment (Production or Development)
+      - DOTNET_ENVIRONMENT=Production
+
+      # Logging Level
+      # Options: Trace, Debug, Information, Warning, Error, Critical
+      # Production: Information (default)
+      # Development: Debug
+      - LOG_LEVEL=Information
+
+      # Disable .NET telemetry (optional)
+      - DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+      # Optional: Set timezone
+      # - TZ=America/New_York
+
+    # Volume Mounts
+    # =============
+    # IMPORTANT: Update these paths to match your system
+    volumes:
+      # Mount your solution directory (read-only recommended for safety)
+      # Windows example: C:\Projects\MySolution:/workspace:ro
+      # macOS example: ~/Projects/MySolution:/workspace:ro
+      # Linux example: /home/user/projects/MySolution:/workspace:ro
+      - ${WORKSPACE_PATH:-./workspace}:/workspace:ro
+
+      # Mount log directory (read-write for log file creation)
+      # Windows example: C:\Logs\RoslynMCP:/logs:rw
+      # macOS example: ~/Logs/RoslynMCP:/logs:rw
+      # Linux example: /var/log/roslynmcp:/logs:rw
+      - ${LOGS_PATH:-./logs}:/logs:rw
+
+    # Resource Limits (optional but recommended)
+    # =========================================
+    # Uncomment and adjust based on your system and codebase size
+    # For CI/CD environments, you may want to set limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '4.0'      # Limit to 4 CPU cores
+    #       memory: 4G       # Limit to 4GB RAM
+    #     reservations:
+    #       cpus: '1.0'      # Reserve at least 1 CPU core
+    #       memory: 1G       # Reserve at least 1GB RAM
+
+    # Restart Policy
+    # ==============
+    # Options: no, always, on-failure, unless-stopped
+    # For CLI usage, "no" or "unless-stopped" is recommended
+    restart: unless-stopped
+
+    # Health Check (optional)
+    # ======================
+    # Uncomment to enable health monitoring
+    # healthcheck:
+    #   test: ["CMD", "dotnet", "--info"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 40s
+
+# =============================================================================
+# Claude CLI Configuration
+# =============================================================================
+#
+# After starting the container, configure Claude CLI to use this server:
+#
+# OPTION 1: Global Configuration (~/.config/claude/settings.toml)
+# ----------------------------------------------------------------
+# Add this to your Claude CLI settings file:
+#
+# [mcp]
+# servers = [
+#   {
+#     name = "roslyn",
+#     command = "docker",
+#     args = ["exec", "-i", "roslynmcp-cli", "dotnet", "RoslynMcpServer.dll"],
+#     env = { DOTNET_ENVIRONMENT = "Production" }
+#   }
+# ]
+#
+# OPTION 2: Per-Project Configuration (.claude.toml in project root)
+# -------------------------------------------------------------------
+# Create a .claude.toml file in your project directory:
+#
+# [mcp]
+# servers = [
+#   {
+#     name = "roslyn",
+#     command = "docker",
+#     args = ["exec", "-i", "roslynmcp-cli", "dotnet", "RoslynMcpServer.dll"],
+#     env = { DOTNET_ENVIRONMENT = "Production" }
+#   }
+# ]
+#
+# OPTION 3: Command-line Flag (One-off usage)
+# --------------------------------------------
+# Use the --mcp-server flag when running Claude CLI:
+#
+#   claude --mcp-server docker exec -i roslynmcp-cli dotnet RoslynMcpServer.dll
+#
+# =============================================================================
+
+# =============================================================================
+# Usage Examples with Claude CLI
+# =============================================================================
+#
+# After configuration, you can use Claude CLI with RoslynMCP:
+#
+# 1. Basic query:
+#    claude "Search for classes named 'Program' in the solution"
+#
+# 2. Find references:
+#    claude "Find all references to the method 'ProcessData'"
+#
+# 3. Analyze dependencies:
+#    claude "Show me the dependency graph for this solution"
+#
+# 4. Code complexity:
+#    claude "Find methods with cyclomatic complexity greater than 10"
+#
+# 5. Interactive mode:
+#    claude -i
+#    > Search for interfaces in the solution
+#    > Show me the hierarchy of the 'BaseService' class
+#
+# =============================================================================
+
+# =============================================================================
+# Environment Variables (.env file)
+# =============================================================================
+#
+# Create a .env file in the same directory as this docker-compose.yml:
+#
+# # Windows Example
+# WORKSPACE_PATH=C:/Projects/MySolution
+# LOGS_PATH=C:/Logs/RoslynMCP
+#
+# # macOS/Linux Example
+# WORKSPACE_PATH=/Users/username/Projects/MySolution
+# LOGS_PATH=/Users/username/Logs/RoslynMCP
+#
+# Then run: docker-compose -f docker-compose.claude-cli.yml --env-file .env up -d
+#
+# =============================================================================
+
+# =============================================================================
+# Switching Between Production and Development
+# =============================================================================
+#
+# OPTION 1: Build-time (Recommended for long-term use)
+# ----------------------------------------------------
+# Edit this file and change the build arg:
+#   args:
+#     ENVIRONMENT: Development
+#
+# Then rebuild:
+#   docker-compose -f docker-compose.claude-cli.yml build --no-cache
+#   docker-compose -f docker-compose.claude-cli.yml up -d
+#
+# OPTION 2: Runtime (Quick testing)
+# ---------------------------------
+# Just change the environment variable:
+#   environment:
+#     - DOTNET_ENVIRONMENT=Development
+#     - LOG_LEVEL=Debug
+#
+# Then restart:
+#   docker-compose -f docker-compose.claude-cli.yml up -d
+#
+# OPTION 3: Per-command (CLI only)
+# --------------------------------
+# Override environment in Claude CLI config:
+#   env = { DOTNET_ENVIRONMENT = "Development", LOG_LEVEL = "Debug" }
+#
+# =============================================================================
+
+# =============================================================================
+# CI/CD Integration
+# =============================================================================
+#
+# For automated CI/CD pipelines, you can use this configuration:
+#
+# 1. GitHub Actions Example:
+#    ```yaml
+#    - name: Start RoslynMCP
+#      run: |
+#        docker-compose -f docker-compose.claude-cli.yml up -d
+#
+#    - name: Wait for container
+#      run: docker wait roslynmcp-cli || true
+#
+#    - name: Run analysis with Claude CLI
+#      run: |
+#        claude "Analyze code complexity for all methods" > complexity-report.txt
+#
+#    - name: Stop container
+#      run: docker-compose -f docker-compose.claude-cli.yml down
+#    ```
+#
+# 2. GitLab CI Example:
+#    ```yaml
+#    code_analysis:
+#      script:
+#        - docker-compose -f docker-compose.claude-cli.yml up -d
+#        - claude "Find all TODO comments in the solution" > todos.txt
+#        - docker-compose -f docker-compose.claude-cli.yml down
+#      artifacts:
+#        paths:
+#          - todos.txt
+#    ```
+#
+# 3. Jenkins Pipeline Example:
+#    ```groovy
+#    stage('Code Analysis') {
+#      steps {
+#        sh 'docker-compose -f docker-compose.claude-cli.yml up -d'
+#        sh 'claude "Analyze security vulnerabilities" > security-report.txt'
+#        sh 'docker-compose -f docker-compose.claude-cli.yml down'
+#      }
+#    }
+#    ```
+#
+# =============================================================================
+
+# =============================================================================
+# Useful Commands
+# =============================================================================
+#
+# Build the image:
+#   docker-compose -f docker-compose.claude-cli.yml build
+#
+# Start the container:
+#   docker-compose -f docker-compose.claude-cli.yml up -d
+#
+# Stop the container:
+#   docker-compose -f docker-compose.claude-cli.yml down
+#
+# View logs:
+#   docker-compose -f docker-compose.claude-cli.yml logs -f
+#
+# View logs (last 100 lines):
+#   docker-compose -f docker-compose.claude-cli.yml logs --tail=100
+#
+# Execute command in running container:
+#   docker-compose -f docker-compose.claude-cli.yml exec roslynmcp sh
+#
+# Test the server directly:
+#   echo '{"method":"tools/list"}' | docker exec -i roslynmcp-cli dotnet RoslynMcpServer.dll
+#
+# Rebuild and restart:
+#   docker-compose -f docker-compose.claude-cli.yml up -d --build
+#
+# Remove container and volumes:
+#   docker-compose -f docker-compose.claude-cli.yml down -v
+#
+# =============================================================================
+
+# =============================================================================
+# Troubleshooting
+# =============================================================================
+#
+# Container won't start:
+#   - Check logs: docker-compose -f docker-compose.claude-cli.yml logs
+#   - Verify Docker is running: docker info
+#   - Check volume paths exist on host
+#
+# Claude CLI can't connect:
+#   - Verify container is running: docker ps | grep roslynmcp-cli
+#   - Test connection: docker exec -i roslynmcp-cli dotnet --info
+#   - Check Claude CLI config syntax
+#
+# Performance issues:
+#   - Increase resource limits in deploy.resources section
+#   - Check host disk I/O for volume mounts
+#   - Consider using bind mounts instead of volumes on Windows
+#
+# Log file issues:
+#   - Verify log directory permissions: ls -la /path/to/logs
+#   - Check LOGS_PATH is correctly mounted
+#   - Ensure read-write permissions: :rw flag on volume mount
+#
+# =============================================================================

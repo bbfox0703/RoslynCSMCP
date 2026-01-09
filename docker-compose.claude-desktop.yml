@@ -1,0 +1,214 @@
+# =============================================================================
+# Docker Compose Configuration for Claude Desktop
+# =============================================================================
+# This configuration runs RoslynCSMCP server in a Docker container for use
+# with Claude Desktop application.
+#
+# Prerequisites:
+#   1. Docker Desktop installed and running
+#   2. Claude Desktop installed
+#   3. Solution files accessible on host machine
+#
+# Quick Start:
+#   1. Update volume paths below (WORKSPACE_PATH and LOGS_PATH)
+#   2. Build: docker-compose -f docker-compose.claude-desktop.yml build
+#   3. Configure Claude Desktop (see instructions below)
+#   4. Start: docker-compose -f docker-compose.claude-desktop.yml up -d
+#
+# =============================================================================
+
+services:
+  roslynmcp:
+    # Build configuration
+    build:
+      context: ./RoslynMcpServer
+      dockerfile: Dockerfile
+      args:
+        # Switch between Production and Development
+        # Production (default): Minimal logging, optimized
+        # Development: Verbose logging, debug output
+        ENVIRONMENT: Production
+        # To use Development mode, change to:
+        # ENVIRONMENT: Development
+
+    image: roslynmcp:latest
+    container_name: roslynmcp-desktop
+
+    # stdin/stdout must be enabled for MCP protocol
+    stdin_open: true
+    tty: false  # Important: false for MCP stdio transport
+
+    # Environment Variables
+    # =====================
+    environment:
+      # .NET Environment (Production or Development)
+      - DOTNET_ENVIRONMENT=Production
+
+      # Logging Level
+      # Options: Trace, Debug, Information, Warning, Error, Critical
+      # Production: Information (default)
+      # Development: Debug
+      - LOG_LEVEL=Information
+
+      # Disable .NET telemetry (optional)
+      - DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+      # Optional: Set timezone
+      # - TZ=America/New_York
+
+    # Volume Mounts
+    # =============
+    # IMPORTANT: Update these paths to match your system
+    volumes:
+      # Mount your solution directory (read-only recommended for safety)
+      # Windows example: C:\Projects\MySolution:/workspace:ro
+      # macOS example: ~/Projects/MySolution:/workspace:ro
+      # Linux example: /home/user/projects/MySolution:/workspace:ro
+      - ${WORKSPACE_PATH:-./workspace}:/workspace:ro
+
+      # Mount log directory (read-write for log file creation)
+      # Windows example: C:\Logs\RoslynMCP:/logs:rw
+      # macOS example: ~/Logs/RoslynMCP:/logs:rw
+      # Linux example: /var/log/roslynmcp:/logs:rw
+      - ${LOGS_PATH:-./logs}:/logs:rw
+
+    # Resource Limits (optional but recommended)
+    # =========================================
+    # Uncomment and adjust based on your system and codebase size
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '4.0'      # Limit to 4 CPU cores
+    #       memory: 4G       # Limit to 4GB RAM
+    #     reservations:
+    #       cpus: '1.0'      # Reserve at least 1 CPU core
+    #       memory: 1G       # Reserve at least 1GB RAM
+
+    # Restart Policy
+    # ==============
+    # Options: no, always, on-failure, unless-stopped
+    restart: unless-stopped
+
+    # Health Check (optional)
+    # ======================
+    # Uncomment to enable health monitoring
+    # healthcheck:
+    #   test: ["CMD", "dotnet", "--info"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 40s
+
+# =============================================================================
+# Claude Desktop Configuration
+# =============================================================================
+#
+# After starting the container, configure Claude Desktop to use this server:
+#
+# 1. Locate Claude Desktop config file:
+#    Windows: %APPDATA%\Claude\claude_desktop_config.json
+#    macOS: ~/Library/Application Support/Claude/claude_desktop_config.json
+#    Linux: ~/.config/Claude/claude_desktop_config.json
+#
+# 2. Add this configuration to the "mcpServers" section:
+#
+#    {
+#      "mcpServers": {
+#        "roslyn": {
+#          "command": "docker",
+#          "args": [
+#            "exec",
+#            "-i",
+#            "roslynmcp-desktop",
+#            "dotnet",
+#            "RoslynMcpServer.dll"
+#          ],
+#          "env": {
+#            "DOTNET_ENVIRONMENT": "Production"
+#          }
+#        }
+#      }
+#    }
+#
+# 3. Restart Claude Desktop
+#
+# 4. Verify the server is working:
+#    - Open Claude Desktop
+#    - Type a message like "Search for classes named 'Program'"
+#    - RoslynMCP tools should be available
+#
+# =============================================================================
+
+# =============================================================================
+# Environment Variables (.env file)
+# =============================================================================
+#
+# Create a .env file in the same directory as this docker-compose.yml:
+#
+# # Windows Example
+# WORKSPACE_PATH=C:/Projects/MySolution
+# LOGS_PATH=C:/Logs/RoslynMCP
+#
+# # macOS/Linux Example
+# WORKSPACE_PATH=/Users/username/Projects/MySolution
+# LOGS_PATH=/Users/username/Logs/RoslynMCP
+#
+# Then run: docker-compose -f docker-compose.claude-desktop.yml --env-file .env up -d
+#
+# =============================================================================
+
+# =============================================================================
+# Switching Between Production and Development
+# =============================================================================
+#
+# OPTION 1: Build-time (Recommended for long-term use)
+# ----------------------------------------------------
+# Edit this file and change the build arg:
+#   args:
+#     ENVIRONMENT: Development
+#
+# Then rebuild:
+#   docker-compose -f docker-compose.claude-desktop.yml build --no-cache
+#   docker-compose -f docker-compose.claude-desktop.yml up -d
+#
+# OPTION 2: Runtime (Quick testing)
+# ---------------------------------
+# Just change the environment variable:
+#   environment:
+#     - DOTNET_ENVIRONMENT=Development
+#     - LOG_LEVEL=Debug
+#
+# Then restart:
+#   docker-compose -f docker-compose.claude-desktop.yml up -d
+#
+# =============================================================================
+
+# =============================================================================
+# Useful Commands
+# =============================================================================
+#
+# Build the image:
+#   docker-compose -f docker-compose.claude-desktop.yml build
+#
+# Start the container:
+#   docker-compose -f docker-compose.claude-desktop.yml up -d
+#
+# Stop the container:
+#   docker-compose -f docker-compose.claude-desktop.yml down
+#
+# View logs:
+#   docker-compose -f docker-compose.claude-desktop.yml logs -f
+#
+# View logs (last 100 lines):
+#   docker-compose -f docker-compose.claude-desktop.yml logs --tail=100
+#
+# Execute command in running container:
+#   docker-compose -f docker-compose.claude-desktop.yml exec roslynmcp sh
+#
+# Rebuild and restart:
+#   docker-compose -f docker-compose.claude-desktop.yml up -d --build
+#
+# Remove container and volumes:
+#   docker-compose -f docker-compose.claude-desktop.yml down -v
+#
+# =============================================================================

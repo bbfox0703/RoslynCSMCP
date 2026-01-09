@@ -1,110 +1,124 @@
-# Claude CLI (Claude Code) 集成評估
+Here is the English translation of your Markdown document, optimized for technical clarity and professional formatting.
 
 ---
 
-### RoslynCSMCP 伺服器特性
-- **傳輸協議**: stdio (標準輸入/輸出)
-- **啟動命令**: `dotnet run --project <path>`
-- **環境變數**: `DOTNET_ENVIRONMENT`, `LOG_LEVEL`
-- **MCP 協議版本**: 2024-11-05 (via ModelContextProtocol 0.5.0)
-
-### Claude Desktop vs Claude CLI
-
-| 特性 | Claude Desktop | Claude CLI | 相容性 |
-|------|----------------|------------|--------|
-| **配置文件** | `claude_desktop_config.json` | `.mcp.json` 或 `~/.claude.json` | ✅ 都支援 |
-| **Stdio 傳輸** | ✅ 支援 | ✅ 支援 | ✅ 完全相容 |
-| **環境變數** | ✅ 支援 | ✅ 支援 | ✅ 完全相容 |
-| **動態配置** | 手動編輯 JSON | `claude mcp` 命令 | ✅ 都可用 |
-| **MCP 工具** | 5 個工具 | 5 個工具 | ✅ 完全相同 |
+# Claude CLI (Claude Code) Integration Evaluation
 
 ---
 
-## 🎯 集成方案
+### RoslynCSMCP Server Features
 
-### 方案 A：專案範圍配置（推薦給團隊）⭐
+* **Transport Protocol**: stdio (Standard Input/Output)
+* **Startup Command**: `dotnet run --project <path>`
+* **Environment Variables**: `DOTNET_ENVIRONMENT`, `LOG_LEVEL`
+* **MCP Protocol Version**: 2024-11-05 (via ModelContextProtocol 0.5.0)
 
-適合多人協作的專案，配置會被 Git 追蹤並共享。
+### Claude Desktop vs. Claude CLI
 
-**優點**:
-- ✅ 團隊成員自動獲得配置
-- ✅ 版本控制追蹤變更
-- ✅ 統一的開發環境
-
-**步驟**:
-
-1. **建立 `.mcp.json` 配置文件**（已自動生成）
-
-2. **團隊成員首次使用**:
-   ```bash
-   cd /path/to/c-sharp-project
-   claude  # Claude CLI 會自動偵測 .mcp.json
-   # 系統會提示批准使用 roslyn MCP 伺服器
-   ```
-
-3. **手動註冊**（如果需要）:
-   ```bash
-   claude mcp add --transport stdio roslyn --scope project \
-     -- dotnet run --project /absolute/path/to/RoslynMcpServer
-   ```
+| Feature | Claude Desktop | Claude CLI | Compatibility |
+| --- | --- | --- | --- |
+| **Config File** | `claude_desktop_config.json` | `.mcp.json` or `~/.claude.json` | ✅ Supported by both |
+| **Stdio Transport** | ✅ Supported | ✅ Supported | ✅ Fully Compatible |
+| **Env Variables** | ✅ Supported | ✅ Supported | ✅ Fully Compatible |
+| **Dynamic Config** | Manual JSON editing | `claude mcp` command | ✅ Available for both |
+| **MCP Tools** | 5 Tools | 5 Tools | ✅ Identical |
 
 ---
 
-### 方案 B：用戶範圍配置（推薦給個人使用）
+## 🎯 Integration Strategies
 
-適合個人開發者，在所有專案中都可使用。
+### Option A: Project-Scope Configuration (Recommended for Teams) ⭐
 
-**優點**:
-- ✅ 一次配置，隨處可用
-- ✅ 不需要在每個專案中設置
-- ✅ 個人化配置
+Best for collaborative projects where configuration is tracked and shared via Git.
 
-**步驟**:
+**Advantages**:
+
+* ✅ Team members receive configuration automatically.
+* ✅ Version control tracks all changes.
+* ✅ Unified development environment across the team.
+
+**Steps**:
+
+1. **Create `.mcp.json` configuration file** (Automatically generated).
+2. **First-time use for team members**:
+```bash
+cd /path/to/c-sharp-project
+claude  # Claude CLI will auto-detect .mcp.json
+# System will prompt to approve the roslyn MCP server
+
+```
+
+
+3. **Manual Registration** (if required):
+```bash
+claude mcp add --transport stdio roslyn --scope project \
+  -- dotnet run --project /absolute/path/to/RoslynMcpServer
+
+```
+
+
+
+---
+
+### Option B: User-Scope Configuration (Recommended for Individuals)
+
+Best for individual developers; available across all projects.
+
+**Advantages**:
+
+* ✅ Configure once, use anywhere.
+* ✅ No need to set up for every individual project.
+* ✅ Personalized configuration.
+
+**Steps**:
 
 ```bash
-# 使用絕對路徑註冊到用戶範圍
+# Register to user scope using an absolute path
 claude mcp add --transport stdio roslyn --scope user \
   --env DOTNET_ENVIRONMENT=Production \
   --env LOG_LEVEL=Information \
   -- dotnet run --project D:\Github\RoslynMCP\RoslynMcpServer
 
-# 驗證配置
+# Verify configuration
 claude mcp list
 
-# 查看詳細資訊
+# View detailed information
 claude mcp get roslyn
+
 ```
 
-**配置位置**: `~/.claude.json` (Windows: `%USERPROFILE%\.claude.json`)
+**Config Location**: `~/.claude.json` (Windows: `%USERPROFILE%\.claude.json`)
 
 ---
 
-### 方案 C：本地範圍配置（快速測試）
+### Option C: Local-Scope Configuration (Quick Testing)
 
-適合在特定目錄下測試，不會提交到版本控制。
+Best for testing in a specific directory without committing to version control.
 
-**優點**:
-- ✅ 快速測試
-- ✅ 不影響其他專案
-- ✅ 私密配置
+**Advantages**:
 
-**步驟**:
+* ✅ Rapid testing.
+* ✅ Does not affect other projects.
+* ✅ Private configuration.
+
+**Steps**:
 
 ```bash
 cd /path/to/test-project
 
-# 本地範圍是預設值
+# Local scope is the default
 claude mcp add --transport stdio roslyn \
   -- dotnet run --project D:\Github\RoslynMCP\RoslynMcpServer
+
 ```
 
-**配置位置**: `~/.claude.json` (標記為 local scope)
+**Config Location**: `~/.claude.json` (Marked as local scope)
 
 ---
 
-## 📝 配置文件格式
+## 📝 Configuration File Format
 
-### .mcp.json (專案範圍)
+### .mcp.json (Project-Scope)
 
 ```json
 {
@@ -119,24 +133,26 @@ claude mcp add --transport stdio roslyn \
     }
   }
 }
+
 ```
 
-**使用環境變數**:
-- `${ROSLYN_MCP_PATH}` - 可自定義路徑
-- `${ROSLYN_MCP_PATH:-default}` - 提供預設值
+**Using Environment Variables**:
+
+* `${ROSLYN_MCP_PATH}` - Custom path variable.
+* `${ROSLYN_MCP_PATH:-default}` - Provides a default fallback path.
 
 ---
 
-## 🚀 使用範例
+## 🚀 Usage Examples
 
-### 在 Claude CLI 中使用 RoslynMCP
+### Using RoslynMCP in Claude CLI
 
 ```bash
-# 1. 開啟 Claude CLI
+# 1. Launch Claude CLI
 cd /path/to/your-csharp-project
 claude
 
-# 2. 在對話中使用 MCP 工具
+# 2. Use MCP tools in conversation
 > Search for all classes implementing IRepository in MySolution.sln
 
 > Find all references to UserService in MySolution.sln
@@ -146,38 +162,42 @@ claude
 > Show me the dependency graph for this solution
 
 > Get symbol information for MyNamespace.MyClass
+
 ```
 
-### 查看 MCP 狀態
+### Checking MCP Status
 
 ```bash
-# 在 Claude CLI 對話中
+# Within Claude CLI chat
 > /mcp
 
-# 或使用命令列
+# Or via Command Line
 claude mcp list
 claude mcp get roslyn
+
 ```
 
 ---
 
-## 🔧 進階配置
+## 🔧 Advanced Configuration
 
-### 1. 設置 MCP 超時時間
+### 1. Set MCP Timeout
 
 ```bash
-# 預設 5 秒，大型解決方案可能需要更長時間
+# Default is 5s; large solutions may require more time
 MCP_TIMEOUT=30000 claude
+
 ```
 
-### 2. 增加輸出限制
+### 2. Increase Output Limits
 
 ```bash
-# 預設 15000 tokens，大型分析結果可能需要更多
+# Default is 15,000 tokens; large analysis results may need more
 MAX_MCP_OUTPUT_TOKENS=50000 claude
+
 ```
 
-### 3. 多個 MCP 伺服器
+### 3. Multiple MCP Servers
 
 ```json
 {
@@ -196,17 +216,16 @@ MAX_MCP_OUTPUT_TOKENS=50000 claude
     }
   }
 }
+
 ```
 
 ---
 
-### 🔧 可選的改進
+## 🔧 Optional Improvements (Non-Essential)
 
-以下是可選的改進項目，非必需：
+#### 1. Add CLI Setup Scripts
 
-#### 1. 添加 CLI 設置腳本
-
-建立 `setup-claude-cli.sh` (Linux/macOS) 和 `setup-claude-cli.ps1` (Windows):
+Create `setup-claude-cli.sh` (Linux/macOS) and `setup-claude-cli.ps1` (Windows):
 
 ```bash
 #!/bin/bash
@@ -217,7 +236,6 @@ ROSLYN_PATH="$SCRIPT_DIR/RoslynMcpServer"
 
 echo "Setting up RoslynMCP for Claude CLI..."
 
-# 詢問範圍
 echo "Select scope:"
 echo "1) User (available in all projects)"
 echo "2) Project (team-shared, requires .mcp.json)"
@@ -244,21 +262,23 @@ esac
 
 echo "✅ RoslynMCP configured successfully!"
 echo "   Run 'claude mcp list' to verify"
+
 ```
 
-#### 2. 添加 .gitignore 更新
+#### 2. Update .gitignore
 
-確保不會意外提交本地配置：
+Ensure local configurations are not accidentally committed:
 
 ```gitignore
-# Claude CLI 本地配置
+# Claude CLI Local Config
 ~/.claude.json
 
-# 但保留專案配置
-# .mcp.json 應該被提交
+# Keep project config
+# .mcp.json SHOULD be committed
+
 ```
 
-#### 3. 建立快速測試腳本
+#### 3. Create Quick Test Script
 
 `test-cli-integration.sh`:
 
@@ -268,13 +288,11 @@ echo "   Run 'claude mcp list' to verify"
 
 echo "Testing RoslynMCP with Claude CLI..."
 
-# 檢查 Claude CLI 是否安裝
 if ! command -v claude &> /dev/null; then
     echo "❌ Claude CLI not found. Please install it first."
     exit 1
 fi
 
-# 檢查 MCP 伺服器配置
 if ! claude mcp get roslyn &> /dev/null; then
     echo "⚠️  RoslynMCP not configured. Run setup-claude-cli.sh first."
     exit 1
@@ -285,29 +303,29 @@ echo ""
 echo "Configured servers:"
 claude mcp list
 
-echo ""
-echo "RoslynMCP details:"
-claude mcp get roslyn
 ```
 
 ---
 
-## 🎯 推薦配置策略
+## 🎯 Recommended Strategy
 
-### 個人開發者
-1. 使用**用戶範圍**配置
-2. 一次設置，隨處使用
-3. 不需要在每個專案中重複配置
+### For Individual Developers
+
+1. Use **User-Scope** configuration.
+2. Set up once, use everywhere.
+3. Avoid redundant setup in every project.
 
 ```bash
 claude mcp add --transport stdio roslyn --scope user \
   -- dotnet run --project /path/to/RoslynMcpServer
+
 ```
 
-### 團隊協作
-1. 提交 `.mcp.json` 到版本控制
-2. 使用相對路徑或環境變數
-3. 在 README 中說明首次使用步驟
+### For Team Collaboration
+
+1. Commit `.mcp.json` to version control.
+2. Use relative paths or environment variables.
+3. Document the first-time setup steps in the README.
 
 ```json
 {
@@ -315,178 +333,46 @@ claude mcp add --transport stdio roslyn --scope user \
     "roslyn": {
       "command": "dotnet",
       "args": ["run", "--project", "${ROSLYN_MCP_PATH}"],
-      "env": {
-        "DOTNET_ENVIRONMENT": "Production"
-      }
+      "env": { "DOTNET_ENVIRONMENT": "Production" }
     }
   }
 }
-```
 
-團隊成員設置環境變數：
-```bash
-# Linux/macOS
-export ROSLYN_MCP_PATH=/path/to/RoslynMcpServer
-
-# Windows
-$env:ROSLYN_MCP_PATH = "D:\path\to\RoslynMcpServer"
 ```
 
 ---
 
-## 🧪 測試計劃
+## 📈 Benefit Analysis
 
-### 手動測試檢查清單
-
-- [ ] **配置測試**
-  - [ ] 用戶範圍配置成功
-  - [ ] 專案範圍配置成功
-  - [ ] `claude mcp list` 顯示 roslyn 伺服器
-  - [ ] `claude mcp get roslyn` 顯示詳細資訊
-
-- [ ] **功能測試**
-  - [ ] SearchSymbols - 搜尋類別/方法
-  - [ ] FindReferences - 查找引用
-  - [ ] GetSymbolInfo - 獲取符號資訊
-  - [ ] AnalyzeDependencies - 依賴分析
-  - [ ] AnalyzeCodeComplexity - 複雜度分析
-
-- [ ] **環境測試**
-  - [ ] Windows 環境
-  - [ ] Linux/macOS 環境
-  - [ ] WSL 環境
-
-- [ ] **錯誤處理**
-  - [ ] 無效的 .sln 路徑
-  - [ ] 超時情況
-  - [ ] 大型解決方案 (>50 專案)
-
-### 自動化測試（未來）
-
-建議建立 E2E 測試：
-
-```bash
-# test-e2e.sh
-#!/bin/bash
-
-# 1. 配置 MCP 伺服器
-claude mcp add --transport stdio roslyn-test --scope local \
-  -- dotnet run --project ./RoslynMcpServer
-
-# 2. 測試各項功能
-echo "Testing SearchSymbols..." # 使用測試 solution
-
-# 3. 清理
-claude mcp remove roslyn-test
-```
+| Feature | Without RoslynMCP | With RoslynMCP | Improvement |
+| --- | --- | --- | --- |
+| **Symbol Search** | Grep (Text-based) | Semantic Search | 🚀 Higher Precision |
+| **Find References** | Manual search | Automated Tracking | ⏱️ Time-saving |
+| **Arch Understanding** | Reading multiple files | One-click Analysis | 📊 Comprehensive |
+| **Complexity Analysis** | None | Automated Calculation | ✨ New Feature |
+| **Dependencies** | Manual Mapping | Visual Graphing | 🎯 Clearer Insights |
 
 ---
 
-## 📈 效益分析
+## 🚦 Implementation Roadmap
 
-### 對 Claude CLI 用戶的優勢
+### Phase 1: Basic Integration (Immediate)
 
-| 功能 | 無 RoslynMCP | 有 RoslynMCP | 改進 |
-|------|-------------|--------------|------|
-| **符號搜尋** | 使用 Grep（文字） | 語義搜尋 | 🚀 更精確 |
-| **找引用** | 手動搜尋 | 自動追蹤 | ⏱️ 省時 |
-| **理解架構** | 讀多個檔案 | 一鍵分析 | 📊 全面 |
-| **複雜度分析** | 無 | 自動計算 | ✨ 新功能 |
-| **依賴關係** | 手動整理 | 圖形化呈現 | 🎯 清晰 |
+1. ✅ Create `.mcp.json` config file.
+2. ✅ Update README with CLI usage instructions.
+3. ✅ Create this evaluation report.
+4. ⏰ Manually test 5 MCP tools.
 
-### 使用場景
+### Phase 2: Documentation (Suggested)
 
-1. **重構大型專案** - 快速找出所有引用
-2. **理解陌生代碼** - 分析架構和依賴
-3. **程式碼審查** - 識別高複雜度方法
-4. **文件生成** - 快速獲取符號資訊
-5. **技術債務評估** - 依賴分析和複雜度報告
+1. Update `CLAUDE.md` to include a CLI section.
+2. Create `setup-claude-cli` scripts.
+3. Record a demo video or GIF.
 
 ---
 
-## 🚦 實施建議
+## 💡 Best Practices
 
-### 階段 1: 基礎集成（立即可行）
-
-1. ✅ 建立 `.mcp.json` 配置文件
-2. ✅ 更新 README 說明 CLI 使用方式
-3. ✅ 建立本文件（評估報告）
-4. ⏰ 手動測試 5 個 MCP 工具
-
-**預計時間**: 已完成配置文件，剩餘文檔更新 ~30 分鐘
-
-### 階段 2: 完善文檔（建議）
-
-1. 更新 CLAUDE.md 添加 CLI 章節
-2. 建立 setup-claude-cli 腳本
-3. 錄製示範影片或 GIF
-4. 撰寫部落格文章
-
-**預計時間**: 1-2 小時
-
-### 階段 3: 最佳化（可選）
-
-1. 建立 E2E 自動化測試
-2. 效能優化（大型解決方案）
-3. 錯誤訊息改進
-4. 添加進度指示器
-
-**預計時間**: 4-6 小時
-
----
-
-## 💡 最佳實踐
-
-### 1. 路徑配置
-
-❌ **不推薦** - 硬編碼絕對路徑:
-```json
-{
-  "command": "dotnet",
-  "args": ["run", "--project", "D:\\Users\\Andy\\Projects\\RoslynMCP"]
-}
-```
-
-✅ **推薦** - 使用環境變數和相對路徑:
-```json
-{
-  "command": "dotnet",
-  "args": ["run", "--project", "${ROSLYN_MCP_PATH:-./RoslynMcpServer}"]
-}
-```
-
-### 2. 效能調整
-
-對於大型解決方案 (>30 專案)：
-
-```bash
-# 增加超時時間
-MCP_TIMEOUT=60000 claude
-
-# 增加輸出限制
-MAX_MCP_OUTPUT_TOKENS=100000 claude
-```
-
-### 3. 安全性考量
-
-- ✅ 使用專案範圍時，團隊成員需手動批准
-- ✅ 敏感資訊使用環境變數 `${API_KEY}`
-- ✅ 不要在 .mcp.json 中硬編碼密碼或 token
-- ✅ 定期更新 MCP 套件到最新版本
-
----
-
-## 📚 相關資源
-
-### Claude CLI 文檔
-- [MCP 伺服器配置](https://docs.anthropic.com/claude/docs/mcp)
-- [claude mcp 命令參考](https://docs.anthropic.com/claude/docs/cli-mcp-commands)
-
-### RoslynMCP 文檔
-- `CLAUDE.md` - 專案架構指南
-- `UPGRADE_COMPLETE.md` - .NET 10 升級文件
-- `README.md` - 基本使用說明
-
-### MCP 協議
-- [ModelContextProtocol 官方文檔](https://modelcontextprotocol.io/)
-- [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)
+* ✅ **Pathing**: Use environment variables `${ROSLYN_MCP_PATH}` instead of hardcoded absolute paths.
+* ✅ **Performance**: Increase `MCP_TIMEOUT` for solutions with >30 projects.
+* ✅ **Security**: Never hardcode passwords/tokens in `.mcp.json`; use environment variables.
