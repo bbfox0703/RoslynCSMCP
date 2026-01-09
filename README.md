@@ -323,7 +323,7 @@ Identify complex methods in src/Services/*.cs with threshold 10
 
 ## Available MCP Tools
 
-The server exposes 12 MCP tools organized in two phases:
+The server exposes 13 MCP tools organized in three phases:
 
 ### Core Analysis Tools
 
@@ -402,6 +402,20 @@ The server exposes 12 MCP tools organized in two phases:
     - Reduces MCP protocol overhead
 
 📚 **[Phase 2 Usage Examples](docs/PHASE2_USAGE_EXAMPLES.md)** - Advanced analysis features with examples
+
+### Phase 3: Advanced Filtering ⚡ **NEW**
+
+12. **FindReferencesFiltered** - Find references with intelligent filtering
+    - **excludeTests**: Exclude test projects (Test, Tests, Testing, Spec) ⭐ Most useful
+    - **crossProjectOnly**: Only cross-project references (API usage analysis)
+    - **publicOnly**: Only public API references
+    - **writesOnly**: Only write operations (assignments, increments)
+    - **projectFilter**: Filter by project name pattern (supports wildcards)
+    - Combines with detail levels (summary/locations/full)
+    - **Token savings: 60-90%** by filtering out irrelevant references
+    - Use case: "Find who uses DeleteUser in production code (exclude tests)" → 88% token savings
+
+📚 **[Phase 3 Usage Examples](docs/PHASE3_USAGE_EXAMPLES.md)** - Advanced filtering with real-world examples
 
 ## Development and Testing
 
@@ -639,6 +653,7 @@ RoslynCSMCP/
 - **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan
 - **[PHASE1_USAGE_EXAMPLES.md](docs/PHASE1_USAGE_EXAMPLES.md)** - ⚡ Phase 1 token optimization features usage guide with examples
 - **[PHASE2_USAGE_EXAMPLES.md](docs/PHASE2_USAGE_EXAMPLES.md)** - ⚡ Phase 2 advanced analysis features usage guide with examples
+- **[PHASE3_USAGE_EXAMPLES.md](docs/PHASE3_USAGE_EXAMPLES.md)** - ⚡ Phase 3 advanced filtering features usage guide with examples
 
 ## License
 

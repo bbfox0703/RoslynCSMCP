@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -217,37 +218,172 @@ namespace RoslynMcpServer.Services
         {
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
             var targetSymbols = await FindSymbolsByNameAsync(solution, symbolName);
-            
+
             var allReferences = new List<ReferenceResult>();
-            
+
             foreach (var symbol in targetSymbols)
             {
                 var references = await SymbolFinder.FindReferencesAsync(symbol, solution);
-                
+
                 foreach (var referencedSymbol in references)
                 {
                     foreach (var location in referencedSymbol.Locations)
                     {
                         // Check if this location is a definition by comparing with the symbol's definition locations
-                        var isDefinition = referencedSymbol.Definition.Locations.Any(defLoc => 
-                            defLoc.SourceTree == location.Location.SourceTree && 
+                        var isDefinition = referencedSymbol.Definition.Locations.Any(defLoc =>
+                            defLoc.SourceTree == location.Location.SourceTree &&
                             defLoc.SourceSpan == location.Location.SourceSpan);
-                        
+
                         if (!includeDefinition && isDefinition)
                             continue;
-                        
+
                         var reference = await CreateReferenceResultAsync(location, symbol, isDefinition);
                         if (reference != null)
                             allReferences.Add(reference);
                     }
                 }
             }
-            
+
             return allReferences
                 .GroupBy(r => $"{r.DocumentPath}:{r.LineNumber}")
                 .Select(g => g.First()) // Remove duplicates
                 .OrderBy(r => r.DocumentPath)
                 .ThenBy(r => r.LineNumber);
+        }
+
+        public async Task<IEnumerable<ReferenceResult>> FindReferencesFilteredAsync(
+            string symbolName,
+            string solutionPath,
+            bool includeDefinition,
+            bool publicOnly = false,
+            bool excludeTests = false,
+            bool crossProjectOnly = false,
+            bool writesOnly = false,
+            string? projectFilter = null)
+        {
+            // Get all references first
+            var allReferences = await FindReferencesAsync(symbolName, solutionPath, includeDefinition);
+            var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
+            var targetSymbols = await FindSymbolsByNameAsync(solution, symbolName);
+            var targetSymbol = targetSymbols.FirstOrDefault();
+
+            // Apply filters
+            var filteredReferences = allReferences.AsEnumerable();
+
+            // Filter: Exclude test projects
+            if (excludeTests)
+            {
+                filteredReferences = filteredReferences.Where(r =>
+                    !IsTestProject(r.ProjectName));
+            }
+
+            // Filter: Cross-project only
+            if (crossProjectOnly && targetSymbol != null)
+            {
+                var definitionProjectName = targetSymbol.ContainingAssembly?.Name ?? "";
+                filteredReferences = filteredReferences.Where(r =>
+                    !r.ProjectName.Equals(definitionProjectName, StringComparison.OrdinalIgnoreCase) &&
+                    !r.IsDefinition);
+            }
+
+            // Filter: Public API only
+            if (publicOnly && targetSymbol != null)
+            {
+                // Only show references where the symbol being accessed is public
+                var isPublicSymbol = targetSymbol.DeclaredAccessibility == Accessibility.Public;
+                if (!isPublicSymbol)
+                {
+                    // If the symbol itself is not public, return empty
+                    return Enumerable.Empty<ReferenceResult>();
+                }
+            }
+
+            // Filter: Project name pattern
+            if (!string.IsNullOrWhiteSpace(projectFilter))
+            {
+                var regex = CreateWildcardRegex(projectFilter, ignoreCase: true);
+                filteredReferences = filteredReferences.Where(r =>
+                    regex.IsMatch(r.ProjectName));
+            }
+
+            // Filter: Writes only (requires syntax analysis)
+            if (writesOnly)
+            {
+                var writeReferences = new List<ReferenceResult>();
+                foreach (var reference in filteredReferences)
+                {
+                    if (await IsWriteOperationAsync(reference, solution))
+                    {
+                        writeReferences.Add(reference);
+                    }
+                }
+                filteredReferences = writeReferences;
+            }
+
+            return filteredReferences;
+        }
+
+        private bool IsTestProject(string projectName)
+        {
+            // Common test project naming patterns
+            var testPatterns = new[] { "Test", "Tests", "Testing", ".Test.", ".Tests.", "Spec", "Specs" };
+            return testPatterns.Any(pattern =>
+                projectName.Contains(pattern, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private async Task<bool> IsWriteOperationAsync(ReferenceResult reference, Solution solution)
+        {
+            try
+            {
+                // Find the document
+                var document = solution.Projects
+                    .SelectMany(p => p.Documents)
+                    .FirstOrDefault(d => d.FilePath == reference.DocumentPath);
+
+                if (document == null)
+                    return false;
+
+                var syntaxTree = await document.GetSyntaxTreeAsync();
+                if (syntaxTree == null)
+                    return false;
+
+                var semanticModel = await document.GetSemanticModelAsync();
+                if (semanticModel == null)
+                    return false;
+
+                // Get the syntax node at the reference location
+                var position = syntaxTree.GetText().Lines[reference.LineNumber - 1].Start + reference.ColumnNumber - 1;
+                var node = syntaxTree.GetRoot().FindNode(new Microsoft.CodeAnalysis.Text.TextSpan(position, 1));
+
+                // Check if this is an assignment operation
+                // Simple heuristic: check if the node or its parent is an assignment expression
+                var currentNode = node;
+                while (currentNode != null)
+                {
+                    var kind = currentNode.Kind().ToString();
+                    if (kind.Contains("Assignment") ||
+                        kind.Contains("PostIncrement") ||
+                        kind.Contains("PostDecrement") ||
+                        kind.Contains("PreIncrement") ||
+                        kind.Contains("PreDecrement"))
+                    {
+                        return true;
+                    }
+
+                    currentNode = currentNode.Parent;
+
+                    // Don't traverse too far up
+                    if (currentNode?.Kind().ToString().Contains("Statement") == true)
+                        break;
+                }
+
+                return false;
+            }
+            catch
+            {
+                // If we can't determine, assume it's not a write
+                return false;
+            }
         }
 
         private async Task<IEnumerable<ISymbol>> FindSymbolsByNameAsync(Solution solution, string symbolName)

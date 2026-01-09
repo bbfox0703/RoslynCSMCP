@@ -435,6 +435,86 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find references with advanced filtering options to reduce noise and focus on specific usage patterns")]
+        public static async Task<string> FindReferencesFiltered(
+            [Description("Exact symbol name to find references for")] string symbolName,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
+            string detailLevel = "locations",
+            [Description("Include symbol definition in results")] bool includeDefinition = true,
+            [Description("Only show references in public API contexts (excludes private/internal usage)")] bool publicOnly = false,
+            [Description("Exclude test projects (projects with 'Test', 'Tests', 'Testing', 'Spec' in name)")] bool excludeTests = false,
+            [Description("Only show cross-project references (exclude same-project usage)")] bool crossProjectOnly = false,
+            [Description("Only show write operations (assignments, increments, etc.)")] bool writesOnly = false,
+            [Description("Filter by project name pattern (supports wildcards: * and ?)")] string? projectFilter = null,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var searchService = serviceProvider?.GetService<SymbolSearchService>();
+                if (searchService == null)
+                {
+                    return "Error: Symbol search service not available.";
+                }
+
+                var diagnosticLogger = serviceProvider?.GetService<DiagnosticLogger>();
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+
+                Func<Task<IEnumerable<ReferenceResult>>> operation = async () =>
+                    await searchService.FindReferencesFilteredAsync(
+                        symbolName,
+                        solutionPath,
+                        includeDefinition,
+                        publicOnly,
+                        excludeTests,
+                        crossProjectOnly,
+                        writesOnly,
+                        projectFilter);
+
+                var results = diagnosticLogger != null
+                    ? await diagnosticLogger.LoggedExecutionAsync(
+                        "FindReferencesFiltered",
+                        operation,
+                        new { symbolName, detailLevel, publicOnly, excludeTests, crossProjectOnly, writesOnly, projectFilter })
+                    : await operation();
+
+                // Build filter summary
+                var filters = new List<string>();
+                if (excludeTests) filters.Add("excluding tests");
+                if (crossProjectOnly) filters.Add("cross-project only");
+                if (publicOnly) filters.Add("public API only");
+                if (writesOnly) filters.Add("writes only");
+                if (!string.IsNullOrWhiteSpace(projectFilter)) filters.Add($"project: {projectFilter}");
+
+                var filterSummary = filters.Any()
+                    ? $"\nFilters applied: {string.Join(", ", filters)}\n"
+                    : "";
+
+                // Format based on detail level
+                var formattedResults = detailLevel.ToLower() switch
+                {
+                    "summary" => FormatReferencesSummary(results),
+                    "locations" => FormatReferencesLocations(results),
+                    "full" => FormatReferencesFull(results),
+                    _ => FormatReferencesLocations(results)
+                };
+
+                return filterSummary + formattedResults;
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding filtered references for symbol: {SymbolName}", symbolName);
+                return "Error: An unexpected error occurred while finding filtered references.";
+            }
+        }
+
         private static string FormatSearchResults(IEnumerable<SymbolSearchResult> results)
         {
             var grouped = results.GroupBy(r => r.Category);
