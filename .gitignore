@@ -432,3 +432,8 @@ FodyWeavers.xsd
 nul
 
 # repos specified
+
+# Docker local directories
+workspace/
+logs/
+.env
