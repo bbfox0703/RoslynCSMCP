@@ -507,18 +507,9 @@ RoslynMCP/
 ## Documentation
 
 - **[CLAUDE.md](CLAUDE.md)** - Development guide and architecture documentation for Claude Code
-- **[CLAUDE_CLI_INTEGRATION.md](CLAUDE_CLI_INTEGRATION.md)** - Comprehensive Claude CLI integration guide
-- **[UPGRADE_COMPLETE.md](UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
-
-### Development Setup
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Run tests: `dotnet test`
-5. Commit your changes: `git commit -am 'Add new feature'`
-6. Push to the branch: `git push origin feature/my-feature`
-7. Submit a Pull Request
+- **[CLAUDE_CLI_INTEGRATION.md](docs/CLAUDE_CLI_INTEGRATION.md)** - Comprehensive Claude CLI integration guide
+- **[UPGRADE_COMPLETE.md](docs/UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
+- **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan
 
 ## License
 
