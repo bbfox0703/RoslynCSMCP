@@ -502,5 +502,193 @@ namespace RoslynMcpServer.Services
             
             return info;
         }
+
+        /// <summary>
+        /// Find all implementations of an interface or abstract class
+        /// </summary>
+        public async Task<List<ImplementationResult>> FindImplementationsAsync(
+            string typeName,
+            string solutionPath,
+            bool includeAbstractImplementations = false)
+        {
+            _logger.LogInformation("Finding implementations for: {TypeName}", typeName);
+
+            var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
+            var results = new List<ImplementationResult>();
+
+            // Find the target interface or abstract class
+            var targetSymbols = await FindSymbolsByNameAsync(solution, typeName);
+            var targetType = targetSymbols.OfType<INamedTypeSymbol>().FirstOrDefault();
+
+            if (targetType == null)
+            {
+                _logger.LogWarning("Type not found: {TypeName}", typeName);
+                return results;
+            }
+
+            // Check if target is interface or abstract class
+            bool isInterface = targetType.TypeKind == TypeKind.Interface;
+            bool isAbstractClass = targetType.IsAbstract && targetType.TypeKind == TypeKind.Class;
+
+            if (!isInterface && !isAbstractClass)
+            {
+                _logger.LogWarning("Type is not an interface or abstract class: {TypeName}", typeName);
+                return results;
+            }
+
+            _logger.LogInformation("Searching for implementations of {TypeKind}: {TypeName}",
+                targetType.TypeKind, typeName);
+
+            // Search all projects for implementations
+            foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
+            {
+                var compilation = await project.GetCompilationAsync();
+                if (compilation == null) continue;
+
+                // Get all named type symbols in the project
+                var allTypes = compilation.GlobalNamespace.GetNamespaceMembers()
+                    .SelectMany(ns => GetAllTypesInNamespace(ns))
+                    .Concat(GetAllTypesInNamespace(compilation.GlobalNamespace));
+
+                foreach (var type in allTypes)
+                {
+                    // Skip the target type itself
+                    if (SymbolEqualityComparer.Default.Equals(type, targetType))
+                        continue;
+
+                    // Check if type implements the interface or inherits from abstract class
+                    bool isImplementation = false;
+
+                    if (isInterface)
+                    {
+                        // Check if type implements the interface (directly or indirectly)
+                        isImplementation = type.AllInterfaces.Any(i =>
+                            SymbolEqualityComparer.Default.Equals(i, targetType));
+                    }
+                    else if (isAbstractClass)
+                    {
+                        // Check if type inherits from abstract class
+                        var baseType = type.BaseType;
+                        while (baseType != null)
+                        {
+                            if (SymbolEqualityComparer.Default.Equals(baseType, targetType))
+                            {
+                                isImplementation = true;
+                                break;
+                            }
+                            baseType = baseType.BaseType;
+                        }
+                    }
+
+                    if (isImplementation)
+                    {
+                        // Skip abstract implementations if not requested
+                        if (type.IsAbstract && !includeAbstractImplementations)
+                            continue;
+
+                        var implementation = await CreateImplementationResultAsync(type, targetType, project);
+                        if (implementation != null)
+                        {
+                            results.Add(implementation);
+                        }
+                    }
+                }
+            }
+
+            _logger.LogInformation("Found {Count} implementations", results.Count);
+            return results.OrderBy(r => r.ImplementingTypeName).ToList();
+        }
+
+        /// <summary>
+        /// Get all types in a namespace recursively
+        /// </summary>
+        private IEnumerable<INamedTypeSymbol> GetAllTypesInNamespace(INamespaceSymbol namespaceSymbol)
+        {
+            foreach (var type in namespaceSymbol.GetTypeMembers())
+            {
+                yield return type;
+
+                // Get nested types
+                foreach (var nestedType in GetNestedTypes(type))
+                {
+                    yield return nestedType;
+                }
+            }
+
+            foreach (var childNamespace in namespaceSymbol.GetNamespaceMembers())
+            {
+                foreach (var type in GetAllTypesInNamespace(childNamespace))
+                {
+                    yield return type;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get nested types recursively
+        /// </summary>
+        private IEnumerable<INamedTypeSymbol> GetNestedTypes(INamedTypeSymbol type)
+        {
+            foreach (var nestedType in type.GetTypeMembers())
+            {
+                yield return nestedType;
+
+                foreach (var deepNestedType in GetNestedTypes(nestedType))
+                {
+                    yield return deepNestedType;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Create ImplementationResult from a type symbol
+        /// </summary>
+        private async Task<ImplementationResult?> CreateImplementationResultAsync(
+            INamedTypeSymbol type,
+            INamedTypeSymbol targetType,
+            Project project)
+        {
+            var location = type.Locations.FirstOrDefault();
+            if (location == null || !location.IsInSource)
+                return null;
+
+            var lineSpan = location.GetLineSpan();
+            var document = project.GetDocument(location.SourceTree);
+
+            // Get documentation
+            var documentation = type.GetDocumentationCommentXml() ?? "";
+            var summaryMatch = Regex.Match(documentation, @"<summary>\s*(.*?)\s*</summary>", RegexOptions.Singleline);
+            var summary = summaryMatch.Success
+                ? summaryMatch.Groups[1].Value.Replace("///", "").Trim()
+                : "";
+
+            // Get implemented interfaces
+            var implementedInterfaces = type.AllInterfaces
+                .Select(i => i.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat))
+                .ToList();
+
+            // Get base class
+            var baseClass = type.BaseType != null && type.BaseType.SpecialType != SpecialType.System_Object
+                ? type.BaseType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)
+                : "";
+
+            return new ImplementationResult
+            {
+                ImplementingTypeName = type.Name,
+                ImplementingTypeFullName = type.ToDisplayString(),
+                InterfaceOrBaseTypeName = targetType.Name,
+                FilePath = location.SourceTree?.FilePath ?? "",
+                FileName = location.SourceTree != null ? Path.GetFileName(location.SourceTree.FilePath) : "",
+                ProjectName = project.Name,
+                LineNumber = lineSpan.StartLinePosition.Line + 1,
+                Accessibility = type.DeclaredAccessibility.ToString(),
+                IsAbstract = type.IsAbstract,
+                IsSealed = type.IsSealed,
+                Namespace = type.ContainingNamespace?.ToDisplayString() ?? "",
+                Documentation = summary,
+                ImplementedInterfaces = implementedInterfaces,
+                BaseClass = baseClass
+            };
+        }
     }
 }

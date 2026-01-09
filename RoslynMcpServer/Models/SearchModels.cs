@@ -149,4 +149,47 @@ namespace RoslynMcpServer.Models
         public List<string> Attributes { get; set; } = new();
         public string Documentation { get; set; } = string.Empty;
     }
+
+    // Phase 4 Week 2: FindImplementations
+    public class ImplementationResult
+    {
+        public string ImplementingTypeName { get; set; } = string.Empty;
+        public string ImplementingTypeFullName { get; set; } = string.Empty;
+        public string InterfaceOrBaseTypeName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string Accessibility { get; set; } = string.Empty;
+        public bool IsAbstract { get; set; }
+        public bool IsSealed { get; set; }
+        public string Namespace { get; set; } = string.Empty;
+        public string Documentation { get; set; } = string.Empty;
+        public List<string> ImplementedInterfaces { get; set; } = new();
+        public string BaseClass { get; set; } = string.Empty;
+    }
+
+    // Phase 4 Week 2: FindTestsForType
+    public class TestClassResult
+    {
+        public string TestClassName { get; set; } = string.Empty;
+        public string TestClassFullName { get; set; } = string.Empty;
+        public string TestedTypeName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string TestFramework { get; set; } = string.Empty;  // xUnit, NUnit, MSTest, Unknown
+        public List<TestMethodResult> TestMethods { get; set; } = new();
+        public int TestCount => TestMethods.Count;
+        public string Documentation { get; set; } = string.Empty;
+    }
+
+    public class TestMethodResult
+    {
+        public string MethodName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public List<string> TestAttributes { get; set; } = new();  // Fact, Theory, Test, TestMethod, etc.
+        public string DisplayName { get; set; } = string.Empty;    // Custom test display name if specified
+    }
 }
