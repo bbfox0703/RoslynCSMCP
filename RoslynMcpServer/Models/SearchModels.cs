@@ -90,4 +90,63 @@ namespace RoslynMcpServer.Models
         public DateTime AnalysisEndTime { get; set; }
         public TimeSpan Duration => AnalysisEndTime - AnalysisStartTime;
     }
+
+    // Phase 4: Diagnostics
+    public class CompilationError
+    {
+        public string Id { get; set; } = string.Empty;           // Error code (e.g., "CS0103")
+        public string Severity { get; set; } = string.Empty;     // Error, Warning, Info
+        public string Message { get; set; } = string.Empty;      // Error message
+        public string FilePath { get; set; } = string.Empty;     // Full file path
+        public string FileName { get; set; } = string.Empty;     // File name only
+        public string ProjectName { get; set; } = string.Empty;  // Project name
+        public int LineNumber { get; set; }                      // Line number (1-based)
+        public int ColumnNumber { get; set; }                    // Column number (1-based)
+        public string LineText { get; set; } = string.Empty;     // Source code line
+    }
+
+    // Phase 4: File Analysis
+    public class FileOutlineResult
+    {
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public int TotalLines { get; set; }
+        public int CodeLines { get; set; }
+        public int CommentLines { get; set; }
+        public int BlankLines { get; set; }
+        public List<string> Namespaces { get; set; } = new();
+        public List<string> UsingStatements { get; set; } = new();
+        public List<TypeOutline> Types { get; set; } = new();
+    }
+
+    public class TypeOutline
+    {
+        public string Name { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string Kind { get; set; } = string.Empty;          // Class, Interface, Struct, Enum, Record
+        public string Accessibility { get; set; } = string.Empty; // Public, Internal, Private, Protected
+        public string Namespace { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public List<string> BaseTypes { get; set; } = new();      // Inheritance and interfaces
+        public List<string> Attributes { get; set; } = new();     // Applied attributes
+        public string Documentation { get; set; } = string.Empty; // XML doc summary
+        public List<MemberOutline> Members { get; set; } = new();
+    }
+
+    public class MemberOutline
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Kind { get; set; } = string.Empty;          // Method, Property, Field, Event, Constructor
+        public string Type { get; set; } = string.Empty;          // Return type or field type
+        public string Accessibility { get; set; } = string.Empty;
+        public string Signature { get; set; } = string.Empty;     // Full signature
+        public int LineNumber { get; set; }
+        public bool IsStatic { get; set; }
+        public bool IsAsync { get; set; }
+        public bool IsAbstract { get; set; }
+        public bool IsVirtual { get; set; }
+        public bool IsOverride { get; set; }
+        public List<string> Attributes { get; set; } = new();
+        public string Documentation { get; set; } = string.Empty;
+    }
 }

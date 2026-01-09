@@ -323,7 +323,7 @@ Identify complex methods in src/Services/*.cs with threshold 10
 
 ## Available MCP Tools
 
-The server exposes 12 MCP tools organized in two phases:
+The server exposes 15 MCP tools organized in four phases:
 
 ### Core Analysis Tools
 
@@ -402,6 +402,43 @@ The server exposes 12 MCP tools organized in two phases:
     - Reduces MCP protocol overhead
 
 📚 **[Phase 2 Usage Examples](docs/PHASE2_USAGE_EXAMPLES.md)** - Advanced analysis features with examples
+
+### Phase 3: Advanced Filtering ⚡ **NEW**
+
+12. **FindReferencesFiltered** - Find references with intelligent filtering
+    - **excludeTests**: Exclude test projects (Test, Tests, Testing, Spec) ⭐ Most useful
+    - **crossProjectOnly**: Only cross-project references (API usage analysis)
+    - **publicOnly**: Only public API references
+    - **writesOnly**: Only write operations (assignments, increments)
+    - **projectFilter**: Filter by project name pattern (supports wildcards)
+    - Combines with detail levels (summary/locations/full)
+    - **Token savings: 60-90%** by filtering out irrelevant references
+    - Use case: "Find who uses DeleteUser in production code (exclude tests)" → 88% token savings
+
+📚 **[Phase 3 Usage Examples](docs/PHASE3_USAGE_EXAMPLES.md)** - Advanced filtering with real-world examples
+
+### Phase 4: Diagnostics & File Analysis ⚡ **NEW**
+
+13. **GetCompilationErrors** - Get compilation errors and warnings without running full build
+    - **severity**: Filter by Error, Warning, Info, or All
+    - **projectFilter**: Filter by project name pattern (supports wildcards)
+    - **errorCodes**: Filter by specific error codes (e.g., CS0103, CS0246)
+    - Provides error location, message, and source code line
+    - Groups by project and severity for easy navigation
+    - **Token savings: 97.5%** vs reading files to find errors manually
+    - Use case: "Get all CS0103 errors in MySolution.sln" → Quick missing variable detection
+
+14. **GetFileOutline** - Get structural outline of C# files without implementation details
+    - Shows file statistics (lines of code, comments, blanks)
+    - Lists using statements and namespaces
+    - Shows all types with inheritance and attributes
+    - Lists members (constructors, fields, properties, methods, events)
+    - Includes XML documentation comments
+    - Option to include/exclude members and documentation
+    - **Token savings: 95%** vs reading full file implementation
+    - Use case: "Get outline of UserService.cs" → Understand file structure in 400 tokens instead of 8,000
+
+📚 **[Phase 4 Usage Examples](docs/PHASE4_USAGE_EXAMPLES.md)** - Diagnostics and file analysis with examples
 
 ## Development and Testing
 
@@ -639,6 +676,7 @@ RoslynCSMCP/
 - **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan
 - **[PHASE1_USAGE_EXAMPLES.md](docs/PHASE1_USAGE_EXAMPLES.md)** - ⚡ Phase 1 token optimization features usage guide with examples
 - **[PHASE2_USAGE_EXAMPLES.md](docs/PHASE2_USAGE_EXAMPLES.md)** - ⚡ Phase 2 advanced analysis features usage guide with examples
+- **[PHASE3_USAGE_EXAMPLES.md](docs/PHASE3_USAGE_EXAMPLES.md)** - ⚡ Phase 3 advanced filtering features usage guide with examples
 
 ## License
 

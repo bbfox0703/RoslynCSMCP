@@ -435,6 +435,160 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find references with advanced filtering options to reduce noise and focus on specific usage patterns")]
+        public static async Task<string> FindReferencesFiltered(
+            [Description("Exact symbol name to find references for")] string symbolName,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
+            string detailLevel = "locations",
+            [Description("Include symbol definition in results")] bool includeDefinition = true,
+            [Description("Only show references in public API contexts (excludes private/internal usage)")] bool publicOnly = false,
+            [Description("Exclude test projects (projects with 'Test', 'Tests', 'Testing', 'Spec' in name)")] bool excludeTests = false,
+            [Description("Only show cross-project references (exclude same-project usage)")] bool crossProjectOnly = false,
+            [Description("Only show write operations (assignments, increments, etc.)")] bool writesOnly = false,
+            [Description("Filter by project name pattern (supports wildcards: * and ?)")] string? projectFilter = null,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var searchService = serviceProvider?.GetService<SymbolSearchService>();
+                if (searchService == null)
+                {
+                    return "Error: Symbol search service not available.";
+                }
+
+                var diagnosticLogger = serviceProvider?.GetService<DiagnosticLogger>();
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+
+                Func<Task<IEnumerable<ReferenceResult>>> operation = async () =>
+                    await searchService.FindReferencesFilteredAsync(
+                        symbolName,
+                        solutionPath,
+                        includeDefinition,
+                        publicOnly,
+                        excludeTests,
+                        crossProjectOnly,
+                        writesOnly,
+                        projectFilter);
+
+                var results = diagnosticLogger != null
+                    ? await diagnosticLogger.LoggedExecutionAsync(
+                        "FindReferencesFiltered",
+                        operation,
+                        new { symbolName, detailLevel, publicOnly, excludeTests, crossProjectOnly, writesOnly, projectFilter })
+                    : await operation();
+
+                // Build filter summary
+                var filters = new List<string>();
+                if (excludeTests) filters.Add("excluding tests");
+                if (crossProjectOnly) filters.Add("cross-project only");
+                if (publicOnly) filters.Add("public API only");
+                if (writesOnly) filters.Add("writes only");
+                if (!string.IsNullOrWhiteSpace(projectFilter)) filters.Add($"project: {projectFilter}");
+
+                var filterSummary = filters.Any()
+                    ? $"\nFilters applied: {string.Join(", ", filters)}\n"
+                    : "";
+
+                // Format based on detail level
+                var formattedResults = detailLevel.ToLower() switch
+                {
+                    "summary" => FormatReferencesSummary(results),
+                    "locations" => FormatReferencesLocations(results),
+                    "full" => FormatReferencesFull(results),
+                    _ => FormatReferencesLocations(results)
+                };
+
+                return filterSummary + formattedResults;
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding filtered references for symbol: {SymbolName}", symbolName);
+                return "Error: An unexpected error occurred while finding filtered references.";
+            }
+        }
+
+        [McpServerTool, Description("Get compilation errors and warnings from solution to quickly identify build issues without running full build")]
+        public static async Task<string> GetCompilationErrors(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Severity filter: Error, Warning, Info, or All (default: All)")] string severity = "All",
+            [Description("Filter by project name pattern (supports wildcards: * and ?)")] string? projectFilter = null,
+            [Description("Filter by specific error codes (e.g., CS0103, CS0246)")] string[]? errorCodes = null,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var diagnosticsService = serviceProvider?.GetService<DiagnosticsService>();
+                if (diagnosticsService == null)
+                {
+                    return "Error: Diagnostics service not available.";
+                }
+
+                var results = await diagnosticsService.GetCompilationErrorsAsync(
+                    solutionPath,
+                    severity,
+                    projectFilter,
+                    errorCodes);
+
+                return FormatCompilationErrors(results, severity);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting compilation errors");
+                return $"Error: An unexpected error occurred while getting compilation errors: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Get structural outline of a C# file showing types and members without full implementation details")]
+        public static async Task<string> GetFileOutline(
+            [Description("Path to C# source file (.cs)")] string filePath,
+            [Description("Include member details (default: true)")] bool includeMembers = true,
+            [Description("Include documentation comments (default: true)")] bool includeDocumentation = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    return "Error: File not found.";
+                }
+
+                if (!filePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Error: File must be a C# source file (.cs)";
+                }
+
+                var fileAnalysisService = serviceProvider?.GetService<FileAnalysisService>();
+                if (fileAnalysisService == null)
+                {
+                    return "Error: File analysis service not available.";
+                }
+
+                var outline = await fileAnalysisService.GetFileOutlineAsync(filePath);
+                return FormatFileOutline(outline, includeMembers, includeDocumentation);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting file outline for: {FilePath}", filePath);
+                return $"Error: An unexpected error occurred while getting file outline: {ex.Message}";
+            }
+        }
+
         private static string FormatSearchResults(IEnumerable<SymbolSearchResult> results)
         {
             var grouped = results.GroupBy(r => r.Category);
@@ -716,6 +870,207 @@ namespace RoslynMcpServer.Tools
         {
             var namespaceDeclaration = method.Ancestors().OfType<NamespaceDeclarationSyntax>().FirstOrDefault();
             return namespaceDeclaration?.Name.ToString() ?? "";
+        }
+
+        private static string FormatCompilationErrors(List<CompilationError> errors, string severityFilter)
+        {
+            if (!errors.Any())
+                return $"No compilation {severityFilter.ToLower()} issues found. Solution builds successfully!";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Compilation Diagnostics** (Severity: {severityFilter})\n");
+            output.AppendLine($"Found {errors.Count} issue{(errors.Count > 1 ? "s" : "")}:\n");
+
+            // Group by severity
+            var groupedBySeverity = errors.GroupBy(e => e.Severity).OrderBy(g => g.Key);
+            foreach (var severityGroup in groupedBySeverity)
+            {
+                output.AppendLine($"## {severityGroup.Key} ({severityGroup.Count()})");
+                output.AppendLine();
+
+                // Group by project within severity
+                var groupedByProject = severityGroup.GroupBy(e => e.ProjectName).OrderBy(g => g.Key);
+                foreach (var projectGroup in groupedByProject)
+                {
+                    output.AppendLine($"### {projectGroup.Key} ({projectGroup.Count()} issue{(projectGroup.Count() > 1 ? "s" : "")})");
+                    output.AppendLine();
+
+                    // Show first 10 errors per project, then summarize
+                    var displayedErrors = projectGroup.Take(10);
+                    foreach (var error in displayedErrors)
+                    {
+                        output.AppendLine($"**{error.Id}**: {error.Message}");
+                        output.AppendLine($"  📄 {error.FileName}:{error.LineNumber}:{error.ColumnNumber}");
+                        if (!string.IsNullOrWhiteSpace(error.LineText))
+                        {
+                            output.AppendLine($"  ```csharp");
+                            output.AppendLine($"  {error.LineText}");
+                            output.AppendLine($"  ```");
+                        }
+                        output.AppendLine();
+                    }
+
+                    if (projectGroup.Count() > 10)
+                    {
+                        output.AppendLine($"... and {projectGroup.Count() - 10} more {severityGroup.Key.ToLower()} issue{(projectGroup.Count() - 10 > 1 ? "s" : "")} in this project");
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Summary
+            var errorCount = errors.Count(e => e.Severity == "Error");
+            var warningCount = errors.Count(e => e.Severity == "Warning");
+            var infoCount = errors.Count(e => e.Severity == "Info" || e.Severity == "Hidden");
+
+            output.AppendLine("---");
+            output.AppendLine($"**Summary**: {errorCount} Error{(errorCount != 1 ? "s" : "")}, {warningCount} Warning{(warningCount != 1 ? "s" : "")}, {infoCount} Info");
+
+            return output.ToString();
+        }
+
+        private static string FormatFileOutline(FileOutlineResult outline, bool includeMembers, bool includeDocumentation)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"**File Outline**: {outline.FileName}\n");
+            output.AppendLine($"📊 **Statistics**:");
+            output.AppendLine($"  • Total Lines: {outline.TotalLines}");
+            output.AppendLine($"  • Code Lines: {outline.CodeLines} ({outline.CodeLines * 100.0 / outline.TotalLines:F1}%)");
+            output.AppendLine($"  • Comment Lines: {outline.CommentLines} ({outline.CommentLines * 100.0 / outline.TotalLines:F1}%)");
+            output.AppendLine($"  • Blank Lines: {outline.BlankLines} ({outline.BlankLines * 100.0 / outline.TotalLines:F1}%)");
+            output.AppendLine();
+
+            // Using statements
+            if (outline.UsingStatements.Any())
+            {
+                output.AppendLine($"📦 **Using Statements** ({outline.UsingStatements.Count}):");
+                foreach (var usingStmt in outline.UsingStatements.Take(10))
+                {
+                    output.AppendLine($"  • {usingStmt}");
+                }
+                if (outline.UsingStatements.Count > 10)
+                {
+                    output.AppendLine($"  ... and {outline.UsingStatements.Count - 10} more");
+                }
+                output.AppendLine();
+            }
+
+            // Namespaces
+            if (outline.Namespaces.Any())
+            {
+                output.AppendLine($"🏷️ **Namespaces**: {string.Join(", ", outline.Namespaces)}");
+                output.AppendLine();
+            }
+
+            // Types
+            if (outline.Types.Any())
+            {
+                output.AppendLine($"📋 **Types** ({outline.Types.Count}):\n");
+
+                foreach (var type in outline.Types)
+                {
+                    var icon = type.Kind switch
+                    {
+                        "Class" => "🔷",
+                        "Interface" => "🔹",
+                        "Struct" => "🔸",
+                        "Enum" => "🔢",
+                        "Record" => "📝",
+                        "Record Struct" => "📝",
+                        _ => "•"
+                    };
+
+                    output.AppendLine($"{icon} **{type.Name}** ({type.Kind}, {type.Accessibility})");
+                    output.AppendLine($"   Line {type.LineNumber}");
+
+                    if (includeDocumentation && !string.IsNullOrWhiteSpace(type.Documentation))
+                    {
+                        output.AppendLine($"   💬 {type.Documentation}");
+                    }
+
+                    if (type.BaseTypes.Any())
+                    {
+                        output.AppendLine($"   ↗️ Inherits/Implements: {string.Join(", ", type.BaseTypes)}");
+                    }
+
+                    if (type.Attributes.Any())
+                    {
+                        output.AppendLine($"   🏷️ Attributes: [{string.Join(", ", type.Attributes)}]");
+                    }
+
+                    // Members
+                    if (includeMembers && type.Members.Any())
+                    {
+                        output.AppendLine($"   📌 **Members** ({type.Members.Count}):");
+
+                        // Group members by kind
+                        var memberGroups = type.Members.GroupBy(m => m.Kind);
+                        foreach (var group in memberGroups.OrderBy(g => GetMemberKindOrder(g.Key)))
+                        {
+                            var memberIcon = GetMemberIcon(group.Key);
+                            output.AppendLine($"      {memberIcon} {group.Key}s ({group.Count()}):");
+
+                            foreach (var member in group)
+                            {
+                                var modifiers = new List<string>();
+                                if (member.IsStatic) modifiers.Add("static");
+                                if (member.IsAsync) modifiers.Add("async");
+                                if (member.IsAbstract) modifiers.Add("abstract");
+                                if (member.IsVirtual) modifiers.Add("virtual");
+                                if (member.IsOverride) modifiers.Add("override");
+
+                                var modifierText = modifiers.Any() ? $" [{string.Join(", ", modifiers)}]" : "";
+
+                                output.AppendLine($"         • {member.Accessibility} {member.Signature}{modifierText}");
+                                output.AppendLine($"           Line {member.LineNumber}");
+
+                                if (includeDocumentation && !string.IsNullOrWhiteSpace(member.Documentation))
+                                {
+                                    output.AppendLine($"           💬 {member.Documentation}");
+                                }
+                            }
+                        }
+                    }
+                    else if (includeMembers)
+                    {
+                        output.AppendLine($"   📌 No members");
+                    }
+
+                    output.AppendLine();
+                }
+            }
+            else
+            {
+                output.AppendLine("No types found in this file.");
+            }
+
+            return output.ToString();
+        }
+
+        private static string GetMemberIcon(string memberKind)
+        {
+            return memberKind switch
+            {
+                "Constructor" => "🏗️",
+                "Method" => "⚙️",
+                "Property" => "🔧",
+                "Field" => "📦",
+                "Event" => "⚡",
+                _ => "•"
+            };
+        }
+
+        private static int GetMemberKindOrder(string memberKind)
+        {
+            return memberKind switch
+            {
+                "Constructor" => 1,
+                "Field" => 2,
+                "Property" => 3,
+                "Method" => 4,
+                "Event" => 5,
+                _ => 99
+            };
         }
     }
 }
