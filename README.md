@@ -323,29 +323,51 @@ Identify complex methods in src/Services/*.cs with threshold 10
 
 ## Available MCP Tools
 
-The server exposes 5 MCP tools:
+The server exposes 8 MCP tools:
+
+### Core Analysis Tools
 
 1. **SearchSymbols** - Search for symbols using wildcard patterns (`*Service`, `Get*`, etc.)
    - Supports filtering by symbol kind (class, interface, method, property, field, event)
    - Returns top results ranked by relevance
 
-2. **FindReferences** - Find all references to a specific symbol
+2. **FindReferences** - Find all references to a specific symbol with configurable detail levels ⚡ **NEW**
+   - **Summary mode** - Only file names and line numbers (95% token savings)
+   - **Locations mode** - File names with code lines (80% token savings)
+   - **Full mode** - Complete 5-line context around each reference
    - Distinguishes between definitions and usages
-   - Provides code context (5 lines) around each reference
 
 3. **GetSymbolInfo** - Get detailed information about a symbol
    - Returns type information, accessibility, location
    - Shows method signatures, property types, etc.
 
-4. **AnalyzeDependencies** - Analyze project dependencies and namespace usage
+### Token Optimization Tools ⚡ **NEW**
+
+4. **GetProjectStructure** - Get hierarchical overview of projects, namespaces, and types
+   - Shows project organization at a glance (90% token savings)
+   - Optional member signatures
+   - Filter by namespace pattern
+   - ~300 tokens vs ~3,000 tokens for multiple searches
+
+5. **GetTypeSignature** - Get type signatures without implementation
+   - Shows class/interface structure with all members (90% token savings)
+   - Includes XML documentation comments
+   - Option to include private members
+   - ~200 tokens vs ~2,000 tokens for reading full file
+
+### Advanced Analysis Tools
+
+6. **AnalyzeDependencies** - Analyze project dependencies and namespace usage
    - Identifies inter-project dependencies
    - Shows most-used namespaces
    - Counts public vs internal symbols
 
-5. **AnalyzeCodeComplexity** - Identify high-complexity methods
+7. **AnalyzeCodeComplexity** - Identify high-complexity methods
    - Calculates cyclomatic complexity
    - Configurable threshold (default: 5)
    - Helps identify refactoring candidates
+
+📚 **[Phase 1 Usage Examples](docs/PHASE1_USAGE_EXAMPLES.md)** - Detailed examples and token savings guide
 
 ## Development and Testing
 
@@ -510,6 +532,7 @@ RoslynMCP/
 - **[CLAUDE_CLI_INTEGRATION.md](docs/CLAUDE_CLI_INTEGRATION.md)** - Comprehensive Claude CLI integration guide
 - **[UPGRADE_COMPLETE.md](docs/UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
 - **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan
+- **[PHASE1_USAGE_EXAMPLES.md](docs/PHASE1_USAGE_EXAMPLES.md)** - ⚡ Phase 1 token optimization features usage guide with examples
 
 ## License
 
