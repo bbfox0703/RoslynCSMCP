@@ -661,6 +661,85 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Get complete class hierarchy showing ancestors (base classes/interfaces) and descendants (derived classes)")]
+        public static async Task<string> GetClassHierarchy(
+            [Description("Type name to analyze hierarchy for")] string typeName,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Direction: ancestors, descendants, or both (default: both)")] string direction = "both",
+            [Description("Maximum depth to traverse (default: 10)")] int maxDepth = 10,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var searchService = serviceProvider?.GetService<SymbolSearchService>();
+                if (searchService == null)
+                {
+                    return "Error: Symbol search service not available.";
+                }
+
+                var result = await searchService.GetClassHierarchyAsync(
+                    typeName,
+                    solutionPath,
+                    direction,
+                    maxDepth);
+
+                if (result == null)
+                {
+                    return $"Type '{typeName}' not found in solution.";
+                }
+
+                return FormatClassHierarchy(result, direction);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting class hierarchy for: {TypeName}", typeName);
+                return $"Error: An unexpected error occurred while getting class hierarchy: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Find all usages of a specific attribute across the solution")]
+        public static async Task<string> FindAttributeUsages(
+            [Description("Attribute name to search for (with or without 'Attribute' suffix)")] string attributeName,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Target type filter: class, interface, method, property, field, parameter, or all (default: all)")] string targetType = "all",
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var attributeSearchService = serviceProvider?.GetService<AttributeSearchService>();
+                if (attributeSearchService == null)
+                {
+                    return "Error: Attribute search service not available.";
+                }
+
+                var results = await attributeSearchService.FindAttributeUsagesAsync(
+                    attributeName,
+                    solutionPath,
+                    targetType);
+
+                return FormatAttributeUsages(results, attributeName, targetType);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding attribute usages for: {AttributeName}", attributeName);
+                return $"Error: An unexpected error occurred while finding attribute usages: {ex.Message}";
+            }
+        }
+
         private static string FormatSearchResults(IEnumerable<SymbolSearchResult> results)
         {
             var grouped = results.GroupBy(r => r.Category);
@@ -1286,6 +1365,190 @@ namespace RoslynMcpServer.Tools
             {
                 var frameworkTests = framework.Sum(r => r.TestCount);
                 output.AppendLine($"  • {framework.Key}: {framework.Count()} class{(framework.Count() > 1 ? "es" : "")}, {frameworkTests} test{(frameworkTests > 1 ? "s" : "")}");
+            }
+
+            return output.ToString();
+        }
+
+        private static string FormatClassHierarchy(ClassHierarchyResult result, string direction)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"**Class Hierarchy for '{result.TypeName}'**\n");
+
+            // Type information
+            var modifiers = new List<string>();
+            if (result.IsAbstract) modifiers.Add("abstract");
+            if (result.IsSealed) modifiers.Add("sealed");
+            var modifierText = modifiers.Any() ? $" [{string.Join(", ", modifiers)}]" : "";
+
+            output.AppendLine($"📦 **{result.TypeName}** ({result.TypeKind}, {result.Accessibility}{modifierText})");
+            output.AppendLine($"   Namespace: {result.Namespace}");
+            output.AppendLine($"   📄 {Path.GetFileName(result.FilePath)}:{result.LineNumber}");
+
+            if (!string.IsNullOrWhiteSpace(result.Documentation))
+            {
+                output.AppendLine($"   💬 {result.Documentation}");
+            }
+
+            output.AppendLine();
+
+            // Ancestors
+            if ((direction == "ancestors" || direction == "both") && result.Ancestors.Any())
+            {
+                output.AppendLine($"## ⬆️ ANCESTORS (Inheritance Chain)\n");
+                output.AppendLine($"Types that '{result.TypeName}' inherits from or implements:\n");
+                FormatHierarchyNodes(result.Ancestors, output, "   ", isAncestor: true);
+                output.AppendLine();
+            }
+
+            // Descendants
+            if ((direction == "descendants" || direction == "both") && result.Descendants.Any())
+            {
+                output.AppendLine($"## ⬇️ DESCENDANTS (Derived Types)\n");
+                output.AppendLine($"Types that inherit from or implement '{result.TypeName}':\n");
+                FormatHierarchyNodes(result.Descendants, output, "   ", isAncestor: false);
+                output.AppendLine();
+            }
+
+            // Summary
+            var ancestorCount = CountTotalNodes(result.Ancestors);
+            var descendantCount = CountTotalNodes(result.Descendants);
+
+            output.AppendLine("---");
+            output.AppendLine($"**Summary**: {ancestorCount} ancestor{(ancestorCount != 1 ? "s" : "")}, {descendantCount} descendant{(descendantCount != 1 ? "s" : "")}");
+
+            return output.ToString();
+        }
+
+        private static void FormatHierarchyNodes(List<HierarchyNode> nodes, StringBuilder output, string indent, bool isAncestor)
+        {
+            foreach (var node in nodes)
+            {
+                var icon = node.IsInterface ? "🔹" : node.IsAbstract ? "🔷" : "▪️";
+                var arrow = isAncestor ? "↑" : "↓";
+                var typeInfo = node.IsInterface ? "Interface" : node.TypeKind;
+
+                output.AppendLine($"{indent}{arrow} {icon} **{node.Name}** ({typeInfo})");
+
+                if (!string.IsNullOrWhiteSpace(node.Namespace))
+                {
+                    output.AppendLine($"{indent}   Namespace: {node.Namespace}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(node.ProjectName))
+                {
+                    output.AppendLine($"{indent}   Project: {node.ProjectName}");
+                }
+
+                if (node.LineNumber > 0)
+                {
+                    output.AppendLine($"{indent}   📄 {Path.GetFileName(node.FilePath)}:{node.LineNumber}");
+                }
+
+                // Recursively format children
+                if (node.Children.Any())
+                {
+                    FormatHierarchyNodes(node.Children, output, indent + "   ", isAncestor);
+                }
+            }
+        }
+
+        private static int CountTotalNodes(List<HierarchyNode> nodes)
+        {
+            int count = nodes.Count;
+            foreach (var node in nodes)
+            {
+                count += CountTotalNodes(node.Children);
+            }
+            return count;
+        }
+
+        private static string FormatAttributeUsages(List<AttributeUsageResult> results, string attributeName, string targetType)
+        {
+            if (!results.Any())
+                return $"No usages of [{attributeName}] attribute found" +
+                       (targetType != "all" ? $" on {targetType} targets." : ".");
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Attribute Usages: [{attributeName}]**\n");
+
+            if (targetType != "all")
+            {
+                output.AppendLine($"Filter: {targetType} targets only\n");
+            }
+
+            output.AppendLine($"Found {results.Count} usage{(results.Count > 1 ? "s" : "")}:\n");
+
+            // Group by target type
+            var groupedByType = results.GroupBy(r => r.TargetType).OrderBy(g => g.Key);
+
+            foreach (var typeGroup in groupedByType)
+            {
+                output.AppendLine($"### {typeGroup.Key}s ({typeGroup.Count()})");
+                output.AppendLine();
+
+                // Group by project within each type
+                var groupedByProject = typeGroup.GroupBy(r => r.ProjectName).OrderBy(g => g.Key);
+
+                foreach (var projectGroup in groupedByProject)
+                {
+                    output.AppendLine($"**{projectGroup.Key}** ({projectGroup.Count()} usage{(projectGroup.Count() > 1 ? "s" : "")}):");
+                    output.AppendLine();
+
+                    foreach (var usage in projectGroup.Take(20))  // Limit to 20 per project
+                    {
+                        var icon = usage.TargetType switch
+                        {
+                            "Class" => "🔷",
+                            "Interface" => "🔹",
+                            "Method" => "⚙️",
+                            "Property" => "🔧",
+                            "Field" => "📦",
+                            "Parameter" => "📝",
+                            "Event" => "⚡",
+                            _ => "•"
+                        };
+
+                        output.AppendLine($"{icon} **{usage.TargetName}**");
+                        output.AppendLine($"   📄 {usage.FileName}:{usage.LineNumber}");
+
+                        if (!string.IsNullOrWhiteSpace(usage.DeclaringType))
+                        {
+                            output.AppendLine($"   In: {usage.DeclaringType}");
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(usage.Signature))
+                        {
+                            output.AppendLine($"   Signature: `{usage.Signature}`");
+                        }
+
+                        // Show attribute arguments if present
+                        if (usage.AttributeArguments.Any() || usage.NamedArguments.Any())
+                        {
+                            var args = new List<string>();
+                            args.AddRange(usage.AttributeArguments);
+                            args.AddRange(usage.NamedArguments.Select(kvp => $"{kvp.Key} = {kvp.Value}"));
+
+                            output.AppendLine($"   Arguments: {string.Join(", ", args)}");
+                        }
+
+                        output.AppendLine();
+                    }
+
+                    if (projectGroup.Count() > 20)
+                    {
+                        output.AppendLine($"... and {projectGroup.Count() - 20} more usage{(projectGroup.Count() - 20 > 1 ? "s" : "")} in this project");
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Summary by target type
+            output.AppendLine("---");
+            output.AppendLine($"**Summary by Target Type**:");
+            foreach (var typeGroup in groupedByType)
+            {
+                output.AppendLine($"  • {typeGroup.Key}: {typeGroup.Count()} usage{(typeGroup.Count() > 1 ? "s" : "")}");
             }
 
             return output.ToString();

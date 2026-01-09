@@ -690,5 +690,200 @@ namespace RoslynMcpServer.Services
                 BaseClass = baseClass
             };
         }
+
+        /// <summary>
+        /// Get complete class hierarchy (ancestors and descendants) for a type
+        /// </summary>
+        public async Task<ClassHierarchyResult?> GetClassHierarchyAsync(
+            string typeName,
+            string solutionPath,
+            string direction = "both",
+            int maxDepth = 10)
+        {
+            _logger.LogInformation("Getting class hierarchy for: {TypeName}, Direction: {Direction}", typeName, direction);
+
+            var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
+
+            // Find the target type
+            var targetSymbols = await FindSymbolsByNameAsync(solution, typeName);
+            var targetType = targetSymbols.OfType<INamedTypeSymbol>().FirstOrDefault();
+
+            if (targetType == null)
+            {
+                _logger.LogWarning("Type not found: {TypeName}", typeName);
+                return null;
+            }
+
+            var location = targetType.Locations.FirstOrDefault();
+            var lineSpan = location?.GetLineSpan();
+
+            // Get documentation
+            var documentation = targetType.GetDocumentationCommentXml() ?? "";
+            var summaryMatch = Regex.Match(documentation, @"<summary>\s*(.*?)\s*</summary>", RegexOptions.Singleline);
+            var summary = summaryMatch.Success
+                ? summaryMatch.Groups[1].Value.Replace("///", "").Trim()
+                : "";
+
+            var result = new ClassHierarchyResult
+            {
+                TypeName = targetType.Name,
+                TypeFullName = targetType.ToDisplayString(),
+                TypeKind = targetType.TypeKind.ToString(),
+                Accessibility = targetType.DeclaredAccessibility.ToString(),
+                IsAbstract = targetType.IsAbstract,
+                IsSealed = targetType.IsSealed,
+                Namespace = targetType.ContainingNamespace?.ToDisplayString() ?? "",
+                FilePath = location?.SourceTree?.FilePath ?? "",
+                LineNumber = lineSpan?.StartLinePosition.Line + 1 ?? 0,
+                Documentation = summary
+            };
+
+            // Get ancestors (base classes and interfaces)
+            if (direction == "ancestors" || direction == "both")
+            {
+                result.Ancestors = await GetAncestorsAsync(targetType, maxDepth);
+            }
+
+            // Get descendants (derived classes)
+            if (direction == "descendants" || direction == "both")
+            {
+                result.Descendants = await GetDescendantsAsync(targetType, solution, maxDepth);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Get ancestor types (base classes and interfaces) recursively
+        /// </summary>
+        private async Task<List<HierarchyNode>> GetAncestorsAsync(INamedTypeSymbol type, int maxDepth, int currentDepth = 0)
+        {
+            var ancestors = new List<HierarchyNode>();
+
+            if (currentDepth >= maxDepth)
+                return ancestors;
+
+            // Add base class
+            if (type.BaseType != null && type.BaseType.SpecialType != SpecialType.System_Object)
+            {
+                var baseNode = await CreateHierarchyNodeAsync(type.BaseType, currentDepth + 1);
+                if (baseNode != null)
+                {
+                    // Recursively get ancestors of base class
+                    baseNode.Children = await GetAncestorsAsync(type.BaseType, maxDepth, currentDepth + 1);
+                    ancestors.Add(baseNode);
+                }
+            }
+
+            // Add interfaces
+            foreach (var iface in type.Interfaces)
+            {
+                var ifaceNode = await CreateHierarchyNodeAsync(iface, currentDepth + 1);
+                if (ifaceNode != null)
+                {
+                    // Recursively get base interfaces
+                    ifaceNode.Children = await GetAncestorsAsync(iface, maxDepth, currentDepth + 1);
+                    ancestors.Add(ifaceNode);
+                }
+            }
+
+            return ancestors;
+        }
+
+        /// <summary>
+        /// Get descendant types (derived classes) by searching the solution
+        /// </summary>
+        private async Task<List<HierarchyNode>> GetDescendantsAsync(
+            INamedTypeSymbol type,
+            Solution solution,
+            int maxDepth,
+            int currentDepth = 0)
+        {
+            var descendants = new List<HierarchyNode>();
+
+            if (currentDepth >= maxDepth)
+                return descendants;
+
+            // Search all projects for types that inherit from or implement the target type
+            foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
+            {
+                var compilation = await project.GetCompilationAsync();
+                if (compilation == null) continue;
+
+                // Get all types in the project
+                var allTypes = compilation.GlobalNamespace.GetNamespaceMembers()
+                    .SelectMany(ns => GetAllTypesInNamespace(ns))
+                    .Concat(GetAllTypesInNamespace(compilation.GlobalNamespace));
+
+                foreach (var candidateType in allTypes)
+                {
+                    // Skip the type itself
+                    if (SymbolEqualityComparer.Default.Equals(candidateType, type))
+                        continue;
+
+                    bool isDirectDescendant = false;
+
+                    // Check if candidate directly inherits from type
+                    if (candidateType.BaseType != null &&
+                        SymbolEqualityComparer.Default.Equals(candidateType.BaseType, type))
+                    {
+                        isDirectDescendant = true;
+                    }
+
+                    // Check if candidate directly implements the interface (only for interfaces)
+                    if (type.TypeKind == TypeKind.Interface &&
+                        candidateType.Interfaces.Any(i => SymbolEqualityComparer.Default.Equals(i, type)))
+                    {
+                        isDirectDescendant = true;
+                    }
+
+                    if (isDirectDescendant)
+                    {
+                        var descendantNode = await CreateHierarchyNodeAsync(candidateType, currentDepth + 1, project);
+                        if (descendantNode != null)
+                        {
+                            // Recursively get descendants of this type
+                            descendantNode.Children = await GetDescendantsAsync(
+                                candidateType,
+                                solution,
+                                maxDepth,
+                                currentDepth + 1);
+                            descendants.Add(descendantNode);
+                        }
+                    }
+                }
+            }
+
+            return descendants.OrderBy(d => d.Name).ToList();
+        }
+
+        /// <summary>
+        /// Create HierarchyNode from a type symbol
+        /// </summary>
+        private async Task<HierarchyNode?> CreateHierarchyNodeAsync(
+            INamedTypeSymbol type,
+            int depth,
+            Project? project = null)
+        {
+            var location = type.Locations.FirstOrDefault();
+            var lineSpan = location?.GetLineSpan();
+
+            // For system types or types not in source, we won't have project info
+            var projectName = project?.Name ?? type.ContainingAssembly?.Name ?? "";
+
+            return new HierarchyNode
+            {
+                Name = type.Name,
+                FullName = type.ToDisplayString(),
+                TypeKind = type.TypeKind.ToString(),
+                IsAbstract = type.IsAbstract,
+                IsInterface = type.TypeKind == TypeKind.Interface,
+                Namespace = type.ContainingNamespace?.ToDisplayString() ?? "",
+                ProjectName = projectName,
+                FilePath = location?.SourceTree?.FilePath ?? "",
+                LineNumber = lineSpan?.StartLinePosition.Line + 1 ?? 0,
+                Depth = depth
+            };
+        }
     }
 }

@@ -192,4 +192,54 @@ namespace RoslynMcpServer.Models
         public List<string> TestAttributes { get; set; } = new();  // Fact, Theory, Test, TestMethod, etc.
         public string DisplayName { get; set; } = string.Empty;    // Custom test display name if specified
     }
+
+    // Phase 4 Week 3: GetClassHierarchy
+    public class ClassHierarchyResult
+    {
+        public string TypeName { get; set; } = string.Empty;
+        public string TypeFullName { get; set; } = string.Empty;
+        public string TypeKind { get; set; } = string.Empty;  // Class, Interface, Struct, Record
+        public string Accessibility { get; set; } = string.Empty;
+        public bool IsAbstract { get; set; }
+        public bool IsSealed { get; set; }
+        public string Namespace { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public List<HierarchyNode> Ancestors { get; set; } = new();      // Base classes and interfaces
+        public List<HierarchyNode> Descendants { get; set; } = new();    // Derived classes
+        public string Documentation { get; set; } = string.Empty;
+    }
+
+    public class HierarchyNode
+    {
+        public string Name { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string TypeKind { get; set; } = string.Empty;
+        public bool IsAbstract { get; set; }
+        public bool IsInterface { get; set; }
+        public string Namespace { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public int Depth { get; set; }  // Distance from root type
+        public List<HierarchyNode> Children { get; set; } = new();  // Nested hierarchy
+    }
+
+    // Phase 4 Week 3: FindAttributeUsages
+    public class AttributeUsageResult
+    {
+        public string AttributeName { get; set; } = string.Empty;
+        public string TargetName { get; set; } = string.Empty;
+        public string TargetFullName { get; set; } = string.Empty;
+        public string TargetType { get; set; } = string.Empty;  // Class, Method, Property, Field, Parameter, etc.
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string Namespace { get; set; } = string.Empty;
+        public string DeclaringType { get; set; } = string.Empty;  // For members, the containing type
+        public List<string> AttributeArguments { get; set; } = new();  // Constructor arguments
+        public Dictionary<string, string> NamedArguments { get; set; } = new();  // Named arguments
+        public string Signature { get; set; } = string.Empty;  // Full signature of the target
+    }
 }
