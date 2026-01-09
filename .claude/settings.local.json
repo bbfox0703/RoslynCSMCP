@@ -24,5 +24,8 @@
       "Bash(git push:*)",
       "Bash(git branch:*)"
     ]
-  }
+  },
+  "disabledMcpjsonServers": [
+    "roslyn"
+  ]
 }
