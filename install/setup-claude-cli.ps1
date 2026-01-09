@@ -149,12 +149,12 @@ switch ($Scope) {
 Write-Host
 Write-Host "Next steps:" -ForegroundColor Yellow
 Write-Host "1. Run 'claude' to start Claude CLI"
-Write-Host "2. Use RoslynMCP tools to analyze C# code:"
+Write-Host "2. Use RoslynCSMCP tools to analyze C# code:"
 Write-Host "   > Search for all classes in MySolution.sln"
 Write-Host "   > Find references to UserService in MySolution.sln"
 Write-Host "   > Analyze dependencies for MySolution.sln"
 Write-Host
 Write-Host "Verify configuration:" -ForegroundColor Yellow
 Write-Host "  claude mcp list      # List all MCP servers"
-Write-Host "  claude mcp get roslyn # Show RoslynMCP details"
+Write-Host "  claude mcp get roslyn # Show RoslynCSMCP details"
 Write-Host

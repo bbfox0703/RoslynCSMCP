@@ -148,12 +148,12 @@ esac
 echo
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Run 'claude' to start Claude CLI"
-echo "2. Use RoslynMCP tools to analyze C# code:"
+echo "2. Use RoslynCSMCP tools to analyze C# code:"
 echo "   > Search for all classes in MySolution.sln"
 echo "   > Find references to UserService in MySolution.sln"
 echo "   > Analyze dependencies for MySolution.sln"
 echo
 echo -e "${YELLOW}Verify configuration:${NC}"
 echo "  claude mcp list       # List all MCP servers"
-echo "  claude mcp get roslyn # Show RoslynMCP details"
+echo "  claude mcp get roslyn # Show RoslynCSMCP details"
 echo

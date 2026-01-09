@@ -8,11 +8,20 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="appsettings.Development.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- MCP Server SDK -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
     <PackageReference Include="ModelContextProtocol" Version="0.5.0-preview.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
-    
+
     <!-- Roslyn packages -->
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.0.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
@@ -20,7 +29,13 @@
     <PackageReference Include="Microsoft.Build.Framework" Version="18.0.2" ExcludeAssets="runtime" PrivateAssets="all">
       <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    
+
+    <!-- Logging -->
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.0" />
+
     <!-- Additional utilities -->
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.1" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.1" />
