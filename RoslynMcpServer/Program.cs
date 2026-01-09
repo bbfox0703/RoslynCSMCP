@@ -46,6 +46,10 @@ namespace RoslynMcpServer
             builder.Services.AddSingleton<SymbolSearchService>();
             builder.Services.AddSingleton<TypeSignatureService>();
             builder.Services.AddSingleton<ProjectStructureService>();
+            builder.Services.AddSingleton<CodeMetricsService>();
+            builder.Services.AddSingleton<DependencyGraphService>();
+            builder.Services.AddSingleton<CallHierarchyService>();
+            builder.Services.AddSingleton<BatchQueryService>();
             builder.Services.AddSingleton<SecurityValidator>();
             builder.Services.AddSingleton<DiagnosticLogger>();
             builder.Services.AddSingleton<IncrementalAnalyzer>();

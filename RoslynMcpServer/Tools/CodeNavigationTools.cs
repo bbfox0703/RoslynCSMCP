@@ -215,6 +215,108 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Get code metrics and statistics for entire solution")]
+        public static async Task<string> GetCodeMetrics(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Group by: project | namespace | type (default: project)")] string groupBy = "project",
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var metricsService = serviceProvider?.GetService<CodeMetricsService>();
+                if (metricsService == null)
+                {
+                    return "Error: Code metrics service not available.";
+                }
+
+                return await metricsService.GetMetricsAsync(solutionPath, groupBy);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting code metrics");
+                return $"Error: An unexpected error occurred while getting code metrics: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Get project dependency graph in various formats")]
+        public static async Task<string> GetDependencyGraph(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: text | dot | mermaid (default: text)")] string format = "text",
+            [Description("Include package dependencies (default: false)")] bool includePackages = false,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var graphService = serviceProvider?.GetService<DependencyGraphService>();
+                if (graphService == null)
+                {
+                    return "Error: Dependency graph service not available.";
+                }
+
+                return await graphService.GetDependencyGraphAsync(solutionPath, format, includePackages);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting dependency graph");
+                return $"Error: An unexpected error occurred while getting dependency graph: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Get call hierarchy showing callers and callees for a method")]
+        public static async Task<string> GetCallHierarchy(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Method name to analyze")] string methodName,
+            [Description("Direction: both | callers | callees (default: both)")] string direction = "both",
+            [Description("Maximum depth for hierarchy traversal (default: 3)")] int maxDepth = 3,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                if (string.IsNullOrWhiteSpace(methodName))
+                {
+                    return "Error: Method name is required.";
+                }
+
+                var callHierarchyService = serviceProvider?.GetService<CallHierarchyService>();
+                if (callHierarchyService == null)
+                {
+                    return "Error: Call hierarchy service not available.";
+                }
+
+                return await callHierarchyService.GetCallHierarchyAsync(
+                    solutionPath,
+                    methodName,
+                    direction,
+                    maxDepth);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting call hierarchy");
+                return $"Error: An unexpected error occurred while getting call hierarchy: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Analyze project dependencies and symbol usage patterns")]
         public static async Task<string> AnalyzeDependencies(
             [Description("Path to solution file (.sln)")] string solutionPath,
@@ -228,13 +330,13 @@ namespace RoslynMcpServer.Tools
                 {
                     return "Error: Invalid solution path provided.";
                 }
-                
+
                 var analysisService = serviceProvider?.GetService<CodeAnalysisService>();
                 if (analysisService == null)
                 {
                     return "Error: Code analysis service not available.";
                 }
-                
+
                 var dependencies = await analysisService.AnalyzeDependenciesAsync(solutionPath, maxDepth);
                 return FormatDependencyAnalysis(dependencies);
             }
@@ -306,6 +408,30 @@ namespace RoslynMcpServer.Tools
                 var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
                 logger?.LogError(ex, "Error analyzing code complexity");
                 return "Error: An unexpected error occurred during complexity analysis.";
+            }
+        }
+
+        [McpServerTool, Description("Execute multiple queries in a single batch request")]
+        public static async Task<string> BatchQuery(
+            [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
+            [Description("Execute queries in parallel (default: true)")] bool parallel = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var batchQueryService = serviceProvider?.GetService<BatchQueryService>();
+                if (batchQueryService == null)
+                {
+                    return "Error: Batch query service not available.";
+                }
+
+                return await batchQueryService.ExecuteBatchAsync(queriesJson, parallel);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error executing batch query");
+                return $"Error: An unexpected error occurred while executing batch query: {ex.Message}";
             }
         }
 

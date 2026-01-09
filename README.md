@@ -323,7 +323,7 @@ Identify complex methods in src/Services/*.cs with threshold 10
 
 ## Available MCP Tools
 
-The server exposes 8 MCP tools:
+The server exposes 12 MCP tools organized in two phases:
 
 ### Core Analysis Tools
 
@@ -369,6 +369,40 @@ The server exposes 8 MCP tools:
 
 📚 **[Phase 1 Usage Examples](docs/PHASE1_USAGE_EXAMPLES.md)** - Detailed examples and token savings guide
 
+### Phase 2: Advanced Analysis Tools ⚡ **NEW**
+
+8. **GetCodeMetrics** - Comprehensive code statistics and quality metrics
+   - Lines of code (total, code, comments, blank)
+   - Type statistics (classes, interfaces, structs, enums)
+   - Cyclomatic complexity analysis with hotspot identification
+   - Project-by-project breakdown
+   - Largest types and complexity hotspots
+   - ~400 tokens for complete solution analysis
+
+9. **GetDependencyGraph** - Project dependency visualization in multiple formats
+   - Text format - Simple, readable dependency tree
+   - DOT format - Graphviz visualization (for professional diagrams)
+   - Mermaid format - Markdown diagrams (renders in GitHub/docs)
+   - Optional package dependency inclusion
+   - ~200-350 tokens depending on format
+
+10. **GetCallHierarchy** - Method call chain analysis
+    - Shows callers (who calls this method)
+    - Shows callees (what this method calls)
+    - Configurable direction (both, callers, callees)
+    - Depth-limited traversal (default: 3 levels)
+    - Call count tracking for frequently called methods
+    - ~250-500 tokens depending on direction
+
+11. **BatchQuery** - Execute multiple queries in a single request
+    - Combine any MCP tools in one batch
+    - Parallel or sequential execution
+    - Graceful error handling (partial failures don't stop others)
+    - Saves ~50-100 tokens per additional query vs separate requests
+    - Reduces MCP protocol overhead
+
+📚 **[Phase 2 Usage Examples](docs/PHASE2_USAGE_EXAMPLES.md)** - Advanced analysis features with examples
+
 ## Development and Testing
 
 ### Using MCP Inspector
@@ -407,10 +441,16 @@ dotnet publish -c Release -o ./publish
 The server features a modular, layered architecture:
 
 - **MCP Server Layer** (`Program.cs`) - Handles MCP protocol communication via stdio transport
-- **Tools Layer** (`Tools/CodeNavigationTools.cs`) - Exposes 5 MCP tools with `[McpServerTool]` attributes
+- **Tools Layer** (`Tools/CodeNavigationTools.cs`) - Exposes 11 MCP tools with `[McpServerTool]` attributes
 - **Services Layer**:
   - `SymbolSearchService` - Core symbol search and reference finding using Roslyn
   - `CodeAnalysisService` - Solution loading and dependency analysis
+  - `TypeSignatureService` - Type signature extraction (Phase 1)
+  - `ProjectStructureService` - Project structure analysis (Phase 1)
+  - `CodeMetricsService` - Code statistics and complexity analysis (Phase 2)
+  - `DependencyGraphService` - Dependency visualization in multiple formats (Phase 2)
+  - `CallHierarchyService` - Call chain analysis (Phase 2)
+  - `BatchQueryService` - Batch query execution (Phase 2)
   - `IncrementalAnalyzer` - File-level caching for performance
   - `MultiLevelCacheManager` - 3-tier caching (Memory → Redis → File system)
   - `SecurityValidator` - Input validation and path sanitization
@@ -533,6 +573,7 @@ RoslynMCP/
 - **[UPGRADE_COMPLETE.md](docs/UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
 - **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan
 - **[PHASE1_USAGE_EXAMPLES.md](docs/PHASE1_USAGE_EXAMPLES.md)** - ⚡ Phase 1 token optimization features usage guide with examples
+- **[PHASE2_USAGE_EXAMPLES.md](docs/PHASE2_USAGE_EXAMPLES.md)** - ⚡ Phase 2 advanced analysis features usage guide with examples
 
 ## License
 
