@@ -589,6 +589,78 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find all implementations of an interface or abstract class")]
+        public static async Task<string> FindImplementations(
+            [Description("Interface or abstract class name to find implementations for")] string typeName,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Include abstract implementations (default: false)")] bool includeAbstractImplementations = false,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var searchService = serviceProvider?.GetService<SymbolSearchService>();
+                if (searchService == null)
+                {
+                    return "Error: Symbol search service not available.";
+                }
+
+                var results = await searchService.FindImplementationsAsync(
+                    typeName,
+                    solutionPath,
+                    includeAbstractImplementations);
+
+                return FormatImplementationResults(results, typeName);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding implementations for: {TypeName}", typeName);
+                return $"Error: An unexpected error occurred while finding implementations: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Find test classes and methods for a given type")]
+        public static async Task<string> FindTestsForType(
+            [Description("Type name to find tests for")] string typeName,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Include partial name matches (default: true)")] bool includePartialMatches = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var testDiscoveryService = serviceProvider?.GetService<TestDiscoveryService>();
+                if (testDiscoveryService == null)
+                {
+                    return "Error: Test discovery service not available.";
+                }
+
+                var results = await testDiscoveryService.FindTestsForTypeAsync(
+                    typeName,
+                    solutionPath,
+                    includePartialMatches);
+
+                return FormatTestResults(results, typeName);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding tests for type: {TypeName}", typeName);
+                return $"Error: An unexpected error occurred while finding tests: {ex.Message}";
+            }
+        }
+
         private static string FormatSearchResults(IEnumerable<SymbolSearchResult> results)
         {
             var grouped = results.GroupBy(r => r.Category);
@@ -1071,6 +1143,152 @@ namespace RoslynMcpServer.Tools
                 "Event" => 5,
                 _ => 99
             };
+        }
+
+        private static string FormatImplementationResults(List<ImplementationResult> results, string typeName)
+        {
+            if (!results.Any())
+                return $"No implementations found for '{typeName}'.\nNote: {typeName} must be an interface or abstract class.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Implementations of '{typeName}'**\n");
+            output.AppendLine($"Found {results.Count} implementation{(results.Count > 1 ? "s" : "")}:\n");
+
+            // Group by project
+            var groupedByProject = results.GroupBy(r => r.ProjectName).OrderBy(g => g.Key);
+
+            foreach (var projectGroup in groupedByProject)
+            {
+                output.AppendLine($"### {projectGroup.Key} ({projectGroup.Count()} implementation{(projectGroup.Count() > 1 ? "s" : "")})");
+                output.AppendLine();
+
+                foreach (var impl in projectGroup)
+                {
+                    var icon = impl.IsAbstract ? "🔷" : impl.IsSealed ? "🔒" : "✅";
+                    var modifiers = new List<string>();
+                    if (impl.IsAbstract) modifiers.Add("abstract");
+                    if (impl.IsSealed) modifiers.Add("sealed");
+
+                    var modifierText = modifiers.Any() ? $" [{string.Join(", ", modifiers)}]" : "";
+
+                    output.AppendLine($"{icon} **{impl.ImplementingTypeName}** ({impl.Accessibility}{modifierText})");
+                    output.AppendLine($"   📄 {impl.FileName}:{impl.LineNumber}");
+
+                    if (!string.IsNullOrWhiteSpace(impl.Namespace))
+                    {
+                        output.AppendLine($"   📦 Namespace: {impl.Namespace}");
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(impl.Documentation))
+                    {
+                        output.AppendLine($"   💬 {impl.Documentation}");
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(impl.BaseClass))
+                    {
+                        output.AppendLine($"   ↗️ Base Class: {impl.BaseClass}");
+                    }
+
+                    if (impl.ImplementedInterfaces.Count > 1) // More than just the target interface
+                    {
+                        var otherInterfaces = impl.ImplementedInterfaces
+                            .Where(i => !i.Contains(typeName))
+                            .ToList();
+
+                        if (otherInterfaces.Any())
+                        {
+                            output.AppendLine($"   🔹 Also Implements: {string.Join(", ", otherInterfaces.Take(3))}");
+                            if (otherInterfaces.Count > 3)
+                            {
+                                output.AppendLine($"      ... and {otherInterfaces.Count - 3} more");
+                            }
+                        }
+                    }
+
+                    output.AppendLine();
+                }
+            }
+
+            // Summary
+            var concreteCount = results.Count(r => !r.IsAbstract);
+            var abstractCount = results.Count(r => r.IsAbstract);
+
+            output.AppendLine("---");
+            output.AppendLine($"**Summary**: {concreteCount} concrete, {abstractCount} abstract implementation{(results.Count > 1 ? "s" : "")} across {groupedByProject.Count()} project{(groupedByProject.Count() > 1 ? "s" : "")}");
+
+            return output.ToString();
+        }
+
+        private static string FormatTestResults(List<TestClassResult> results, string typeName)
+        {
+            if (!results.Any())
+                return $"No test classes found for '{typeName}'.\nNote: Searched test projects for classes matching naming conventions (e.g., {typeName}Tests, {typeName}Test).";
+
+            var output = new StringBuilder();
+            var totalTests = results.Sum(r => r.TestCount);
+
+            output.AppendLine($"**Test Classes for '{typeName}'**\n");
+            output.AppendLine($"Found {results.Count} test class{(results.Count > 1 ? "es" : "")} with {totalTests} test{(totalTests > 1 ? "s" : "")} total:\n");
+
+            // Group by project
+            var groupedByProject = results.GroupBy(r => r.ProjectName).OrderBy(g => g.Key);
+
+            foreach (var projectGroup in groupedByProject)
+            {
+                var projectTestCount = projectGroup.Sum(r => r.TestCount);
+                output.AppendLine($"### {projectGroup.Key} ({projectTestCount} test{(projectTestCount > 1 ? "s" : "")})");
+                output.AppendLine();
+
+                foreach (var testClass in projectGroup)
+                {
+                    output.AppendLine($"🧪 **{testClass.TestClassName}** - {testClass.TestCount} test{(testClass.TestCount > 1 ? "s" : "")}");
+                    output.AppendLine($"   📄 {testClass.FileName}:{testClass.LineNumber}");
+                    output.AppendLine($"   🔬 Framework: {testClass.TestFramework}");
+
+                    if (!string.IsNullOrWhiteSpace(testClass.Documentation))
+                    {
+                        output.AppendLine($"   💬 {testClass.Documentation}");
+                    }
+
+                    // Show test methods
+                    if (testClass.TestMethods.Any())
+                    {
+                        output.AppendLine($"   📋 **Test Methods**:");
+
+                        // Show first 10 tests
+                        var displayedTests = testClass.TestMethods.Take(10);
+                        foreach (var testMethod in displayedTests)
+                        {
+                            var attributeText = string.Join(", ", testMethod.TestAttributes.Select(a => $"[{a}]"));
+                            var displayNameText = !string.IsNullOrWhiteSpace(testMethod.DisplayName)
+                                ? $" - \"{testMethod.DisplayName}\""
+                                : "";
+
+                            output.AppendLine($"      ✓ {testMethod.MethodName} {attributeText}{displayNameText}");
+                            output.AppendLine($"        Line {testMethod.LineNumber}");
+                        }
+
+                        if (testClass.TestMethods.Count > 10)
+                        {
+                            output.AppendLine($"      ... and {testClass.TestMethods.Count - 10} more test{(testClass.TestMethods.Count - 10 > 1 ? "s" : "")}");
+                        }
+                    }
+
+                    output.AppendLine();
+                }
+            }
+
+            // Summary by framework
+            var frameworkGroups = results.GroupBy(r => r.TestFramework);
+            output.AppendLine("---");
+            output.AppendLine($"**Summary by Framework**:");
+            foreach (var framework in frameworkGroups.OrderBy(g => g.Key))
+            {
+                var frameworkTests = framework.Sum(r => r.TestCount);
+                output.AppendLine($"  • {framework.Key}: {framework.Count()} class{(framework.Count() > 1 ? "es" : "")}, {frameworkTests} test{(frameworkTests > 1 ? "s" : "")}");
+            }
+
+            return output.ToString();
         }
     }
 }

@@ -323,7 +323,7 @@ Identify complex methods in src/Services/*.cs with threshold 10
 
 ## Available MCP Tools
 
-The server exposes 15 MCP tools organized in four phases:
+The server exposes 17 MCP tools organized in four phases:
 
 ### Core Analysis Tools
 
@@ -439,6 +439,27 @@ The server exposes 15 MCP tools organized in four phases:
     - Use case: "Get outline of UserService.cs" → Understand file structure in 400 tokens instead of 8,000
 
 📚 **[Phase 4 Usage Examples](docs/PHASE4_USAGE_EXAMPLES.md)** - Diagnostics and file analysis with examples
+
+15. **FindImplementations** - Find all implementations of interfaces or abstract classes
+    - Discovers all concrete classes implementing an interface
+    - Finds all classes inheriting from abstract base classes
+    - Option to include abstract implementations
+    - Shows inheritance hierarchy and implemented interfaces
+    - Groups results by project
+    - **Token savings: 70-80%** vs manual file searching
+    - Use case: "Find implementations of IUserRepository" → Quickly discover all repository implementations
+
+16. **FindTestsForType** - Find test classes and methods for a given type
+    - Discovers test classes using naming conventions ({Type}Tests, Test{Type}, etc.)
+    - Detects test frameworks (xUnit, NUnit, MSTest)
+    - Lists all test methods with attributes
+    - Supports partial name matching
+    - Shows test display names and descriptions
+    - Groups by test project and framework
+    - **Token savings: 90%+** vs reading test files manually
+    - Use case: "Find tests for UserService" → See complete test coverage with 28 tests in 800 tokens
+
+📚 **[Phase 4 Week 2 Usage Examples](docs/PHASE4_WEEK2_USAGE_EXAMPLES.md)** - Navigation and testing features
 
 ## Development and Testing
 

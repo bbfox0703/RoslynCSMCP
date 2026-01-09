@@ -89,6 +89,7 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<BatchQueryService>();
                 builder.Services.AddSingleton<DiagnosticsService>();
                 builder.Services.AddSingleton<FileAnalysisService>();
+                builder.Services.AddSingleton<TestDiscoveryService>();
                 builder.Services.AddSingleton<SecurityValidator>();
                 builder.Services.AddSingleton<DiagnosticLogger>();
                 builder.Services.AddSingleton<IncrementalAnalyzer>();
