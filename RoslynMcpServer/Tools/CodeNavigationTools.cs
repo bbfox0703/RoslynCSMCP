@@ -69,10 +69,12 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find all references to a specific symbol")]
+        [McpServerTool, Description("Find all references to a specific symbol with configurable detail level")]
         public static async Task<string> FindReferences(
             [Description("Exact symbol name to find references for")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
+            string detailLevel = "locations",
             [Description("Include symbol definition in results")] bool includeDefinition = true,
             IServiceProvider? serviceProvider = null)
         {
@@ -83,21 +85,102 @@ namespace RoslynMcpServer.Tools
                 {
                     return "Error: Invalid solution path provided.";
                 }
-                
+
                 var searchService = serviceProvider?.GetService<SymbolSearchService>();
                 if (searchService == null)
                 {
                     return "Error: Symbol search service not available.";
                 }
-                
+
                 var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
-                return FormatReferenceResults(results);
+
+                // Format based on detail level
+                return detailLevel.ToLower() switch
+                {
+                    "summary" => FormatReferencesSummary(results),
+                    "locations" => FormatReferencesLocations(results),
+                    "full" => FormatReferencesFull(results),
+                    _ => FormatReferencesLocations(results) // Default to locations
+                };
             }
             catch (Exception ex)
             {
                 var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
                 logger?.LogError(ex, "Error finding references for symbol: {SymbolName}", symbolName);
                 return "Error: An unexpected error occurred while finding references.";
+            }
+        }
+
+        [McpServerTool, Description("Get hierarchical structure of projects, namespaces, and types")]
+        public static async Task<string> GetProjectStructure(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Include member signatures (default: false)")] bool includeMembers = false,
+            [Description("Filter by namespace pattern (optional, e.g., 'MyProject.Services')")] string? namespaceFilter = null,
+            [Description("Include only public types (default: true)")] bool publicOnly = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var structureService = serviceProvider?.GetService<ProjectStructureService>();
+                if (structureService == null)
+                {
+                    return "Error: Project structure service not available.";
+                }
+
+                return await structureService.GetStructureAsync(
+                    solutionPath,
+                    includeMembers,
+                    namespaceFilter,
+                    publicOnly);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting project structure");
+                return $"Error: An unexpected error occurred while getting project structure: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Get type signature with members but without implementation")]
+        public static async Task<string> GetTypeSignature(
+            [Description("Fully qualified or simple type name (e.g., 'UserService' or 'MyProject.Services.UserService')")]
+            string typeName,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Include private members (default: false)")] bool includePrivate = false,
+            [Description("Include XML documentation comments (default: true)")] bool includeDocumentation = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var typeSignatureService = serviceProvider?.GetService<TypeSignatureService>();
+                if (typeSignatureService == null)
+                {
+                    return "Error: Type signature service not available.";
+                }
+
+                return await typeSignatureService.GetTypeSignatureAsync(
+                    typeName,
+                    solutionPath,
+                    includePrivate,
+                    includeDocumentation);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting type signature for: {TypeName}", typeName);
+                return $"Error: An unexpected error occurred while getting type signature: {ex.Message}";
             }
         }
 
@@ -114,13 +197,13 @@ namespace RoslynMcpServer.Tools
                 {
                     return "Error: Invalid solution path provided.";
                 }
-                
+
                 var searchService = serviceProvider?.GetService<SymbolSearchService>();
                 if (searchService == null)
                 {
                     return "Error: Symbol search service not available.";
                 }
-                
+
                 var info = await searchService.GetSymbolInfoAsync(symbolName, solutionPath);
                 return FormatSymbolInfo(info);
             }
@@ -129,6 +212,108 @@ namespace RoslynMcpServer.Tools
                 var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
                 logger?.LogError(ex, "Error getting symbol info for: {SymbolName}", symbolName);
                 return "Error: An unexpected error occurred while getting symbol information.";
+            }
+        }
+
+        [McpServerTool, Description("Get code metrics and statistics for entire solution")]
+        public static async Task<string> GetCodeMetrics(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Group by: project | namespace | type (default: project)")] string groupBy = "project",
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var metricsService = serviceProvider?.GetService<CodeMetricsService>();
+                if (metricsService == null)
+                {
+                    return "Error: Code metrics service not available.";
+                }
+
+                return await metricsService.GetMetricsAsync(solutionPath, groupBy);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting code metrics");
+                return $"Error: An unexpected error occurred while getting code metrics: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Get project dependency graph in various formats")]
+        public static async Task<string> GetDependencyGraph(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: text | dot | mermaid (default: text)")] string format = "text",
+            [Description("Include package dependencies (default: false)")] bool includePackages = false,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var graphService = serviceProvider?.GetService<DependencyGraphService>();
+                if (graphService == null)
+                {
+                    return "Error: Dependency graph service not available.";
+                }
+
+                return await graphService.GetDependencyGraphAsync(solutionPath, format, includePackages);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting dependency graph");
+                return $"Error: An unexpected error occurred while getting dependency graph: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Get call hierarchy showing callers and callees for a method")]
+        public static async Task<string> GetCallHierarchy(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Method name to analyze")] string methodName,
+            [Description("Direction: both | callers | callees (default: both)")] string direction = "both",
+            [Description("Maximum depth for hierarchy traversal (default: 3)")] int maxDepth = 3,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                if (string.IsNullOrWhiteSpace(methodName))
+                {
+                    return "Error: Method name is required.";
+                }
+
+                var callHierarchyService = serviceProvider?.GetService<CallHierarchyService>();
+                if (callHierarchyService == null)
+                {
+                    return "Error: Call hierarchy service not available.";
+                }
+
+                return await callHierarchyService.GetCallHierarchyAsync(
+                    solutionPath,
+                    methodName,
+                    direction,
+                    maxDepth);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error getting call hierarchy");
+                return $"Error: An unexpected error occurred while getting call hierarchy: {ex.Message}";
             }
         }
 
@@ -145,13 +330,13 @@ namespace RoslynMcpServer.Tools
                 {
                     return "Error: Invalid solution path provided.";
                 }
-                
+
                 var analysisService = serviceProvider?.GetService<CodeAnalysisService>();
                 if (analysisService == null)
                 {
                     return "Error: Code analysis service not available.";
                 }
-                
+
                 var dependencies = await analysisService.AnalyzeDependenciesAsync(solutionPath, maxDepth);
                 return FormatDependencyAnalysis(dependencies);
             }
@@ -226,6 +411,30 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Execute multiple queries in a single batch request")]
+        public static async Task<string> BatchQuery(
+            [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
+            [Description("Execute queries in parallel (default: true)")] bool parallel = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var batchQueryService = serviceProvider?.GetService<BatchQueryService>();
+                if (batchQueryService == null)
+                {
+                    return "Error: Batch query service not available.";
+                }
+
+                return await batchQueryService.ExecuteBatchAsync(queriesJson, parallel);
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error executing batch query");
+                return $"Error: An unexpected error occurred while executing batch query: {ex.Message}";
+            }
+        }
+
         private static string FormatSearchResults(IEnumerable<SymbolSearchResult> results)
         {
             var grouped = results.GroupBy(r => r.Category);
@@ -250,26 +459,131 @@ namespace RoslynMcpServer.Tools
             return output.ToString();
         }
 
-        private static string FormatReferenceResults(IEnumerable<ReferenceResult> results)
+        // Format: Summary - Only file statistics and line numbers
+        private static string FormatReferencesSummary(IEnumerable<ReferenceResult> results)
         {
+            if (!results.Any())
+                return "No references found.";
+
             var output = new StringBuilder();
-            output.AppendLine($"Found {results.Count()} references:\n");
-            
-            var groupedByFile = results.GroupBy(r => r.DocumentPath);
-            
-            foreach (var fileGroup in groupedByFile.OrderBy(g => g.Key))
+            var groupedByFile = results.GroupBy(r => r.DocumentPath).OrderBy(g => g.Key);
+            var totalCount = results.Count();
+            var fileCount = groupedByFile.Count();
+            var projectCount = results.Select(r => r.ProjectName).Distinct().Count();
+            var symbolName = results.First().SymbolName;
+
+            output.AppendLine($"Found {totalCount} reference{(totalCount > 1 ? "s" : "")} to '{symbolName}' across {fileCount} file{(fileCount > 1 ? "s" : "")}:\n");
+
+            foreach (var fileGroup in groupedByFile)
             {
-                output.AppendLine($"**{Path.GetFileName(fileGroup.Key)}** ({fileGroup.Count()} references):");
-                
-                foreach (var reference in fileGroup.OrderBy(r => r.LineNumber))
-                {
-                    var refType = reference.IsDefinition ? "Definition" : reference.ReferenceKind;
-                    output.AppendLine($"  • Line {reference.LineNumber}: {refType}");
-                    output.AppendLine($"    `{reference.LineText.Trim()}`");
-                }
+                var fileName = Path.GetFileName(fileGroup.Key);
+                var count = fileGroup.Count();
+                var hasDefinition = fileGroup.Any(r => r.IsDefinition);
+                var defSuffix = hasDefinition ? " (Definition)" : "";
+
+                output.AppendLine($"📄 {fileName}: {count} reference{(count > 1 ? "s" : "")}{defSuffix}");
+
+                var lines = fileGroup.Select(r => r.LineNumber).OrderBy(l => l);
+                var linesSummary = lines.Count() > 10
+                    ? $"{string.Join(", ", lines.Take(10))}, ..."
+                    : string.Join(", ", lines);
+
+                output.AppendLine($"   Lines: {linesSummary}");
                 output.AppendLine();
             }
-            
+
+            output.AppendLine($"Total: {totalCount} reference{(totalCount > 1 ? "s" : "")} in {fileCount} file{(fileCount > 1 ? "s" : "")} across {projectCount} project{(projectCount > 1 ? "s" : "")}");
+
+            return output.ToString();
+        }
+
+        // Format: Locations - Show code lines without full context
+        private static string FormatReferencesLocations(IEnumerable<ReferenceResult> results)
+        {
+            if (!results.Any())
+                return "No references found.";
+
+            var output = new StringBuilder();
+            var symbolName = results.First().SymbolName;
+            output.AppendLine($"Found {results.Count()} reference{(results.Count() > 1 ? "s" : "")} to '{symbolName}':\n");
+
+            var groupedByFile = results.GroupBy(r => r.DocumentPath).OrderBy(g => g.Key);
+
+            foreach (var fileGroup in groupedByFile)
+            {
+                var fileName = Path.GetFileName(fileGroup.Key);
+                var count = fileGroup.Count();
+
+                output.AppendLine($"📄 {fileName} ({count} reference{(count > 1 ? "s" : "")})");
+
+                // Show details for files with <= 5 references, summary for larger files
+                if (count <= 5)
+                {
+                    foreach (var reference in fileGroup.OrderBy(r => r.LineNumber))
+                    {
+                        var icon = reference.IsDefinition ? "📍" : "✓";
+                        var refType = reference.IsDefinition ? "Definition" : reference.ReferenceKind;
+                        output.AppendLine($"  {icon} Line {reference.LineNumber}: {refType}");
+                        output.AppendLine($"    {reference.LineText.Trim()}");
+                        output.AppendLine();
+                    }
+                }
+                else
+                {
+                    // Summary for files with many references
+                    var lines = fileGroup.Select(r => r.LineNumber).OrderBy(l => l);
+                    output.AppendLine($"  Lines: {string.Join(", ", lines)}");
+
+                    var definitionRef = fileGroup.FirstOrDefault(r => r.IsDefinition);
+                    if (definitionRef != null)
+                    {
+                        output.AppendLine($"  📍 Definition at line {definitionRef.LineNumber}");
+                    }
+                    output.AppendLine();
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Format: Full - Show complete 5-line context (original behavior)
+        private static string FormatReferencesFull(IEnumerable<ReferenceResult> results)
+        {
+            if (!results.Any())
+                return "No references found.";
+
+            var output = new StringBuilder();
+            var symbolName = results.First().SymbolName;
+            output.AppendLine($"Found {results.Count()} reference{(results.Count() > 1 ? "s" : "")} to '{symbolName}':\n");
+
+            var groupedByFile = results.GroupBy(r => r.DocumentPath).OrderBy(g => g.Key);
+
+            foreach (var fileGroup in groupedByFile)
+            {
+                output.AppendLine($"📄 **{Path.GetFileName(fileGroup.Key)}** ({fileGroup.Count()} references):");
+
+                foreach (var reference in fileGroup.OrderBy(r => r.LineNumber))
+                {
+                    var icon = reference.IsDefinition ? "📍" : "✓";
+                    var refType = reference.IsDefinition ? "Definition" : reference.ReferenceKind;
+                    output.AppendLine($"  {icon} Line {reference.LineNumber}: {refType}");
+
+                    // Show 5-line context if available
+                    if (reference.Context != null && reference.Context.Any())
+                    {
+                        foreach (var contextLine in reference.Context)
+                        {
+                            output.AppendLine($"    {contextLine}");
+                        }
+                    }
+                    else
+                    {
+                        output.AppendLine($"    {reference.LineText.Trim()}");
+                    }
+                    output.AppendLine();
+                }
+            }
+
             return output.ToString();
         }
 
