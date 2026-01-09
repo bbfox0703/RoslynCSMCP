@@ -1,4 +1,4 @@
-# Roslyn MCP Server
+# Roslyn CSharp MCP Server
 
 ![.NET 10.0](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet) ![MCP 0.5.0](https://img.shields.io/badge/MCP-0.5.0--preview.1-00A4EF) ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
