@@ -134,7 +134,37 @@ The codebase follows a layered architecture:
 
 ### Logging Requirements
 
-All logging MUST go to stderr due to MCP's stdio transport protocol (stdout is reserved for MCP messages). This is configured in Program.cs:38-42 via `LogToStandardErrorThreshold`.
+**Dual Logging Strategy (Serilog)**
+
+The server uses Serilog for structured logging with dual output:
+
+1. **stderr Output** (Required for MCP protocol)
+   - All log levels output to stderr (stdout reserved for MCP messages)
+   - Configured via `standardErrorFromLevel: Verbose`
+   - Ensures Claude Desktop/CLI receives all diagnostic information
+
+2. **File Logging** (For debugging and diagnostics)
+   - **Development Mode**: Verbose logging to help developers debug
+     - Location: `%TEMP%\RoslynCSMCP\logs\debug-YYYYMMDD.log` (Windows)
+     - Location: `/tmp/RoslynCSMCP/logs/debug-YYYYMMDD.log` (Linux/macOS)
+     - Log Level: Verbose (all events)
+     - Retention: 7 days
+     - Includes detailed properties and operation context
+
+   - **Production Mode**: Warning+ logging for issue diagnosis
+     - Location: `%TEMP%\RoslynCSMCP\logs\roslyn-mcp-YYYYMMDD.log`
+     - Log Level: Warning and above
+     - Retention: 30 days
+     - Minimal overhead, only captures problems
+
+**Environment Detection**:
+- Set `DOTNET_ENVIRONMENT=Development` for debug logging
+- Defaults to Production mode if not specified
+
+**Configuration**:
+- `appsettings.json` - Production settings
+- `appsettings.Development.json` - Development settings
+- Logs are written asynchronously with automatic daily rolling
 
 ### Working with Roslyn
 
@@ -158,5 +188,38 @@ MCP server configuration is added to Claude Desktop config:
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 The server runs via `dotnet run --project /path/to/RoslynMcpServer` with environment variables:
-- `DOTNET_ENVIRONMENT`: Production
-- `LOG_LEVEL`: Information
+- `DOTNET_ENVIRONMENT`: Production (default) or Development
+- `LOG_LEVEL`: Information (deprecated, now using Serilog configuration)
+
+### Debugging with File Logs
+
+When debugging or developing RoslynCSMCP:
+
+1. **Enable Development Mode**:
+   ```json
+   "env": {
+     "DOTNET_ENVIRONMENT": "Development"
+   }
+   ```
+
+2. **Locate Log Files**:
+   - **Windows**: `%TEMP%\RoslynCSMCP\logs\debug-YYYYMMDD.log`
+   - **Linux/macOS**: `/tmp/RoslynCSMCP/logs/debug-YYYYMMDD.log`
+   - **Startup logs**: `startup-YYYYMMDD.log` (early initialization)
+
+3. **Log File Contents**:
+   - All tool invocations with parameters
+   - Operation timing (from DiagnosticLogger)
+   - MSBuild workspace loading events
+   - Symbol search and analysis details
+   - Cache hits/misses
+   - Errors with full stack traces
+
+4. **Viewing Logs in Real-time**:
+   ```bash
+   # Windows PowerShell
+   Get-Content "$env:TEMP\RoslynCSMCP\logs\debug-$(Get-Date -Format yyyyMMdd).log" -Wait -Tail 50
+
+   # Linux/macOS
+   tail -f /tmp/RoslynCSMCP/logs/debug-$(date +%Y%m%d).log
+   ```

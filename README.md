@@ -535,14 +535,79 @@ chmod +x install/setup-claude-cli.sh
 chmod +x RoslynMcpServer/test-installation.sh
 ```
 
+### Debugging with File Logs 🔍
+
+**Problem**: When running as an MCP server from Claude Desktop/CLI, debug output goes to stderr and may be hard to view.
+
+**Solution**: Enable Development mode to write detailed logs to file.
+
+#### Enable Debug Logging
+
+**For Claude Desktop**, edit your config file:
+```json
+{
+  "mcpServers": {
+    "roslyn": {
+      "command": "dotnet",
+      "args": ["run", "--project", "/path/to/RoslynCSMCP/RoslynMcpServer"],
+      "env": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
+```
+
+**For Claude CLI**, add the environment variable:
+```bash
+claude mcp add --transport stdio roslyn --scope user \
+  --env DOTNET_ENVIRONMENT=Development \
+  -- dotnet run --project /path/to/RoslynCSMCP/RoslynMcpServer
+```
+
+#### Locate Log Files
+
+After enabling Development mode, logs are written to:
+
+- **Windows**: `%TEMP%\RoslynCSMCP\logs\debug-YYYYMMDD.log`
+  ```powershell
+  # View in PowerShell
+  Get-Content "$env:TEMP\RoslynCSMCP\logs\debug-$(Get-Date -Format yyyyMMdd).log" -Wait -Tail 50
+  ```
+
+- **Linux/macOS**: `/tmp/RoslynCSMCP/logs/debug-YYYYMMDD.log`
+  ```bash
+  # View in terminal
+  tail -f /tmp/RoslynCSMCP/logs/debug-$(date +%Y%m%d).log
+  ```
+
+#### Log Contents
+
+Debug logs include:
+- All MCP tool invocations with parameters
+- Operation timing from DiagnosticLogger
+- MSBuild workspace loading events
+- Symbol search and analysis details
+- Cache hits/misses
+- Full error stack traces
+
+#### Production Logs
+
+In Production mode (default), only warnings and errors are logged to:
+- **Windows**: `%TEMP%\RoslynCSMCP\logs\roslyn-mcp-YYYYMMDD.log`
+- **Linux/macOS**: `/tmp/RoslynCSMCP/logs/roslyn-mcp-YYYYMMDD.log`
+- Retained for 30 days (vs 7 days for debug logs)
+
 ## Project Structure
 
 ```
 RoslynCSMCP/
 ├── RoslynMcpServer/              # Main MCP server project
-│   ├── Program.cs                # MCP server entry point
+│   ├── Program.cs                # MCP server entry point with Serilog configuration
+│   ├── appsettings.json          # Production logging configuration
+│   ├── appsettings.Development.json # Development logging configuration
 │   ├── Tools/
-│   │   └── CodeNavigationTools.cs # 5 MCP tool implementations
+│   │   └── CodeNavigationTools.cs # 12 MCP tool implementations
 │   ├── Services/
 │   │   ├── SymbolSearchService.cs
 │   │   ├── CodeAnalysisService.cs
