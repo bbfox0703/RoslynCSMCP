@@ -24,7 +24,11 @@
       "Bash(git push:*)",
       "Bash(git branch:*)",
       "Bash(dir \"$TEMP\\\\RoslynCSMCP\\\\logs\")",
-      "Bash(git check-ignore:*)"
+      "Bash(git check-ignore:*)",
+      "Bash(claude mcp list:*)",
+      "Bash(claude mcp add:*)",
+      "Bash(claude mcp get:*)",
+      "Bash(claude mcp remove:*)"
     ]
   },
   "disabledMcpjsonServers": [
