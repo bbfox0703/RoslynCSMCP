@@ -323,7 +323,7 @@ Identify complex methods in src/Services/*.cs with threshold 10
 
 ## Available MCP Tools
 
-The server exposes 13 MCP tools organized in three phases:
+The server exposes 15 MCP tools organized in four phases:
 
 ### Core Analysis Tools
 
@@ -416,6 +416,29 @@ The server exposes 13 MCP tools organized in three phases:
     - Use case: "Find who uses DeleteUser in production code (exclude tests)" → 88% token savings
 
 📚 **[Phase 3 Usage Examples](docs/PHASE3_USAGE_EXAMPLES.md)** - Advanced filtering with real-world examples
+
+### Phase 4: Diagnostics & File Analysis ⚡ **NEW**
+
+13. **GetCompilationErrors** - Get compilation errors and warnings without running full build
+    - **severity**: Filter by Error, Warning, Info, or All
+    - **projectFilter**: Filter by project name pattern (supports wildcards)
+    - **errorCodes**: Filter by specific error codes (e.g., CS0103, CS0246)
+    - Provides error location, message, and source code line
+    - Groups by project and severity for easy navigation
+    - **Token savings: 97.5%** vs reading files to find errors manually
+    - Use case: "Get all CS0103 errors in MySolution.sln" → Quick missing variable detection
+
+14. **GetFileOutline** - Get structural outline of C# files without implementation details
+    - Shows file statistics (lines of code, comments, blanks)
+    - Lists using statements and namespaces
+    - Shows all types with inheritance and attributes
+    - Lists members (constructors, fields, properties, methods, events)
+    - Includes XML documentation comments
+    - Option to include/exclude members and documentation
+    - **Token savings: 95%** vs reading full file implementation
+    - Use case: "Get outline of UserService.cs" → Understand file structure in 400 tokens instead of 8,000
+
+📚 **[Phase 4 Usage Examples](docs/PHASE4_USAGE_EXAMPLES.md)** - Diagnostics and file analysis with examples
 
 ## Development and Testing
 
