@@ -1,5 +1,5 @@
-# RoslynMCP Setup Script for Claude CLI
-# This script helps configure RoslynMCP for Claude Code CLI
+# RoslynCSMCP Setup Script for Claude CLI
+# This script helps configure RoslynCSMCP for Claude Code CLI
 
 param(
     [ValidateSet("user", "project", "local")]
@@ -9,7 +9,7 @@ param(
 
 if ($Help) {
     Write-Host @"
-RoslynMCP Setup Script for Claude CLI
+RoslynCSMCP Setup Script for Claude CLI
 
 Usage: .\setup-claude-cli.ps1 [-Scope <user|project|local>] [-Help]
 
@@ -26,7 +26,7 @@ Examples:
     exit 0
 }
 
-Write-Host "=== RoslynMCP Setup for Claude CLI ===" -ForegroundColor Cyan
+Write-Host "=== RoslynCSMCP Setup for Claude CLI ===" -ForegroundColor Cyan
 Write-Host
 
 # Get script directory and project path
@@ -65,7 +65,7 @@ try {
 
 # Build project
 Write-Host
-Write-Host "3. Building RoslynMCP..." -ForegroundColor Yellow
+Write-Host "3. Building RoslynCSMCP..." -ForegroundColor Yellow
 Push-Location $projectPath
 try {
     dotnet build -c Release | Out-Null
@@ -130,7 +130,7 @@ try {
 Write-Host
 Write-Host "=== Setup Complete ===" -ForegroundColor Cyan
 Write-Host
-Write-Host "✓ RoslynMCP is configured for Claude CLI!" -ForegroundColor Green
+Write-Host "✓ RoslynCSMCP is configured for Claude CLI!" -ForegroundColor Green
 Write-Host
 Write-Host "Scope: $Scope" -ForegroundColor Yellow
 

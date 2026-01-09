@@ -5,7 +5,7 @@
       "args": [
         "run",
         "--project",
-        "/absolute/path/to/RoslynMCP/RoslynMcpServer"
+        "/absolute/path/to/RoslynCSMCP/RoslynMcpServer"
       ],
       "env": {
         "DOTNET_ENVIRONMENT": "Production",

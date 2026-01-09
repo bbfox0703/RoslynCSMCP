@@ -1,6 +1,6 @@
 #!/bin/bash
-# RoslynMCP Setup Script for Claude CLI
-# This script helps configure RoslynMCP for Claude Code CLI
+# RoslynCSMCP Setup Script for Claude CLI
+# This script helps configure RoslynCSMCP for Claude Code CLI
 
 set -e
 
@@ -23,7 +23,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --help|-h)
             cat <<EOF
-RoslynMCP Setup Script for Claude CLI
+RoslynCSMCP Setup Script for Claude CLI
 
 Usage: ./setup-claude-cli.sh [--scope <user|project|local>] [--help]
 
@@ -53,7 +53,7 @@ if [[ ! "$SCOPE" =~ ^(user|project|local)$ ]]; then
     exit 1
 fi
 
-echo -e "${CYAN}=== RoslynMCP Setup for Claude CLI ===${NC}"
+echo -e "${CYAN}=== RoslynCSMCP Setup for Claude CLI ===${NC}"
 echo
 
 # Get script directory and project path
@@ -87,7 +87,7 @@ echo -e "${GREEN}   ✓ .NET SDK found: $DOTNET_VERSION${NC}"
 
 # Build project
 echo
-echo -e "${YELLOW}3. Building RoslynMCP...${NC}"
+echo -e "${YELLOW}3. Building RoslynCSMCP...${NC}"
 cd "$PROJECT_PATH"
 if ! dotnet build -c Release > /dev/null 2>&1; then
     echo -e "${RED}   ✗ Build failed${NC}"
@@ -129,7 +129,7 @@ fi
 echo
 echo -e "${CYAN}=== Setup Complete ===${NC}"
 echo
-echo -e "${GREEN}✓ RoslynMCP is configured for Claude CLI!${NC}"
+echo -e "${GREEN}✓ RoslynCSMCP is configured for Claude CLI!${NC}"
 echo
 echo -e "${YELLOW}Scope: $SCOPE${NC}"
 

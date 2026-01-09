@@ -38,8 +38,8 @@ A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/bbfox0703/RoslynMCP.git
-cd RoslynMCP
+git clone https://github.com/bbfox0703/RoslynCSMCP.git
+cd RoslynCSMCP
 ```
 
 ### 2. Build the Project
@@ -107,7 +107,7 @@ Add the following to your `claude_desktop_config.json`:
       "args": [
         "run",
         "--project",
-        "C:\\absolute\\path\\to\\RoslynMCP\\RoslynMcpServer"
+        "C:\\absolute\\path\\to\\RoslynCSMCP\\RoslynMcpServer"
       ],
       "env": {
         "DOTNET_ENVIRONMENT": "Production",
@@ -118,10 +118,10 @@ Add the following to your `claude_desktop_config.json`:
 }
 ```
 
-**Important**: Replace `C:\\absolute\\path\\to\\RoslynMCP\\RoslynMcpServer` with your actual absolute path.
+**Important**: Replace `C:\\absolute\\path\\to\\RoslynCSMCP\\RoslynMcpServer` with your actual absolute path.
 
-- Windows example: `C:\\Users\\YourName\\Projects\\RoslynMCP\\RoslynMcpServer`
-- macOS/Linux example: `/Users/YourName/Projects/RoslynMCP/RoslynMcpServer`
+- Windows example: `C:\\Users\\YourName\\Projects\\RoslynCSMCP\\RoslynMcpServer`
+- macOS/Linux example: `/Users/YourName/Projects/RoslynCSMCP/RoslynMcpServer`
 
 See [claude-desktop-config.example.json](install/claude-desktop-config.example.json) for a complete example.
 
@@ -225,7 +225,7 @@ Available in all your projects:
 claude mcp add --transport stdio roslyn --scope user \
   --env DOTNET_ENVIRONMENT=Production \
   --env LOG_LEVEL=Information \
-  -- dotnet run --project /absolute/path/to/RoslynMCP/RoslynMcpServer
+  -- dotnet run --project /absolute/path/to/RoslynCSMCP/RoslynMcpServer
 ```
 
 #### Project Scope (Team Sharing)
@@ -233,7 +233,7 @@ claude mcp add --transport stdio roslyn --scope user \
 Best for shared projects - configuration is committed to `.mcp.json`:
 
 ```bash
-# From the RoslynMCP directory
+# From the RoslynCSMCP directory
 claude mcp add --transport stdio roslyn --scope project \
   --env DOTNET_ENVIRONMENT=Production \
   --env LOG_LEVEL=Information \
@@ -261,13 +261,13 @@ See [claude-cli-config.example.json](install/claude-cli-config.example.json) for
 # List all configured MCP servers
 claude mcp list
 
-# Check RoslynMCP configuration
+# Check RoslynCSMCP configuration
 claude mcp get roslyn
 
 # Should show: roslyn (stdio) with command and environment details
 ```
 
-### Using RoslynMCP in Claude CLI
+### Using RoslynCSMCP in Claude CLI
 
 Start Claude CLI and use natural language to analyze C# code:
 

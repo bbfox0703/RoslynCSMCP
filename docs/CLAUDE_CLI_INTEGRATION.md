@@ -2,7 +2,7 @@
 
 ---
 
-### RoslynMCP 伺服器特性
+### RoslynCSMCP 伺服器特性
 - **傳輸協議**: stdio (標準輸入/輸出)
 - **啟動命令**: `dotnet run --project <path>`
 - **環境變數**: `DOTNET_ENVIRONMENT`, `LOG_LEVEL`
