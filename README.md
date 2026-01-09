@@ -507,8 +507,9 @@ RoslynMCP/
 ## Documentation
 
 - **[CLAUDE.md](CLAUDE.md)** - Development guide and architecture documentation for Claude Code
-- **[CLAUDE_CLI_INTEGRATION.md](CLAUDE_CLI_INTEGRATION.md)** - Comprehensive Claude CLI integration guide
-- **[UPGRADE_COMPLETE.md](UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
+- **[CLAUDE_CLI_INTEGRATION.md](docs/CLAUDE_CLI_INTEGRATION.md)** - Comprehensive Claude CLI integration guide
+- **[UPGRADE_COMPLETE.md](docs/UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
+- **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan
 
 ## License
 
