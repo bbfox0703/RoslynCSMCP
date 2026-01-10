@@ -104,6 +104,8 @@ namespace RoslynMcpServer.Models
         public string FileName { get; set; } = string.Empty;
         public int LineNumber { get; set; }
         public int Complexity { get; set; }
+        public int CognitiveComplexity { get; set; }
+        public int MaxNestingDepth { get; set; }
         public string ClassName { get; set; } = string.Empty;
         public string Namespace { get; set; } = string.Empty;
     }

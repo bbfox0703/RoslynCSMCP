@@ -223,7 +223,11 @@ namespace RoslynMcpServer.Services
         private void AnalyzeMemberComplexity(SyntaxNode memberNode, string filePath, List<ComplexityResult> results)
         {
             var complexity = CalculateCyclomaticComplexity(memberNode);
-            if (complexity >= 5) // Threshold
+            var cognitiveComplexity = CalculateCognitiveComplexity(memberNode);
+            var maxNestingDepth = CalculateMaxNestingDepth(memberNode);
+
+            // Report if either cyclomatic or cognitive complexity exceeds threshold
+            if (complexity >= 5 || cognitiveComplexity >= 5)
             {
                 var lineSpan = memberNode.GetLocation().GetLineSpan();
                 var (memberName, memberType) = GetMemberNameAndType(memberNode);
@@ -234,6 +238,8 @@ namespace RoslynMcpServer.Services
                     FileName = Path.GetFileName(filePath),
                     LineNumber = lineSpan.StartLinePosition.Line + 1,
                     Complexity = complexity,
+                    CognitiveComplexity = cognitiveComplexity,
+                    MaxNestingDepth = maxNestingDepth,
                     ClassName = GetContainingClassName(memberNode),
                     Namespace = GetContainingNamespace(memberNode)
                 });
@@ -294,6 +300,142 @@ namespace RoslynMcpServer.Services
             complexity += whenClauses.Count();
 
             return complexity;
+        }
+
+        /// <summary>
+        /// Calculates cognitive complexity considering nesting depth
+        /// Based on SonarSource Cognitive Complexity specification
+        /// </summary>
+        private int CalculateCognitiveComplexity(SyntaxNode memberNode)
+        {
+            int cognitiveComplexity = 0;
+
+            void AnalyzeNode(SyntaxNode node, int nestingLevel)
+            {
+                // Structural decision points: +1 + nesting level
+                if (node.IsKind(SyntaxKind.IfStatement) ||
+                    node.IsKind(SyntaxKind.WhileStatement) ||
+                    node.IsKind(SyntaxKind.ForStatement) ||
+                    node.IsKind(SyntaxKind.ForEachStatement) ||
+                    node.IsKind(SyntaxKind.DoStatement) ||
+                    node.IsKind(SyntaxKind.SwitchStatement) ||
+                    node.IsKind(SyntaxKind.CatchClause) ||
+                    node.IsKind(SyntaxKind.ConditionalExpression) ||  // Ternary operator
+                    node.IsKind(SyntaxKind.CoalesceExpression) ||     // Null coalescing
+                    node.IsKind(SyntaxKind.SwitchExpression))         // Switch expressions
+                {
+                    cognitiveComplexity += 1 + nestingLevel;
+
+                    // Recursively analyze children with increased nesting
+                    foreach (var child in node.ChildNodes())
+                    {
+                        AnalyzeNode(child, nestingLevel + 1);
+                    }
+                    return; // Don't continue to avoid double-counting
+                }
+
+                // Logical operators: +1 (not affected by nesting)
+                if (node.IsKind(SyntaxKind.LogicalAndExpression) ||
+                    node.IsKind(SyntaxKind.LogicalOrExpression))
+                {
+                    // Only count if it breaks the binary sequence
+                    var parent = node.Parent;
+                    if (parent == null ||
+                        (!parent.IsKind(SyntaxKind.LogicalAndExpression) &&
+                         !parent.IsKind(SyntaxKind.LogicalOrExpression)))
+                    {
+                        cognitiveComplexity += 1;
+                    }
+                }
+
+                // Break and continue: +1 (not affected by nesting)
+                if (node.IsKind(SyntaxKind.BreakStatement) ||
+                    node.IsKind(SyntaxKind.ContinueStatement))
+                {
+                    cognitiveComplexity += 1;
+                }
+
+                // Goto statements: +1 (not affected by nesting)
+                if (node.IsKind(SyntaxKind.GotoStatement))
+                {
+                    cognitiveComplexity += 1;
+                }
+
+                // Switch expression arms: each arm adds +1 + nesting level
+                if (node is SwitchExpressionSyntax switchExpr)
+                {
+                    foreach (var arm in switchExpr.Arms)
+                    {
+                        cognitiveComplexity += 1 + nestingLevel;
+
+                        // When clauses add additional complexity
+                        if (arm.Pattern is not null && arm.Pattern.DescendantNodes().OfType<WhenClauseSyntax>().Any())
+                        {
+                            cognitiveComplexity += 1;
+                        }
+                    }
+                    return; // Don't continue to avoid double-counting
+                }
+
+                // Recursively analyze children at the same nesting level
+                foreach (var child in node.ChildNodes())
+                {
+                    AnalyzeNode(child, nestingLevel);
+                }
+            }
+
+            // Start analysis at nesting level 0
+            foreach (var child in memberNode.ChildNodes())
+            {
+                AnalyzeNode(child, 0);
+            }
+
+            return cognitiveComplexity;
+        }
+
+        /// <summary>
+        /// Calculates the maximum nesting depth of control structures
+        /// </summary>
+        private int CalculateMaxNestingDepth(SyntaxNode memberNode)
+        {
+            int maxDepth = 0;
+
+            void CalculateDepth(SyntaxNode node, int currentDepth)
+            {
+                // Track nesting for control structures
+                bool isNestingNode = node.IsKind(SyntaxKind.IfStatement) ||
+                                   node.IsKind(SyntaxKind.WhileStatement) ||
+                                   node.IsKind(SyntaxKind.ForStatement) ||
+                                   node.IsKind(SyntaxKind.ForEachStatement) ||
+                                   node.IsKind(SyntaxKind.DoStatement) ||
+                                   node.IsKind(SyntaxKind.SwitchStatement) ||
+                                   node.IsKind(SyntaxKind.TryStatement) ||
+                                   node.IsKind(SyntaxKind.CatchClause) ||
+                                   node.IsKind(SyntaxKind.ConditionalExpression) ||
+                                   node.IsKind(SyntaxKind.SwitchExpression);
+
+                int nextDepth = isNestingNode ? currentDepth + 1 : currentDepth;
+
+                // Update max depth
+                if (nextDepth > maxDepth)
+                {
+                    maxDepth = nextDepth;
+                }
+
+                // Recursively check children
+                foreach (var child in node.ChildNodes())
+                {
+                    CalculateDepth(child, nextDepth);
+                }
+            }
+
+            // Start from depth 0
+            foreach (var child in memberNode.ChildNodes())
+            {
+                CalculateDepth(child, 0);
+            }
+
+            return maxDepth;
         }
 
         private string GetContainingClassName(SyntaxNode memberNode)

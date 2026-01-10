@@ -79,6 +79,18 @@ namespace RoslynMcpServer.Services
         private long _currentCacheSize = 0;
         private readonly object _sizeLock = new object();
 
+        // Circuit breaker for L2 cache (Redis)
+        private CircuitBreakerState _l2CircuitState = CircuitBreakerState.Closed;
+        private int _l2FailureCount = 0;
+        private DateTime _l2LastFailureTime = DateTime.MinValue;
+        private DateTime _l2CircuitOpenedTime = DateTime.MinValue;
+        private readonly object _circuitLock = new object();
+
+        // Circuit breaker configuration
+        private const int FailureThreshold = 3; // Open circuit after 3 failures
+        private static readonly TimeSpan CircuitOpenDuration = TimeSpan.FromMinutes(5); // Keep circuit open for 5 minutes
+        private static readonly TimeSpan FailureWindow = TimeSpan.FromMinutes(1); // Count failures within 1 minute
+
         public MultiLevelCacheManager(
             IMemoryCache memoryCache,
             IDistributedCache? distributedCache = null,
@@ -118,43 +130,36 @@ namespace RoslynMcpServer.Services
                 return value;
             }
 
-            // L2 Cache check (if available)
-            if (_l2Cache != null)
+            // L2 Cache check (if available, with circuit breaker protection)
+            value = await TryGetFromL2CacheAsync<T>(key);
+            if (value != null)
             {
-                var serializedValue = await _l2Cache.GetStringAsync(key);
-                if (serializedValue != null)
-                {
-                    value = JsonSerializer.Deserialize<T>(serializedValue);
-                    if (value != null)
+                _logger?.LogDebug("L2 cache hit: {Key}", key);
+
+                // Store in L1 with size tracking
+                CheckAndCompactCache();
+                long estimatedSize = EstimateObjectSize(value);
+                var cacheEntryOptions = new MemoryCacheEntryOptions()
+                    .SetAbsoluteExpiration(l1Expiry ?? TimeSpan.FromMinutes(10))
+                    .SetSize(estimatedSize)
+                    .RegisterPostEvictionCallback((k, v, reason, state) =>
                     {
-                        _logger?.LogDebug("L2 cache hit: {Key}", key);
-
-                        // Store in L1 with size tracking
-                        CheckAndCompactCache();
-                        long estimatedSize = EstimateObjectSize(value);
-                        var cacheEntryOptions = new MemoryCacheEntryOptions()
-                            .SetAbsoluteExpiration(l1Expiry ?? TimeSpan.FromMinutes(10))
-                            .SetSize(estimatedSize)
-                            .RegisterPostEvictionCallback((k, v, reason, state) =>
-                            {
-                                if (reason != EvictionReason.Replaced)
-                                {
-                                    lock (_sizeLock)
-                                    {
-                                        _currentCacheSize -= estimatedSize;
-                                    }
-                                }
-                            });
-
-                        _l1Cache.Set(key, value, cacheEntryOptions);
-                        lock (_sizeLock)
+                        if (reason != EvictionReason.Replaced)
                         {
-                            _currentCacheSize += estimatedSize;
+                            lock (_sizeLock)
+                            {
+                                _currentCacheSize -= estimatedSize;
+                            }
                         }
+                    });
 
-                        return value;
-                    }
+                _l1Cache.Set(key, value, cacheEntryOptions);
+                lock (_sizeLock)
+                {
+                    _currentCacheSize += estimatedSize;
                 }
+
+                return value;
             }
 
             // L3 Persistent cache check
@@ -212,14 +217,8 @@ namespace RoslynMcpServer.Services
             _logger?.LogDebug("Added to L1 cache: {Key}, Size: {Size} bytes, Total: {Total} bytes",
                 key, estimatedSize, CurrentCacheSize);
 
-            if (_l2Cache != null)
-            {
-                var serializedValue = JsonSerializer.Serialize(value);
-                await _l2Cache.SetStringAsync(key, serializedValue, new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = l2Expiry ?? TimeSpan.FromHours(1)
-                });
-            }
+            // Try to store in L2 cache with circuit breaker protection
+            await TrySetToL2CacheAsync(key, value, l2Expiry);
         }
         
         private async Task StoreInAllCaches<T>(string key, T value, TimeSpan? l1Expiry, TimeSpan? l2Expiry)
@@ -315,19 +314,172 @@ namespace RoslynMcpServer.Services
         }
 
         /// <summary>
+        /// Checks if L2 cache should be attempted based on circuit breaker state
+        /// </summary>
+        private bool ShouldAttemptL2Cache()
+        {
+            lock (_circuitLock)
+            {
+                switch (_l2CircuitState)
+                {
+                    case CircuitBreakerState.Closed:
+                        return true;
+
+                    case CircuitBreakerState.Open:
+                        // Check if we should transition to half-open
+                        if (DateTime.UtcNow - _l2CircuitOpenedTime >= CircuitOpenDuration)
+                        {
+                            _l2CircuitState = CircuitBreakerState.HalfOpen;
+                            _logger?.LogInformation("L2 cache circuit breaker transitioning to HalfOpen state");
+                            return true;
+                        }
+                        return false;
+
+                    case CircuitBreakerState.HalfOpen:
+                        // Allow one attempt in half-open state
+                        return true;
+
+                    default:
+                        return false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Records a successful L2 cache operation
+        /// </summary>
+        private void RecordL2Success()
+        {
+            lock (_circuitLock)
+            {
+                if (_l2CircuitState == CircuitBreakerState.HalfOpen)
+                {
+                    _l2CircuitState = CircuitBreakerState.Closed;
+                    _l2FailureCount = 0;
+                    _logger?.LogInformation("L2 cache circuit breaker closed after successful recovery");
+                }
+                else if (_l2CircuitState == CircuitBreakerState.Closed)
+                {
+                    // Reset failure count on success
+                    _l2FailureCount = 0;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Records a failed L2 cache operation
+        /// </summary>
+        private void RecordL2Failure(Exception ex)
+        {
+            lock (_circuitLock)
+            {
+                var now = DateTime.UtcNow;
+
+                // Reset failure count if outside failure window
+                if (now - _l2LastFailureTime > FailureWindow)
+                {
+                    _l2FailureCount = 0;
+                }
+
+                _l2FailureCount++;
+                _l2LastFailureTime = now;
+
+                _logger?.LogWarning(ex, "L2 cache operation failed. Failure count: {FailureCount}", _l2FailureCount);
+
+                // Check if we should open the circuit
+                if (_l2CircuitState == CircuitBreakerState.Closed && _l2FailureCount >= FailureThreshold)
+                {
+                    _l2CircuitState = CircuitBreakerState.Open;
+                    _l2CircuitOpenedTime = now;
+                    _logger?.LogError("L2 cache circuit breaker opened after {FailureCount} failures. Will retry after {Duration}",
+                        _l2FailureCount, CircuitOpenDuration);
+                }
+                else if (_l2CircuitState == CircuitBreakerState.HalfOpen)
+                {
+                    // Failure in half-open state, reopen the circuit
+                    _l2CircuitState = CircuitBreakerState.Open;
+                    _l2CircuitOpenedTime = now;
+                    _logger?.LogWarning("L2 cache circuit breaker reopened after failure in HalfOpen state");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Tries to get a value from L2 cache with circuit breaker protection
+        /// </summary>
+        private async Task<T?> TryGetFromL2CacheAsync<T>(string key)
+        {
+            if (_l2Cache == null || !ShouldAttemptL2Cache())
+            {
+                return default;
+            }
+
+            try
+            {
+                var serializedValue = await _l2Cache.GetStringAsync(key);
+                if (serializedValue != null)
+                {
+                    var value = JsonSerializer.Deserialize<T>(serializedValue);
+                    RecordL2Success();
+                    return value;
+                }
+                RecordL2Success();
+                return default;
+            }
+            catch (Exception ex)
+            {
+                RecordL2Failure(ex);
+                return default;
+            }
+        }
+
+        /// <summary>
+        /// Tries to set a value to L2 cache with circuit breaker protection
+        /// </summary>
+        private async Task<bool> TrySetToL2CacheAsync<T>(string key, T value, TimeSpan? expiry)
+        {
+            if (_l2Cache == null || !ShouldAttemptL2Cache())
+            {
+                return false;
+            }
+
+            try
+            {
+                var serializedValue = JsonSerializer.Serialize(value);
+                await _l2Cache.SetStringAsync(key, serializedValue, new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = expiry ?? TimeSpan.FromHours(1)
+                });
+                RecordL2Success();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                RecordL2Failure(ex);
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Gets cache statistics
         /// </summary>
         public CacheStatistics GetStatistics()
         {
-            return new CacheStatistics
+            lock (_circuitLock)
             {
-                CurrentSizeBytes = CurrentCacheSize,
-                CurrentSizeMB = CurrentCacheSize / 1024.0 / 1024.0,
-                MaxSizeBytes = MaxL1CacheSize,
-                MaxSizeMB = MaxL1CacheSize / 1024.0 / 1024.0,
-                UsagePercentage = (double)CurrentCacheSize / MaxL1CacheSize * 100,
-                IsNearLimit = CurrentCacheSize > WarningThreshold
-            };
+                return new CacheStatistics
+                {
+                    CurrentSizeBytes = CurrentCacheSize,
+                    CurrentSizeMB = CurrentCacheSize / 1024.0 / 1024.0,
+                    MaxSizeBytes = MaxL1CacheSize,
+                    MaxSizeMB = MaxL1CacheSize / 1024.0 / 1024.0,
+                    UsagePercentage = (double)CurrentCacheSize / MaxL1CacheSize * 100,
+                    IsNearLimit = CurrentCacheSize > WarningThreshold,
+                    L2CircuitState = _l2CircuitState.ToString(),
+                    L2FailureCount = _l2FailureCount,
+                    L2LastFailureTime = _l2LastFailureTime == DateTime.MinValue ? null : _l2LastFailureTime
+                };
+            }
         }
     }
 
@@ -342,5 +494,18 @@ namespace RoslynMcpServer.Services
         public double MaxSizeMB { get; set; }
         public double UsagePercentage { get; set; }
         public bool IsNearLimit { get; set; }
+        public string L2CircuitState { get; set; } = string.Empty;
+        public int L2FailureCount { get; set; }
+        public DateTime? L2LastFailureTime { get; set; }
+    }
+
+    /// <summary>
+    /// Circuit breaker state for distributed cache
+    /// </summary>
+    public enum CircuitBreakerState
+    {
+        Closed,    // Normal operation, L2 cache is being used
+        Open,      // Too many failures, L2 cache is bypassed
+        HalfOpen   // Testing if L2 cache has recovered
     }
 }
