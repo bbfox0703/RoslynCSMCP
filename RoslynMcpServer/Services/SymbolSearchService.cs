@@ -334,6 +334,53 @@ namespace RoslynMcpServer.Services
             return filteredReferences;
         }
 
+        /// <summary>
+        /// Finds references across multiple solutions
+        /// </summary>
+        public async Task<IEnumerable<ReferenceResult>> FindReferencesAcrossSolutionsAsync(
+            string symbolName,
+            string[] solutionPaths,
+            bool includeDefinition)
+        {
+            _logger.LogInformation("Finding references for '{SymbolName}' across {Count} solutions",
+                symbolName, solutionPaths.Length);
+
+            // Search all solutions in parallel
+            var searchTasks = solutionPaths.Select(async solutionPath =>
+            {
+                try
+                {
+                    _logger.LogDebug("Searching solution: {SolutionPath}", solutionPath);
+                    var references = await FindReferencesAsync(symbolName, solutionPath, includeDefinition);
+                    _logger.LogDebug("Found {Count} references in {SolutionPath}",
+                        references.Count(), Path.GetFileName(solutionPath));
+                    return references;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to search solution: {SolutionPath}", solutionPath);
+                    return Enumerable.Empty<ReferenceResult>();
+                }
+            });
+
+            var solutionResults = await Task.WhenAll(searchTasks);
+
+            // Merge and deduplicate results
+            var allReferences = solutionResults
+                .SelectMany(r => r)
+                .GroupBy(r => $"{r.DocumentPath}:{r.LineNumber}:{r.ColumnNumber}")
+                .Select(g => g.First()) // Deduplicate by location
+                .OrderBy(r => r.DocumentPath)
+                .ThenBy(r => r.LineNumber)
+                .ThenBy(r => r.ColumnNumber)
+                .ToList();
+
+            _logger.LogInformation("Found {TotalCount} unique references across all solutions",
+                allReferences.Count);
+
+            return allReferences;
+        }
+
         private bool IsTestProject(string projectName)
         {
             // Common test project naming patterns

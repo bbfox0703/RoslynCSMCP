@@ -111,6 +111,78 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find all references to a symbol across multiple solutions")]
+        public static async Task<string> FindReferencesAcrossSolutions(
+            [Description("Exact symbol name to find references for")] string symbolName,
+            [Description("Comma-separated list of solution file paths (.sln)")] string solutionPaths,
+            [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
+            string detailLevel = "locations",
+            [Description("Include symbol definition in results")] bool includeDefinition = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                // Parse solution paths
+                var solutionPathArray = solutionPaths
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToArray();
+
+                if (solutionPathArray.Length == 0)
+                {
+                    return "Error: No solution paths provided.";
+                }
+
+                // Validate all paths
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                var invalidPaths = solutionPathArray
+                    .Where(path => !validator?.ValidateSolutionPath(path) ?? false)
+                    .ToList();
+
+                if (invalidPaths.Any())
+                {
+                    return $"Error: Invalid solution paths: {string.Join(", ", invalidPaths)}";
+                }
+
+                var searchService = serviceProvider?.GetService<SymbolSearchService>();
+                if (searchService == null)
+                {
+                    return "Error: Symbol search service not available.";
+                }
+
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogInformation("Searching for '{SymbolName}' across {Count} solutions",
+                    symbolName, solutionPathArray.Length);
+
+                // Search across all solutions
+                var results = await searchService.FindReferencesAcrossSolutionsAsync(
+                    symbolName,
+                    solutionPathArray,
+                    includeDefinition);
+
+                // Format based on detail level
+                var formattedResult = detailLevel.ToLower() switch
+                {
+                    "summary" => FormatReferencesSummary(results),
+                    "locations" => FormatReferencesLocations(results),
+                    "full" => FormatReferencesFull(results),
+                    _ => FormatReferencesLocations(results)
+                };
+
+                // Add solution summary
+                var solutionSummary = $"Searched across {solutionPathArray.Length} solutions:\n" +
+                    string.Join("\n", solutionPathArray.Select((path, i) => $"  {i + 1}. {Path.GetFileName(path)}")) +
+                    "\n\n";
+
+                return solutionSummary + formattedResult;
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding references across solutions for symbol: {SymbolName}", symbolName);
+                return $"Error: An unexpected error occurred while finding references across solutions: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Get hierarchical structure of projects, namespaces, and types")]
         public static async Task<string> GetProjectStructure(
             [Description("Path to solution file (.sln)")] string solutionPath,
