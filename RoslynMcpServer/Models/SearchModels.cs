@@ -64,6 +64,11 @@ namespace RoslynMcpServer.Models
         public int PublicSymbols { get; set; }
         public int InternalSymbols { get; set; }
 
+        // Circular dependency detection
+        public List<CircularDependency> CircularDependencies { get; set; } = new();
+        public int CircularDependencyCount => CircularDependencies.Count;
+        public bool HasCircularDependencies => CircularDependencies.Any();
+
         // Partial failure tracking
         public int AnalyzedProjects { get; set; }
         public int FailedProjects { get; set; }
@@ -83,6 +88,14 @@ namespace RoslynMcpServer.Models
         public string Namespace { get; set; } = string.Empty;
         public int UsageCount { get; set; }
         public List<string> UsedTypes { get; set; } = new();
+    }
+
+    public class CircularDependency
+    {
+        public List<string> ProjectChain { get; set; } = new();
+        public string Description { get; set; } = string.Empty;
+        public int ChainLength => ProjectChain.Count;
+        public string CycleType { get; set; } = string.Empty; // "Direct" or "Indirect"
     }
 
     public class ComplexityResult
