@@ -91,8 +91,24 @@ dotnet restore
 dotnet build -c Release
 ```
 
-### 3. Test the Server (Optional)
+### 3. Verify Installation (Optional but Recommended)
 
+```bash
+# Windows
+.\test-installation.bat
+
+# Linux/macOS
+./test-installation.sh
+```
+
+This script will:
+- ✅ Check .NET version (must be 10.0+)
+- ✅ Verify all required files exist
+- ✅ Build the project
+- ✅ Test server startup
+- ✅ Check test project (if present)
+
+For manual testing:
 ```bash
 # Run the server (should show MCP protocol initialization)
 cd RoslynMcpServer
