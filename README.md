@@ -766,13 +766,24 @@ RoslynCSMCP/
 
 ## Documentation
 
+### Getting Started
 - **[CLAUDE.md](CLAUDE.md)** - Development guide and architecture documentation for Claude Code
 - **[CLAUDE_CLI_INTEGRATION.md](docs/CLAUDE_CLI_INTEGRATION.md)** - Comprehensive Claude CLI integration guide
-- **[UPGRADE_COMPLETE.md](docs/UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
-- **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan
+- **[MCP_TOOL_SELECTION.md](docs/MCP_TOOL_SELECTION.md)** - How Claude chooses RoslynCSMCP tools and language-specific detection
+
+### Testing & Verification
+- **[TESTING_GUIDE.md](docs/TESTING_GUIDE.md)** - Complete testing guide (installation, unit tests, MCP integration)
+- **[TEST_IMPLEMENTATION_SUMMARY.md](docs/TEST_IMPLEMENTATION_SUMMARY.md)** - Current test status and known issues
+
+### Features & Usage
 - **[PHASE1_USAGE_EXAMPLES.md](docs/PHASE1_USAGE_EXAMPLES.md)** - ⚡ Phase 1 token optimization features usage guide with examples
 - **[PHASE2_USAGE_EXAMPLES.md](docs/PHASE2_USAGE_EXAMPLES.md)** - ⚡ Phase 2 advanced analysis features usage guide with examples
 - **[PHASE3_USAGE_EXAMPLES.md](docs/PHASE3_USAGE_EXAMPLES.md)** - ⚡ Phase 3 advanced filtering features usage guide with examples
+- **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan
+
+### Project Information
+- **[UPGRADE_COMPLETE.md](docs/UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
+- **[SOLUTION_STRUCTURE.md](docs/SOLUTION_STRUCTURE.md)** - Solution file organization
 
 ## License
 

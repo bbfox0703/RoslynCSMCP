@@ -149,13 +149,43 @@ This script:
 ```
 
 This script:
-1. Verifies RoslynCSMCP is in Claude CLI config
-2. Tests that the server can start
-3. Checks for recent log files
-4. Provides step-by-step testing instructions
-5. Shows how to monitor logs in real-time
+1. Verifies Claude CLI is installed
+2. Checks if RoslynCSMCP MCP server is configured (via `claude mcp list`)
+3. Tests that the server can start
+4. Checks for recent log files
+5. Provides step-by-step testing instructions
+6. Shows how to monitor logs in real-time
 
 **When to use:** When using Claude CLI (command line) with C# projects.
+
+**Adding RoslynCSMCP to Claude CLI:**
+
+If not configured, add it using the `claude mcp add` command:
+
+```powershell
+# Add with full project path
+claude mcp add roslyn-mcp -e DOTNET_ENVIRONMENT=Development -- dotnet run --project "D:\Github\RoslynCSMCP\RoslynMcpServer"
+
+# Or use relative path from the script directory
+cd D:\Github\RoslynCSMCP
+claude mcp add roslyn-mcp -e DOTNET_ENVIRONMENT=Development -- dotnet run --project ".\RoslynMcpServer"
+
+# If already built (faster startup)
+claude mcp add roslyn-mcp -e DOTNET_ENVIRONMENT=Development -- dotnet run --project ".\RoslynMcpServer" --no-build
+```
+
+**Managing the MCP server:**
+
+```powershell
+# List all configured MCP servers
+claude mcp list
+
+# Get details about RoslynCSMCP
+claude mcp get roslyn-mcp
+
+# Remove RoslynCSMCP
+claude mcp remove roslyn-mcp
+```
 
 ### How to Verify RoslynCSMCP is Being Used
 
