@@ -9,6 +9,7 @@
     <RepositoryUrl>https://github.com/bbfox0703/RoslynCSMCP.git</RepositoryUrl>
     <AssemblyVersion>1.0.0.1</AssemblyVersion>
     <FileVersion>1.0.0.1</FileVersion>
+    <AssemblyTitle>Roslyn C# MCP Server</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>
