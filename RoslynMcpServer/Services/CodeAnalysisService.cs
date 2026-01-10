@@ -177,6 +177,15 @@ namespace RoslynMcpServer.Services
                     failedProjects, analyzedProjects + failedProjects);
             }
 
+            // Detect circular dependencies
+            analysis.CircularDependencies = DetectCircularDependencies(solution);
+
+            if (analysis.HasCircularDependencies)
+            {
+                _logger.LogWarning("Detected {Count} circular dependencies in solution",
+                    analysis.CircularDependencyCount);
+            }
+
             return analysis;
         }
 
@@ -297,6 +306,167 @@ namespace RoslynMcpServer.Services
         {
             var systemPrefixes = new[] { "System", "Microsoft" };
             return systemPrefixes.Any(prefix => namespaceName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Detects circular dependencies in the solution using Tarjan's algorithm
+        /// </summary>
+        private List<CircularDependency> DetectCircularDependencies(Solution solution)
+        {
+            var circularDependencies = new List<CircularDependency>();
+
+            // Build dependency graph
+            var graph = BuildProjectDependencyGraph(solution);
+
+            if (graph.Count == 0)
+            {
+                return circularDependencies; // No projects or no dependencies
+            }
+
+            // Use Tarjan's algorithm to find strongly connected components
+            var stronglyConnectedComponents = FindStronglyConnectedComponents(graph);
+
+            // Filter out single-node components (not circular)
+            foreach (var scc in stronglyConnectedComponents.Where(scc => scc.Count > 1))
+            {
+                // This is a circular dependency
+                var cycle = new CircularDependency
+                {
+                    ProjectChain = scc,
+                    CycleType = scc.Count == 2 ? "Direct" : "Indirect",
+                    Description = $"Circular dependency detected: {string.Join(" → ", scc)} → {scc[0]}"
+                };
+
+                circularDependencies.Add(cycle);
+            }
+
+            // Also check for direct bidirectional dependencies (A → B and B → A)
+            foreach (var kvp in graph)
+            {
+                var projectA = kvp.Key;
+                var dependenciesOfA = kvp.Value;
+
+                foreach (var projectB in dependenciesOfA)
+                {
+                    if (graph.ContainsKey(projectB) && graph[projectB].Contains(projectA))
+                    {
+                        // Found direct circular dependency
+                        // Make sure we don't add duplicates
+                        var existingCycle = circularDependencies.FirstOrDefault(c =>
+                            c.ProjectChain.Count == 2 &&
+                            c.ProjectChain.Contains(projectA) &&
+                            c.ProjectChain.Contains(projectB));
+
+                        if (existingCycle == null)
+                        {
+                            circularDependencies.Add(new CircularDependency
+                            {
+                                ProjectChain = new List<string> { projectA, projectB },
+                                CycleType = "Direct",
+                                Description = $"Direct circular dependency: {projectA} ↔ {projectB}"
+                            });
+                        }
+                    }
+                }
+            }
+
+            return circularDependencies.Distinct().ToList();
+        }
+
+        /// <summary>
+        /// Builds a project dependency graph
+        /// </summary>
+        private Dictionary<string, List<string>> BuildProjectDependencyGraph(Solution solution)
+        {
+            var graph = new Dictionary<string, List<string>>();
+
+            foreach (var project in solution.Projects)
+            {
+                var projectName = project.Name;
+
+                if (!graph.ContainsKey(projectName))
+                {
+                    graph[projectName] = new List<string>();
+                }
+
+                // Add project references
+                foreach (var projectRef in project.ProjectReferences)
+                {
+                    var referencedProject = solution.GetProject(projectRef.ProjectId);
+                    if (referencedProject != null)
+                    {
+                        graph[projectName].Add(referencedProject.Name);
+                    }
+                }
+            }
+
+            return graph;
+        }
+
+        /// <summary>
+        /// Finds strongly connected components using Tarjan's algorithm
+        /// </summary>
+        private List<List<string>> FindStronglyConnectedComponents(Dictionary<string, List<string>> graph)
+        {
+            var index = 0;
+            var stack = new Stack<string>();
+            var indices = new Dictionary<string, int>();
+            var lowLinks = new Dictionary<string, int>();
+            var onStack = new HashSet<string>();
+            var sccs = new List<List<string>>();
+
+            void StrongConnect(string node)
+            {
+                indices[node] = index;
+                lowLinks[node] = index;
+                index++;
+                stack.Push(node);
+                onStack.Add(node);
+
+                if (graph.ContainsKey(node))
+                {
+                    foreach (var neighbor in graph[node])
+                    {
+                        if (!indices.ContainsKey(neighbor))
+                        {
+                            // Neighbor has not been visited
+                            StrongConnect(neighbor);
+                            lowLinks[node] = Math.Min(lowLinks[node], lowLinks[neighbor]);
+                        }
+                        else if (onStack.Contains(neighbor))
+                        {
+                            // Neighbor is on stack, part of current SCC
+                            lowLinks[node] = Math.Min(lowLinks[node], indices[neighbor]);
+                        }
+                    }
+                }
+
+                // If node is a root node, pop the stack and generate an SCC
+                if (lowLinks[node] == indices[node])
+                {
+                    var scc = new List<string>();
+                    string w;
+                    do
+                    {
+                        w = stack.Pop();
+                        onStack.Remove(w);
+                        scc.Add(w);
+                    } while (w != node);
+
+                    sccs.Add(scc);
+                }
+            }
+
+            // Visit all nodes
+            foreach (var node in graph.Keys)
+            {
+                if (!indices.ContainsKey(node))
+                {
+                    StrongConnect(node);
+                }
+            }
+
+            return sccs;
         }
 
         public void Dispose()
