@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using RoslynMcpServer.Services;
 using RoslynMcpServer.Tests.Helpers;
+using System.Text;
+using System.Text.Json;
 
 namespace RoslynMcpServer.Tests.Unit.Services;
 
@@ -29,7 +31,13 @@ public class CacheManagerTests : IDisposable
     public async Task Cache_AddItem_UpdatesSize()
     {
         // Arrange
-        var cacheManager = new MultiLevelCacheManager(_memoryCache, null, null, _mockLogger.Object);
+        var mockL3Cache = new Mock<IPersistentCache>();
+        mockL3Cache.Setup(c => c.GetAsync<byte[]>(It.IsAny<string>()))
+            .Returns(Task.FromResult<byte[]?>(null));
+        mockL3Cache.Setup(c => c.GetAsync<string>(It.IsAny<string>()))
+            .Returns(Task.FromResult<string?>(null));
+
+        var cacheManager = new MultiLevelCacheManager(_memoryCache, null, mockL3Cache.Object, _mockLogger.Object);
         var initialSize = cacheManager.CurrentCacheSize;
 
         // Act
@@ -45,7 +53,13 @@ public class CacheManagerTests : IDisposable
     public async Task Cache_GetStatistics_ReturnsCorrectData()
     {
         // Arrange
-        var cacheManager = new MultiLevelCacheManager(_memoryCache, null, null, _mockLogger.Object);
+        var mockL3Cache = new Mock<IPersistentCache>();
+        mockL3Cache.Setup(c => c.GetAsync<byte[]>(It.IsAny<string>()))
+            .Returns(Task.FromResult<byte[]?>(null));
+        mockL3Cache.Setup(c => c.GetAsync<string>(It.IsAny<string>()))
+            .Returns(Task.FromResult<string?>(null));
+
+        var cacheManager = new MultiLevelCacheManager(_memoryCache, null, mockL3Cache.Object, _mockLogger.Object);
 
         // Act: Add some items
         await cacheManager.GetOrComputeAsync("key1",
@@ -66,7 +80,13 @@ public class CacheManagerTests : IDisposable
     public async Task Cache_ExceedsWarning_LogsWarning()
     {
         // Arrange
-        var cacheManager = new MultiLevelCacheManager(_memoryCache, null, null, _mockLogger.Object);
+        var mockL3Cache = new Mock<IPersistentCache>();
+        mockL3Cache.Setup(c => c.GetAsync<byte[]>(It.IsAny<string>()))
+            .Returns(Task.FromResult<byte[]?>(null));
+        mockL3Cache.Setup(c => c.GetAsync<string>(It.IsAny<string>()))
+            .Returns(Task.FromResult<string?>(null));
+
+        var cacheManager = new MultiLevelCacheManager(_memoryCache, null, mockL3Cache.Object, _mockLogger.Object);
 
         // Act: Add items approaching warning threshold (80 MB)
         for (int i = 0; i < 85; i++)
@@ -96,10 +116,12 @@ public class CacheManagerTests : IDisposable
     {
         // Arrange
         var mockL2Cache = MockServiceProvider.CreateMockDistributedCache();
+        var mockL3Cache = new Mock<IPersistentCache>();
+
         var cacheManager = new MultiLevelCacheManager(
             _memoryCache,
             mockL2Cache.Object,
-            null,
+            mockL3Cache.Object,
             _mockLogger.Object);
 
         // Act
@@ -115,16 +137,24 @@ public class CacheManagerTests : IDisposable
     {
         // Arrange
         var mockL2Cache = MockServiceProvider.CreateMockDistributedCache();
+        var mockL3Cache = new Mock<IPersistentCache>();
+        mockL3Cache.Setup(c => c.GetAsync<byte[]>(It.IsAny<string>()))
+            .Returns(Task.FromResult<byte[]?>(null));
+        mockL3Cache.Setup(c => c.GetAsync<string>(It.IsAny<string>()))
+            .Returns(Task.FromResult<string?>(null));
+
+        // Setup GetAsync (underlying method) to throw exceptions
         mockL2Cache.Setup(c => c.GetAsync(It.IsAny<string>(), default))
             .ThrowsAsync(new Exception("Redis connection failed"));
 
         var cacheManager = new MultiLevelCacheManager(
             _memoryCache,
             mockL2Cache.Object,
-            null,
+            mockL3Cache.Object,
             _mockLogger.Object);
 
-        // Act: Trigger 3 failures
+        // Act: Trigger 3 failures by calling GetOrComputeAsync
+        // This will attempt to get from L2 cache and fail
         for (int i = 0; i < 3; i++)
         {
             await cacheManager.GetOrComputeAsync($"key{i}",
@@ -144,22 +174,49 @@ public class CacheManagerTests : IDisposable
     {
         // Arrange
         var mockL2Cache = MockServiceProvider.CreateMockDistributedCache();
-        int callCount = 0;
-        mockL2Cache.Setup(c => c.GetAsync(It.IsAny<string>(), default))
-            .ReturnsAsync((byte[]?)null)
-            .Callback(() => callCount++);
+        var mockL3Cache = new Mock<IPersistentCache>();
+        mockL3Cache.Setup(c => c.GetAsync<byte[]>(It.IsAny<string>()))
+            .Returns(Task.FromResult<byte[]?>(null));
+        mockL3Cache.Setup(c => c.GetAsync<string>(It.IsAny<string>()))
+            .Returns(Task.FromResult<string?>(null));
 
-        // First, trigger 3 failures to open the circuit
-        mockL2Cache.Setup(c => c.GetAsync(It.Is<string>(k => k.StartsWith("fail")), default))
-            .ThrowsAsync(new Exception("Redis connection failed"));
+        int getCallCount = 0;
+        int setCallCount = 0;
+
+        // Setup to fail first 3 calls
+        mockL2Cache.Setup(c => c.GetAsync(It.IsAny<string>(), default))
+            .ReturnsAsync(() =>
+            {
+                getCallCount++;
+                if (getCallCount <= 3)
+                {
+                    throw new Exception("Redis connection failed");
+                }
+                return (byte[]?)null;
+            });
+
+        mockL2Cache.Setup(c => c.SetAsync(
+            It.IsAny<string>(),
+            It.IsAny<byte[]>(),
+            It.IsAny<DistributedCacheEntryOptions>(),
+            default))
+            .Returns(() =>
+            {
+                setCallCount++;
+                if (setCallCount <= 3)
+                {
+                    throw new Exception("Redis connection failed");
+                }
+                return Task.CompletedTask;
+            });
 
         var cacheManager = new MultiLevelCacheManager(
             _memoryCache,
             mockL2Cache.Object,
-            null,
+            mockL3Cache.Object,
             _mockLogger.Object);
 
-        // Open the circuit
+        // Open the circuit by causing 3 failures
         for (int i = 0; i < 3; i++)
         {
             await cacheManager.GetOrComputeAsync($"fail{i}",
@@ -167,7 +224,8 @@ public class CacheManagerTests : IDisposable
                 TimeSpan.FromMinutes(1));
         }
 
-        callCount = 0; // Reset counter
+        getCallCount = 0; // Reset counter
+        setCallCount = 0;
 
         // Act: Try to access cache with circuit open
         await cacheManager.GetOrComputeAsync("normal-key",
@@ -175,7 +233,10 @@ public class CacheManagerTests : IDisposable
             TimeSpan.FromMinutes(1));
 
         // Assert: L2 cache should not be called when circuit is open
-        callCount.Should().Be(0);
+        // The circuit is open, so it should skip L2 entirely
+        getCallCount.Should().Be(0);
+        setCallCount.Should().Be(0);
+
         var stats = cacheManager.GetStatistics();
         stats.L2CircuitState.Should().Be("Open");
     }
@@ -185,7 +246,14 @@ public class CacheManagerTests : IDisposable
     {
         // Arrange
         var mockL2Cache = MockServiceProvider.CreateMockDistributedCache();
+        var mockL3Cache = new Mock<IPersistentCache>();
+        mockL3Cache.Setup(c => c.GetAsync<byte[]>(It.IsAny<string>()))
+            .Returns(Task.FromResult<byte[]?>(null));
+        mockL3Cache.Setup(c => c.GetAsync<string>(It.IsAny<string>()))
+            .Returns(Task.FromResult<string?>(null));
+
         var failureCount = 0;
+
         mockL2Cache.Setup(c => c.GetAsync(It.IsAny<string>(), default))
             .ReturnsAsync(() =>
             {
@@ -200,7 +268,7 @@ public class CacheManagerTests : IDisposable
         var cacheManager = new MultiLevelCacheManager(
             _memoryCache,
             mockL2Cache.Object,
-            null,
+            mockL3Cache.Object,
             _mockLogger.Object);
 
         // Act: Trigger 2 failures (not enough to open circuit)
@@ -218,30 +286,37 @@ public class CacheManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task Circuit_HalfOpen_SuccessClosesCircuit()
+    public async Task Circuit_SuccessResetsFailureCount()
     {
         // Arrange
         var mockL2Cache = MockServiceProvider.CreateMockDistributedCache();
-        var failureCount = 0;
+        var mockL3Cache = new Mock<IPersistentCache>();
+        mockL3Cache.Setup(c => c.GetAsync<byte[]>(It.IsAny<string>()))
+            .Returns(Task.FromResult<byte[]?>(null));
+        mockL3Cache.Setup(c => c.GetAsync<string>(It.IsAny<string>()))
+            .Returns(Task.FromResult<string?>(null));
+
+        var callCount = 0;
 
         mockL2Cache.Setup(c => c.GetAsync(It.IsAny<string>(), default))
             .ReturnsAsync(() =>
             {
-                failureCount++;
-                if (failureCount <= 3)
+                callCount++;
+                // First 2 calls fail, third succeeds
+                if (callCount <= 2)
                 {
                     throw new Exception("Redis connection failed");
                 }
-                return (byte[]?)null; // Success after 3 failures
+                return (byte[]?)null; // Success (no value found)
             });
 
         var cacheManager = new MultiLevelCacheManager(
             _memoryCache,
             mockL2Cache.Object,
-            null,
+            mockL3Cache.Object,
             _mockLogger.Object);
 
-        // Act: Trigger 3 failures to open circuit
+        // Act: Trigger 2 failures, then 1 success
         for (int i = 0; i < 3; i++)
         {
             await cacheManager.GetOrComputeAsync($"key{i}",
@@ -249,19 +324,10 @@ public class CacheManagerTests : IDisposable
                 TimeSpan.FromMinutes(1));
         }
 
-        // Wait for circuit to transition to HalfOpen (simulate time passing)
-        // In real implementation, this would require time-based testing
-        var stats1 = cacheManager.GetStatistics();
-        stats1.L2CircuitState.Should().Be("Open");
-
-        // Try one more call - should succeed and close circuit
-        await cacheManager.GetOrComputeAsync("test-key",
-            () => Task.FromResult("value"),
-            TimeSpan.FromMinutes(1));
-
-        // Assert: After successful call, failures should be recorded but circuit logic should handle it
-        var stats2 = cacheManager.GetStatistics();
-        failureCount.Should().Be(4); // 3 failures + 1 success
+        // Assert: Success should reset failure count
+        var stats = cacheManager.GetStatistics();
+        stats.L2CircuitState.Should().Be("Closed");
+        stats.L2FailureCount.Should().Be(0); // Reset after success
     }
 
     #endregion
@@ -272,7 +338,13 @@ public class CacheManagerTests : IDisposable
     public async Task Cache_L1Hit_ReturnsValueImmediately()
     {
         // Arrange
-        var cacheManager = new MultiLevelCacheManager(_memoryCache, null, null, _mockLogger.Object);
+        var mockL3Cache = new Mock<IPersistentCache>();
+        mockL3Cache.Setup(c => c.GetAsync<byte[]>(It.IsAny<string>()))
+            .Returns(Task.FromResult<byte[]?>(null));
+        mockL3Cache.Setup(c => c.GetAsync<string>(It.IsAny<string>()))
+            .Returns(Task.FromResult<string?>(null));
+
+        var cacheManager = new MultiLevelCacheManager(_memoryCache, null, mockL3Cache.Object, _mockLogger.Object);
         var computeCallCount = 0;
 
         // Act: First call - cache miss, should compute
@@ -303,7 +375,13 @@ public class CacheManagerTests : IDisposable
     public async Task Cache_DifferentKeys_StoresSeparately()
     {
         // Arrange
-        var cacheManager = new MultiLevelCacheManager(_memoryCache, null, null, _mockLogger.Object);
+        var mockL3Cache = new Mock<IPersistentCache>();
+        mockL3Cache.Setup(c => c.GetAsync<byte[]>(It.IsAny<string>()))
+            .Returns(Task.FromResult<byte[]?>(null));
+        mockL3Cache.Setup(c => c.GetAsync<string>(It.IsAny<string>()))
+            .Returns(Task.FromResult<string?>(null));
+
+        var cacheManager = new MultiLevelCacheManager(_memoryCache, null, mockL3Cache.Object, _mockLogger.Object);
 
         // Act
         await cacheManager.GetOrComputeAsync("key1",
