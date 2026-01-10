@@ -105,6 +105,129 @@ bash test-installation.sh
 ✓ All tests passed! The Roslyn MCP Server is ready to use.
 ```
 
+## MCP Connection Tests
+
+### Purpose
+
+The MCP connection test scripts verify that RoslynCSMCP is properly configured and being used by Claude:
+
+- **`test-mcp-connection.ps1`** - Tests Claude Desktop integration
+- **`test-mcp-cli.ps1`** - Tests Claude CLI (Claude Code) integration
+
+### Differences Between Desktop and CLI Testing
+
+| Feature | `test-mcp-connection.ps1` | `test-mcp-cli.ps1` |
+|---------|--------------------------|-------------------|
+| Target | Claude Desktop | Claude CLI (Claude Code) |
+| Config Path (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` | `%APPDATA%\Claude\claude_code_config.json` |
+| Verifies config | ✅ Yes | ✅ Yes |
+| Tests server startup | ✅ Yes | ✅ Yes |
+| Checks logs | ✅ Yes | ✅ Yes |
+| Provides test guidance | ✅ Yes | ✅ Yes |
+| Real-time log monitoring | ❌ No | ✅ Yes |
+
+### Testing Claude Desktop Integration
+
+```powershell
+# Run the Desktop connection test
+.\test-mcp-connection.ps1
+```
+
+This script:
+1. Verifies RoslynCSMCP is in Claude Desktop config
+2. Tests that the server can start
+3. Checks for recent log files
+4. Provides example prompts to test with
+
+**When to use:** After installing RoslynCSMCP, before using Claude Desktop with C# projects.
+
+### Testing Claude CLI Integration
+
+```powershell
+# Run the CLI connection test
+.\test-mcp-cli.ps1
+```
+
+This script:
+1. Verifies RoslynCSMCP is in Claude CLI config
+2. Tests that the server can start
+3. Checks for recent log files
+4. Provides step-by-step testing instructions
+5. Shows how to monitor logs in real-time
+
+**When to use:** When using Claude CLI (command line) with C# projects.
+
+### How to Verify RoslynCSMCP is Being Used
+
+After running either test script, follow these steps:
+
+**Step 1: Clear old logs**
+```powershell
+Remove-Item "$env:TEMP\RoslynCSMCP\logs\*.log"
+```
+
+**Step 2: Use Claude with a C# solution**
+
+Ask Claude to analyze your C# code with prompts like:
+- "Search for classes named UserService"
+- "Find all references to the GetUser method"
+- "Analyze dependencies in this solution"
+- "Find methods with high complexity"
+
+**Step 3: Check if RoslynCSMCP was used**
+
+Look for evidence in logs:
+```powershell
+# List recent log files
+$logDir = "$env:TEMP\RoslynCSMCP\logs"
+Get-ChildItem $logDir -Filter *.log | Sort-Object LastWriteTime
+
+# Watch logs in real-time
+$today = Get-Date -Format "yyyyMMdd"
+Get-Content "$logDir\debug-$today.log" -Wait -Tail 50
+```
+
+**Signs RoslynCSMCP is being used:**
+- ✅ New `debug-YYYYMMDD.log` files appear
+- ✅ Log entries show "Executing tool: SearchSymbols", "FindReferences", etc.
+- ✅ Roslyn workspace loading messages
+- ✅ Symbol search results with relevance scores
+
+**Signs built-in tools are being used instead:**
+- ❌ No new RoslynCSMCP log files
+- ❌ Claude uses generic tools like "Explore", "Task", "Grep"
+- ❌ No Roslyn-specific messages
+
+### Troubleshooting
+
+**Issue: "RoslynCSMCP is NOT configured"**
+```powershell
+# Run the appropriate setup script
+.\install\setup-claude-desktop.ps1   # For Desktop
+# Or manually edit the config file shown in the error message
+```
+
+**Issue: "Server failed to start"**
+```bash
+# Check build status
+cd RoslynMcpServer
+dotnet build --verbosity detailed
+```
+
+**Issue: "No log files appear when using Claude"**
+
+Possible causes:
+1. Claude is using built-in tools instead of RoslynCSMCP
+2. Not in a directory with .sln or .csproj files
+3. Config not loaded (restart Claude Desktop/CLI)
+4. Server failed to start (check error logs)
+
+Try:
+- Restart Claude Desktop/CLI completely
+- Ensure you're in a C# solution directory
+- Mention "using Roslyn analysis" explicitly in prompts
+- Check server error logs: `Get-Content "$env:TEMP\RoslynCSMCP\logs\debug-$(Get-Date -Format yyyyMMdd).log"`
+
 ## Unit Testing
 
 ### Running Unit Tests
@@ -347,6 +470,8 @@ RoslynMcpServer.Tests/
 | Task | Command | When to Use |
 |------|---------|-------------|
 | Verify installation | `./test-installation.*` | Before setup, troubleshooting |
+| Test Desktop MCP | `./test-mcp-connection.ps1` | Verify Claude Desktop integration |
+| Test CLI MCP | `./test-mcp-cli.ps1` | Verify Claude CLI integration |
 | Run all tests | `dotnet test RoslynCSMCP.sln` | Before commits, CI/CD |
 | Test interactively | `npx @modelcontextprotocol/inspector ...` | Debugging MCP tools |
 | Check coverage | `dotnet test --collect:...` | Periodic quality checks |
