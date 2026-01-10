@@ -785,6 +785,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - Fork from [RoslynMCP](https://github.com/carquiza/RoslynMCP), originally by [Chris Arquiza](https://github.com/carquiza). For personal playground.
+- Not all scripts (installation, test, PowerShell script) are tested.
 - Built with [Roslyn](https://github.com/dotnet/roslyn) - The .NET Compiler Platform
 - Uses [Model Context Protocol](https://modelcontextprotocol.io) for Claude integration
 - Powered by [.NET 10.0](https://dotnet.microsoft.com/download/dotnet/10.0)
