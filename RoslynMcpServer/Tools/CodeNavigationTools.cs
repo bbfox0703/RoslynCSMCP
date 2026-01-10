@@ -260,6 +260,8 @@ namespace RoslynMcpServer.Tools
         public static async Task<string> GetSymbolInfo(
             [Description("Exact symbol name or full qualified name")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Detail level: summary (minimal), basic (balanced), full (comprehensive). Default: basic")]
+            string detailLevel = "basic",
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -277,7 +279,17 @@ namespace RoslynMcpServer.Tools
                 }
 
                 var info = await searchService.GetSymbolInfoAsync(symbolName, solutionPath);
-                return FormatSymbolInfo(info);
+
+                // Normalize detail level to lowercase
+                var normalizedLevel = detailLevel.ToLowerInvariant();
+
+                return normalizedLevel switch
+                {
+                    "summary" => FormatSymbolInfoSummary(info),
+                    "basic" => FormatSymbolInfoBasic(info),
+                    "full" => FormatSymbolInfoFull(info),
+                    _ => FormatSymbolInfoBasic(info)
+                };
             }
             catch (Exception ex)
             {
@@ -628,6 +640,9 @@ namespace RoslynMcpServer.Tools
         [McpServerTool, Description("Get structural outline of a C# file showing types and members without full implementation details")]
         public static async Task<string> GetFileOutline(
             [Description("Path to C# source file (.cs)")] string filePath,
+            [Description("Output mode: compact (minimal info), normal (balanced), detailed (comprehensive). Default: normal")]
+            string mode = "normal",
+            [Description("Maximum members to show per type (default: 10, 0=show all)")] int maxMembers = 10,
             [Description("Include member details (default: true)")] bool includeMembers = true,
             [Description("Include documentation comments (default: true)")] bool includeDocumentation = true,
             IServiceProvider? serviceProvider = null)
@@ -651,7 +666,17 @@ namespace RoslynMcpServer.Tools
                 }
 
                 var outline = await fileAnalysisService.GetFileOutlineAsync(filePath);
-                return FormatFileOutline(outline, includeMembers, includeDocumentation);
+
+                // Normalize mode to lowercase
+                var normalizedMode = mode.ToLowerInvariant();
+
+                return normalizedMode switch
+                {
+                    "compact" => FormatFileOutlineCompact(outline, maxMembers),
+                    "detailed" => FormatFileOutlineDetailed(outline, maxMembers, includeDocumentation),
+                    "normal" => FormatFileOutlineNormal(outline, maxMembers, includeMembers, includeDocumentation),
+                    _ => FormatFileOutlineNormal(outline, maxMembers, includeMembers, includeDocumentation)
+                };
             }
             catch (Exception ex)
             {
@@ -964,42 +989,143 @@ namespace RoslynMcpServer.Tools
             return output.ToString();
         }
 
-        private static string FormatSymbolInfo(RoslynMcpServer.Models.SymbolInfo? info)
+        // Summary mode: Minimal information (30-50 tokens)
+        private static string FormatSymbolInfoSummary(RoslynMcpServer.Models.SymbolInfo? info)
         {
             if (info == null)
                 return "Symbol not found.";
-            
+
+            var output = new StringBuilder();
+            output.AppendLine($"{info.Name} ({info.Kind}, {info.Accessibility})");
+
+            // For methods, show signature
+            if (info.Kind == "Method" && !string.IsNullOrEmpty(info.ReturnType))
+            {
+                var parameters = info.Parameters.Any()
+                    ? string.Join(", ", info.Parameters.Select(p => p.Split(' ').First())) // Just types
+                    : "";
+                output.AppendLine($"→ {info.ReturnType} ({parameters})");
+            }
+            // For fields/properties, show type
+            else if (!string.IsNullOrEmpty(info.ReturnType))
+            {
+                output.AppendLine($"Type: {info.ReturnType}");
+            }
+
+            // Simplified location (just filename and line)
+            if (!string.IsNullOrEmpty(info.SourceLocation))
+            {
+                var parts = info.SourceLocation.Split(':');
+                if (parts.Length >= 2)
+                {
+                    var fileName = Path.GetFileName(parts[0]);
+                    output.AppendLine($"@ {fileName}:{parts[1]}");
+                }
+                else
+                {
+                    output.AppendLine($"@ {Path.GetFileName(info.SourceLocation)}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Basic mode: Balanced information (80-120 tokens)
+        private static string FormatSymbolInfoBasic(RoslynMcpServer.Models.SymbolInfo? info)
+        {
+            if (info == null)
+                return "Symbol not found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**{info.Name}** ({info.Kind})");
+
+            // Type information
+            if (!string.IsNullOrEmpty(info.ReturnType))
+            {
+                if (info.Kind == "Method")
+                {
+                    var paramStr = info.Parameters.Any() ? string.Join(", ", info.Parameters) : "";
+                    output.AppendLine($"Signature: {info.ReturnType} {info.Name}({paramStr})");
+                }
+                else
+                {
+                    output.AppendLine($"Type: {info.ReturnType}");
+                }
+            }
+
+            output.AppendLine($"Accessibility: {info.Accessibility}");
+
+            // Location (declaring type + namespace, or just namespace)
+            if (!string.IsNullOrEmpty(info.DeclaringType))
+            {
+                output.AppendLine($"In: {info.Namespace}.{info.DeclaringType}");
+            }
+            else if (!string.IsNullOrEmpty(info.Namespace))
+            {
+                output.AppendLine($"Namespace: {info.Namespace}");
+            }
+
+            // Simplified file location
+            if (!string.IsNullOrEmpty(info.SourceLocation))
+            {
+                var parts = info.SourceLocation.Split(':');
+                if (parts.Length >= 2)
+                {
+                    var fileName = Path.GetFileName(parts[0]);
+                    output.AppendLine($"File: {fileName}:{parts[1]}");
+                }
+                else
+                {
+                    output.AppendLine($"File: {Path.GetFileName(info.SourceLocation)}");
+                }
+            }
+
+            // Attributes (if any, show count only)
+            if (info.Attributes.Any())
+            {
+                output.AppendLine($"Attributes: {info.Attributes.Count} (use detailLevel=full to see details)");
+            }
+
+            return output.ToString();
+        }
+
+        // Full mode: Comprehensive information (150-250 tokens, original behavior)
+        private static string FormatSymbolInfoFull(RoslynMcpServer.Models.SymbolInfo? info)
+        {
+            if (info == null)
+                return "Symbol not found.";
+
             var output = new StringBuilder();
             output.AppendLine($"**{info.Name}** ({info.Kind})");
             output.AppendLine($"Full Name: `{info.FullName}`");
             output.AppendLine($"Accessibility: {info.Accessibility}");
-            
+
             if (!string.IsNullOrEmpty(info.Namespace))
                 output.AppendLine($"Namespace: {info.Namespace}");
-            
+
             if (!string.IsNullOrEmpty(info.DeclaringType))
                 output.AppendLine($"Declaring Type: {info.DeclaringType}");
-            
+
             if (!string.IsNullOrEmpty(info.ReturnType))
                 output.AppendLine($"Return Type: {info.ReturnType}");
-            
+
             if (info.Parameters.Any())
             {
                 output.AppendLine("Parameters:");
                 foreach (var param in info.Parameters)
                     output.AppendLine($"  • {param}");
             }
-            
+
             if (info.Attributes.Any())
             {
                 output.AppendLine("Attributes:");
                 foreach (var attr in info.Attributes)
                     output.AppendLine($"  • {attr}");
             }
-            
+
             if (!string.IsNullOrEmpty(info.SourceLocation))
                 output.AppendLine($"Location: {info.SourceLocation}");
-            
+
             return output.ToString();
         }
 
@@ -1186,7 +1312,157 @@ namespace RoslynMcpServer.Tools
             return output.ToString();
         }
 
-        private static string FormatFileOutline(FileOutlineResult outline, bool includeMembers, bool includeDocumentation)
+        // Compact mode: Minimal information, maximum token efficiency
+        private static string FormatFileOutlineCompact(FileOutlineResult outline, int maxMembers)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"File: {outline.FileName} ({outline.CodeLines} LOC, {outline.UsingStatements.Count} usings)\n");
+
+            if (!outline.Types.Any())
+            {
+                output.AppendLine("No types found.");
+                return output.ToString();
+            }
+
+            foreach (var type in outline.Types)
+            {
+                output.AppendLine($"{type.Name} ({type.Kind}, {type.Accessibility}) @ {type.Namespace}");
+
+                // Group members by kind and show counts
+                var memberGroups = type.Members.GroupBy(m => m.Kind).OrderBy(g => g.Key).ToList();
+
+                if (memberGroups.Any())
+                {
+                    foreach (var group in memberGroups)
+                    {
+                        var members = group.ToList();
+                        var publicCount = members.Count(m => m.Accessibility == "Public");
+                        var privateCount = members.Count(m => m.Accessibility == "Private");
+                        var countDetail = publicCount > 0 && privateCount > 0
+                            ? $" ({publicCount} public, {privateCount} private)"
+                            : "";
+
+                        output.AppendLine($"  {group.Key}s: {members.Count}{countDetail}");
+
+                        // Show method signatures for methods (compact format)
+                        if (group.Key == "Method")
+                        {
+                            var displayMembers = maxMembers > 0 ? members.Take(maxMembers) : members;
+                            foreach (var method in displayMembers)
+                            {
+                                var modifiers = GetModifiersCompact(method);
+                                // Use Signature for display, Type is the return type
+                                output.AppendLine($"    {method.Signature} {modifiers}");
+                            }
+
+                            if (maxMembers > 0 && members.Count > maxMembers)
+                            {
+                                output.AppendLine($"    ... and {members.Count - maxMembers} more (use maxMembers=0 for all)");
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    output.AppendLine("  No members");
+                }
+
+                output.AppendLine();
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Balanced information
+        private static string FormatFileOutlineNormal(FileOutlineResult outline, int maxMembers, bool includeMembers, bool includeDocumentation)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"**File Outline**: {outline.FileName}\n");
+
+            // Simplified statistics (no percentages)
+            output.AppendLine($"📊 **Statistics**:");
+            output.AppendLine($"  • Lines: {outline.CodeLines} code, {outline.CommentLines} comments, {outline.BlankLines} blank");
+            output.AppendLine($"  • Types: {outline.Types.Count} ({outline.FailedTypes} failed)");
+            if (includeMembers)
+            {
+                output.AppendLine($"  • Members: {outline.Types.Sum(t => t.Members.Count)} ({outline.FailedMembers} failed)");
+            }
+            output.AppendLine();
+
+            // Top 5 using statements only
+            if (outline.UsingStatements.Any())
+            {
+                output.AppendLine($"📦 **Using** ({outline.UsingStatements.Count}): {string.Join(", ", outline.UsingStatements.Take(5))}");
+                if (outline.UsingStatements.Count > 5)
+                {
+                    output.AppendLine($"     ... and {outline.UsingStatements.Count - 5} more");
+                }
+                output.AppendLine();
+            }
+
+            // Types
+            if (outline.Types.Any())
+            {
+                output.AppendLine($"📋 **Types** ({outline.Types.Count}):\n");
+
+                foreach (var type in outline.Types)
+                {
+                    var icon = GetTypeIcon(type.Kind);
+                    output.AppendLine($"{icon} **{type.Name}** ({type.Kind}, {type.Accessibility})");
+                    output.AppendLine($"   Line {type.LineNumber}, Namespace: {type.Namespace}");
+
+                    if (includeDocumentation && !string.IsNullOrWhiteSpace(type.Documentation))
+                    {
+                        output.AppendLine($"   💬 {type.Documentation}");
+                    }
+
+                    if (includeMembers && type.Members.Any())
+                    {
+                        var memberGroups = type.Members.GroupBy(m => m.Kind).OrderBy(g => GetMemberKindOrder(g.Key));
+
+                        foreach (var group in memberGroups)
+                        {
+                            var members = group.ToList();
+                            if (!members.Any()) continue;
+
+                            output.AppendLine($"\n   📋 **{group.Key}s** ({members.Count}):");
+
+                            var displayMembers = maxMembers > 0 ? members.Take(maxMembers) : members;
+                            foreach (var member in displayMembers)
+                            {
+                                output.AppendLine($"     • {member.Signature}");
+                                if (!string.IsNullOrEmpty(member.Type))
+                                {
+                                    output.AppendLine($"       → {member.Type}");
+                                }
+                                output.AppendLine($"       Line {member.LineNumber}, {member.Accessibility}");
+
+                                if (includeDocumentation && !string.IsNullOrWhiteSpace(member.Documentation))
+                                {
+                                    output.AppendLine($"       💬 {member.Documentation}");
+                                }
+                            }
+
+                            if (maxMembers > 0 && members.Count > maxMembers)
+                            {
+                                output.AppendLine($"     ... and {members.Count - maxMembers} more (use maxMembers=0 for all)");
+                            }
+                        }
+                    }
+
+                    output.AppendLine();
+                }
+            }
+            else
+            {
+                output.AppendLine("No types found in this file.");
+            }
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Comprehensive information (original behavior)
+        private static string FormatFileOutlineDetailed(FileOutlineResult outline, int maxMembers, bool includeDocumentation)
         {
             var output = new StringBuilder();
             output.AppendLine($"**File Outline**: {outline.FileName}\n");
@@ -1273,7 +1549,7 @@ namespace RoslynMcpServer.Tools
                     }
 
                     // Members
-                    if (includeMembers && type.Members.Any())
+                    if (type.Members.Any())
                     {
                         output.AppendLine($"   📌 **Members** ({type.Members.Count}):");
 
@@ -1282,9 +1558,11 @@ namespace RoslynMcpServer.Tools
                         foreach (var group in memberGroups.OrderBy(g => GetMemberKindOrder(g.Key)))
                         {
                             var memberIcon = GetMemberIcon(group.Key);
-                            output.AppendLine($"      {memberIcon} {group.Key}s ({group.Count()}):");
+                            var members = group.ToList();
+                            output.AppendLine($"      {memberIcon} {group.Key}s ({members.Count}):");
 
-                            foreach (var member in group)
+                            var displayMembers = maxMembers > 0 ? members.Take(maxMembers) : members;
+                            foreach (var member in displayMembers)
                             {
                                 var modifiers = new List<string>();
                                 if (member.IsStatic) modifiers.Add("static");
@@ -1303,9 +1581,14 @@ namespace RoslynMcpServer.Tools
                                     output.AppendLine($"           💬 {member.Documentation}");
                                 }
                             }
+
+                            if (maxMembers > 0 && members.Count > maxMembers)
+                            {
+                                output.AppendLine($"         ... and {members.Count - maxMembers} more (use maxMembers=0 for all)");
+                            }
                         }
                     }
-                    else if (includeMembers)
+                    else
                     {
                         output.AppendLine($"   📌 No members");
                     }
@@ -1345,6 +1628,32 @@ namespace RoslynMcpServer.Tools
                 "Event" => 5,
                 _ => 99
             };
+        }
+
+        private static string GetTypeIcon(string typeKind)
+        {
+            return typeKind switch
+            {
+                "Class" => "🔷",
+                "Interface" => "🔹",
+                "Struct" => "🔸",
+                "Enum" => "🔢",
+                "Record" => "📝",
+                "Record Struct" => "📝",
+                _ => "•"
+            };
+        }
+
+        private static string GetModifiersCompact(dynamic member)
+        {
+            var modifiers = new List<string>();
+            if (member.IsStatic) modifiers.Add("static");
+            if (member.IsAsync) modifiers.Add("async");
+            if (member.IsAbstract) modifiers.Add("abstract");
+            if (member.IsVirtual) modifiers.Add("virtual");
+            if (member.IsOverride) modifiers.Add("override");
+
+            return modifiers.Any() ? $"[{string.Join(",", modifiers)}]" : "";
         }
 
         private static string FormatImplementationResults(List<ImplementationResult> results, string typeName)

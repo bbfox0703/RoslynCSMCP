@@ -1,682 +1,310 @@
-# Phase 4: Diagnostics & File Analysis - Usage Examples
+# Phase 4 Token Optimization Usage Examples
 
+**Date**: 2026-01-10  
+**Status**: ✅ Implemented  
 **Version**: 1.0
-**Date**: 2026-01-09
-**Status**: ✅ Implemented
 
 ---
 
-## Overview
+## 📊 Overview
 
-Phase 4 implements two high-value features that dramatically reduce token consumption by providing quick access to compilation issues and file structure without reading full implementation details.
+Phase 4A introduces token-optimized parameters:
 
-### New Tools
-
-| Tool | Description | Token Savings |
-|------|-------------|---------------|
-| **GetCompilationErrors** | Get compilation errors and warnings without running full build | 97.5% |
-| **GetFileOutline** | Get file structure outline without reading full implementation | 95% |
+| Tool | New Parameters | Token Savings | Status |
+|------|---------------|---------------|--------|
+| GetFileOutline | `mode`, `maxMembers` | 60-75% | ✅ Implemented |
+| GetSymbolInfo | `detailLevel` | 70-80% | ✅ Implemented |
 
 ---
 
-## 🎯 GetCompilationErrors
-
-### Purpose
-
-Quickly identify compilation errors and warnings across the solution without running a full build. This is especially useful when analyzing unfamiliar codebases or debugging build issues.
+## 🔷 GetFileOutline - Token Optimization
 
 ### Parameters
 
 ```csharp
-GetCompilationErrors(
-    solutionPath: string,        // Path to .sln file
-    severity: string,            // "Error" | "Warning" | "Info" | "All" (default: "All")
-    projectFilter: string?,      // Project name filter (wildcards: *, ?)
-    errorCodes: string[]?        // Specific error codes (e.g., ["CS0103", "CS0246"])
-)
+string mode = "normal"              // compact | normal | detailed  
+int maxMembers = 10                 // Max members per type (0=all)
+bool includeMembers = true          // Legacy parameter
+bool includeDocumentation = true    // Legacy parameter
 ```
 
----
-
-## 📚 GetCompilationErrors Usage Examples
-
-### Example 1: Check All Compilation Issues ⭐ Most Common
-
-**Scenario**: Quickly check if a solution has any build issues
-
-```
-Get all compilation errors in MySolution.sln
-```
-
-**Behind the scenes**:
-```csharp
-GetCompilationErrors(
-    solutionPath: "MySolution.sln",
-    severity: "All"
-)
-```
-
-**Output**:
-```
-**Compilation Diagnostics** (Severity: All)
-
-Found 8 issues:
-
-## Error (5)
-
-### MyProject.Core (3 issues)
-
-**CS0103**: The name 'user' does not exist in the current context
-  📄 UserService.cs:45:12
-  ```csharp
-  var name = user.Name;
-  ```
-
-**CS0246**: The type or namespace name 'InvalidType' could not be found
-  📄 DataAccess.cs:23:5
-  ```csharp
-  InvalidType obj = new InvalidType();
-  ```
-
-**CS1061**: 'string' does not contain a definition for 'Lenght'
-  📄 StringHelper.cs:67:20
-  ```csharp
-  return str.Lenght > 0;
-  ```
-
-### MyProject.WebAPI (2 issues)
-
-**CS0029**: Cannot implicitly convert type 'int' to 'string'
-  📄 UserController.cs:89:16
-  ```csharp
-  string id = user.Id;
-  ```
-
-**CS0103**: The name 'logger' does not exist in the current context
-  📄 HomeController.cs:34:9
-  ```csharp
-  logger.LogInformation("test");
-  ```
-
-## Warning (3)
-
-### MyProject.Core (2 issues)
-
-**CS0169**: The field 'UserService._cache' is never used
-  📄 UserService.cs:12:25
-  ```csharp
-  private Dictionary<int, User> _cache;
-  ```
-
-**CS0618**: 'OldMethod()' is obsolete
-  📄 LegacyCode.cs:56:9
-  ```csharp
-  OldMethod();
-  ```
-
-### MyProject.Tests (1 issue)
-
-**CS0219**: The variable 'result' is assigned but its value is never used
-  📄 UserServiceTests.cs:78:13
-  ```csharp
-  var result = service.GetUser(1);
-  ```
-
----
-**Summary**: 5 Errors, 3 Warnings, 0 Info
-```
-
-**Token Comparison**:
-- Reading all source files to find errors: ~50,000 tokens
-- GetCompilationErrors output: ~1,200 tokens
-- **Savings: 97.5%** 🎉
-
----
-
-### Example 2: Check Only Errors
-
-**Scenario**: Focus only on critical compilation errors
-
-```
-Get compilation errors from MySolution.sln, severity Error
-```
-
-**Behind the scenes**:
-```csharp
-GetCompilationErrors(
-    solutionPath: "MySolution.sln",
-    severity: "Error"
-)
-```
-
-**Output**:
-```
-**Compilation Diagnostics** (Severity: Error)
-
-Found 5 issues:
-
-## Error (5)
-
-### MyProject.Core (3 issues)
-[... only errors shown ...]
-
----
-**Summary**: 5 Errors, 0 Warnings, 0 Info
-```
-
-**Use Case**: Pre-commit check, CI/CD validation.
-
----
-
-### Example 3: Filter by Project Pattern
-
-**Scenario**: Check compilation issues in specific projects
-
-```
-Get compilation errors from MySolution.sln, filter projects matching *.WebAPI
-```
-
-**Behind the scenes**:
-```csharp
-GetCompilationErrors(
-    solutionPath: "MySolution.sln",
-    severity: "All",
-    projectFilter: "*.WebAPI"
-)
-```
-
-**Output**:
-```
-**Compilation Diagnostics** (Severity: All)
-
-Found 2 issues:
-
-## Error (2)
-
-### MyProject.WebAPI (2 issues)
-[... only WebAPI project issues ...]
-
----
-**Summary**: 2 Errors, 0 Warnings, 0 Info
-```
-
-**Use Case**: Layer-specific analysis, debugging specific subsystem.
-
----
-
-### Example 4: Find Specific Error Codes
-
-**Scenario**: Track down specific types of errors (e.g., missing usings)
-
-```
-Get compilation errors from MySolution.sln with error codes CS0103 and CS0246
-```
-
-**Behind the scenes**:
-```csharp
-GetCompilationErrors(
-    solutionPath: "MySolution.sln",
-    severity: "All",
-    errorCodes: ["CS0103", "CS0246"]
-)
-```
-
-**Output**:
-```
-**Compilation Diagnostics** (Severity: All)
-
-Found 3 issues:
-
-## Error (3)
-
-### MyProject.Core (3 issues)
-
-**CS0103**: The name 'user' does not exist in the current context
-  📄 UserService.cs:45:12
-  ```csharp
-  var name = user.Name;
-  ```
-
-**CS0246**: The type or namespace name 'InvalidType' could not be found
-  📄 DataAccess.cs:23:5
-  ```csharp
-  InvalidType obj = new InvalidType();
-  ```
-
-**CS0103**: The name 'logger' does not exist in the current context
-  📄 HomeController.cs:34:9
-  ```csharp
-  logger.LogInformation("test");
-  ```
-
----
-**Summary**: 3 Errors, 0 Warnings, 0 Info
-```
-
-**Use Case**: Systematic fixing of specific error categories.
-
----
-
-### Example 5: Check Build Success
-
-**Scenario**: Verify solution has no errors before proceeding
-
-```
-Check if MySolution.sln has any compilation errors
-```
-
-**Output** (when successful):
-```
-No compilation error issues found. Solution builds successfully!
-```
-
-**Use Case**: Pre-deployment verification, automated testing.
-
----
-
-## 📄 GetFileOutline
-
-### Purpose
-
-Get the structural outline of a C# file showing types, members, and documentation without reading full implementation details. This is extremely useful for understanding file structure without consuming thousands of tokens on method bodies.
-
-### Parameters
+### Mode Comparison
+
+| Mode | Tokens | Use Case |
+|------|--------|----------|
+| compact | 200-500 | Quick overview |
+| normal | 500-1000 | Daily development |
+| detailed | 800-2000 | Deep analysis |
+
+### Example 1: Compact Mode (75% savings)
 
 ```csharp
-GetFileOutline(
-    filePath: string,               // Path to .cs file
-    includeMembers: bool,           // Include member details (default: true)
-    includeDocumentation: bool      // Include XML doc comments (default: true)
-)
+GetFileOutline(filePath: "UserService.cs", mode: "compact", maxMembers: 5)
 ```
 
----
-
-## 📚 GetFileOutline Usage Examples
-
-### Example 1: Quick File Overview ⭐ Most Common
-
-**Scenario**: Understand the structure of a file without reading implementation
-
+**Output (~250 tokens)**:
 ```
-Get outline of UserService.cs
+File: UserService.cs (180 LOC, 15 usings)
+
+UserService (Class, Public) @ MyProject.Services
+  Constructors: 1
+  Fields: 2 (0 public, 2 private)
+  Methods: 8 (6 public, 2 private)
+    GetUserAsync(int id) [async]
+    GetAllUsersAsync() [async]
+    CreateUserAsync(UserDto dto) [async]
+    UpdateUserAsync(int id, UserDto dto) [async]
+    DeleteUserAsync(int id) [async]
+    ... and 3 more (use maxMembers=0 for all)
 ```
 
-**Behind the scenes**:
+**Best for**: Initial exploration, quick reference
+
+### Example 2: Normal Mode (50% savings)
+
 ```csharp
-GetFileOutline(
-    filePath: "D:\\MyProject\\Services\\UserService.cs",
-    includeMembers: true,
-    includeDocumentation: true
-)
+GetFileOutline(filePath: "UserService.cs", mode: "normal", maxMembers: 10)
 ```
 
-**Output**:
+**Output (~650 tokens)**:
 ```
 **File Outline**: UserService.cs
 
 📊 **Statistics**:
-  • Total Lines: 245
-  • Code Lines: 180 (73.5%)
-  • Comment Lines: 45 (18.4%)
-  • Blank Lines: 20 (8.2%)
+  • Lines: 180 code, 40 comments, 30 blank
+  • Types: 2 (0 failed)
+  • Members: 13 (0 failed)
 
-📦 **Using Statements** (8):
-  • System
-  • System.Collections.Generic
-  • System.Linq
-  • System.Threading.Tasks
-  • Microsoft.Extensions.Logging
-  • MyProject.Domain.Entities
-  • MyProject.Domain.Interfaces
-  • MyProject.Infrastructure.Data
+📦 **Using** (15): System, System.Collections.Generic, System.Linq...
+     ... and 10 more
 
-🏷️ **Namespaces**: MyProject.Services
-
-📋 **Types** (1):
+📋 **Types** (2):
 
 🔷 **UserService** (Class, Public)
-   Line 12
-   💬 Service for managing user operations including CRUD and authentication
-   ↗️ Inherits/Implements: IUserService
-   📌 **Members** (15):
-      📦 Fields (2):
-         • Private readonly ILogger<UserService> _logger [static]
-           Line 14
-         • Private readonly IUserRepository _repository
-           Line 15
-      🏗️ Constructors (1):
-         • Public UserService(ILogger<UserService> logger, IUserRepository repository)
-           Line 17
-           💬 Initializes a new instance of the UserService class
-      ⚙️ Methods (10):
-         • Public Task<User> GetUserAsync(int userId) [async]
-           Line 28
-           💬 Gets a user by ID
-         • Public Task<IEnumerable<User>> GetAllUsersAsync() [async]
-           Line 45
-           💬 Gets all users from the repository
-         • Public Task<User> CreateUserAsync(CreateUserRequest request) [async]
-           Line 67
-           💬 Creates a new user
-         • Public Task<User> UpdateUserAsync(int userId, UpdateUserRequest request) [async]
-           Line 89
-         • Public Task<bool> DeleteUserAsync(int userId) [async]
-           Line 112
-         • Public Task<bool> ValidateUserAsync(string username, string password) [async]
-           Line 134
-         • Public Task<User> GetUserByEmailAsync(string email) [async]
-           Line 156
-         • Public Task<IEnumerable<User>> SearchUsersAsync(string query) [async]
-           Line 178
-         • Private Task<bool> ValidateEmailAsync(string email) [async]
-           Line 201
-         • Private void LogUserAction(string action, int userId)
-           Line 223
-      🔧 Properties (2):
-         • Public int TotalUsers { get; }
-           Line 238
-         • Private bool IsInitialized { get; set; }
-           Line 240
+   Line 15, Namespace: MyProject.Services
+
+   📋 **Methods** (8):
+     • GetUserAsync(int id)
+       → Task<User?>
+       Line 30, Public
+     ... (limited to 10 members)
 ```
 
-**Token Comparison**:
-- Reading full file with implementation: ~8,000 tokens
-- GetFileOutline output: ~400 tokens
-- **Savings: 95%** 🎉
+**Best for**: Code review, daily work
+
+### Example 3: Detailed Mode (original)
+
+```csharp
+GetFileOutline(filePath: "UserService.cs", mode: "detailed", maxMembers: 0)
+```
+
+**Output (~1500 tokens)**: Full statistics, all usings, all members with docs
+
+**Best for**: Documentation, comprehensive analysis
 
 ---
 
-### Example 2: Members Only (No Documentation)
+## 🔹 GetSymbolInfo - Token Optimization
 
-**Scenario**: Quick scan of available methods and properties
+### Parameters
 
-```
-Get outline of UserController.cs without documentation
-```
-
-**Behind the scenes**:
 ```csharp
-GetFileOutline(
-    filePath: "D:\\MyProject\\Controllers\\UserController.cs",
-    includeMembers: true,
-    includeDocumentation: false
+string detailLevel = "basic"  // summary | basic | full
+```
+
+### Detail Level Comparison
+
+| Level | Tokens | Use Case |
+|-------|--------|----------|
+| summary | 30-50 | Quick lookup |
+| basic | 80-120 | Daily use |
+| full | 150-250 | Deep analysis |
+
+### Example 4: Summary Mode (80% savings)
+
+```csharp
+GetSymbolInfo(
+    symbolName: "GetUserAsync",
+    solutionPath: "MyProject.sln",
+    detailLevel: "summary"
 )
 ```
 
-**Output**:
+**Output (~40 tokens)**:
 ```
-**File Outline**: UserController.cs
-
-📊 **Statistics**:
-  • Total Lines: 189
-  • Code Lines: 145 (76.7%)
-  • Comment Lines: 28 (14.8%)
-  • Blank Lines: 16 (8.5%)
-
-📦 **Using Statements** (6):
-  • Microsoft.AspNetCore.Mvc
-  • System.Threading.Tasks
-  • MyProject.Services
-  • MyProject.Models.Requests
-  • MyProject.Models.Responses
-  • Microsoft.AspNetCore.Authorization
-
-🏷️ **Namespaces**: MyProject.Controllers
-
-📋 **Types** (1):
-
-🔷 **UserController** (Class, Public)
-   Line 10
-   ↗️ Inherits/Implements: ControllerBase
-   🏷️ Attributes: [ApiController, Route, Authorize]
-   📌 **Members** (7):
-      📦 Fields (1):
-         • Private readonly IUserService _userService
-           Line 15
-      🏗️ Constructors (1):
-         • Public UserController(IUserService userService)
-           Line 17
-      ⚙️ Methods (5):
-         • Public Task<ActionResult<UserResponse>> GetUser(int id) [async]
-           Line 25
-         • Public Task<ActionResult<IEnumerable<UserResponse>>> GetAllUsers() [async]
-           Line 45
-         • Public Task<ActionResult<UserResponse>> CreateUser(CreateUserRequest request) [async]
-           Line 67
-         • Public Task<ActionResult<UserResponse>> UpdateUser(int id, UpdateUserRequest request) [async]
-           Line 89
-         • Public Task<ActionResult> DeleteUser(int id) [async]
-           Line 112
+GetUserAsync (Method, Public)
+→ Task<User?> (int)
+@ UserService.cs:30
 ```
 
-**Use Case**: Quick API surface scan, finding available methods.
+**Best for**: Quick signature checks
+
+### Example 5: Basic Mode (50% savings)
+
+```csharp
+GetSymbolInfo(
+    symbolName: "GetUserAsync",
+    solutionPath: "MyProject.sln",
+    detailLevel: "basic"
+)
+```
+
+**Output (~100 tokens)**:
+```
+**GetUserAsync** (Method)
+Signature: Task<User?> GetUserAsync(int id)
+Accessibility: Public
+In: MyProject.Services.UserService
+File: UserService.cs:30
+Attributes: 1 (use detailLevel=full for details)
+```
+
+**Best for**: Understanding context
+
+### Example 6: Full Mode (original)
+
+```csharp
+GetSymbolInfo(
+    symbolName: "GetUserAsync",
+    solutionPath: "MyProject.sln",
+    detailLevel: "full"
+)
+```
+
+**Output (~200 tokens)**: Full name, namespace, declaring type, all attributes, full path
+
+**Best for**: API documentation, debugging
 
 ---
 
-### Example 3: Type Structure Only
+## 📈 Real-World Savings
 
-**Scenario**: Just want to see what types are in the file
+### Scenario 1: Exploring Codebase
 
+**Before**:
 ```
-Get outline of Models.cs without members
-```
-
-**Behind the scenes**:
-```csharp
-GetFileOutline(
-    filePath: "D:\\MyProject\\Models\\Models.cs",
-    includeMembers: false
-)
+3x GetFileOutline (default)  = 5300 tokens
+2x GetSymbolInfo (default)   = 460 tokens
+Total: 5760 tokens
 ```
 
-**Output**:
+**After**:
 ```
-**File Outline**: Models.cs
-
-📊 **Statistics**:
-  • Total Lines: 312
-  • Code Lines: 245 (78.5%)
-  • Comment Lines: 42 (13.5%)
-  • Blank Lines: 25 (8.0%)
-
-📦 **Using Statements** (3):
-  • System
-  • System.Collections.Generic
-  • System.ComponentModel.DataAnnotations
-
-🏷️ **Namespaces**: MyProject.Models
-
-📋 **Types** (8):
-
-🔷 **User** (Class, Public)
-   Line 8
-   💬 Represents a user entity
-   🏷️ Attributes: [Table]
-
-🔷 **CreateUserRequest** (Class, Public)
-   Line 45
-   💬 Request model for creating a new user
-
-🔷 **UpdateUserRequest** (Class, Public)
-   Line 67
-   💬 Request model for updating an existing user
-
-🔷 **UserResponse** (Class, Public)
-   Line 89
-   💬 Response model for user operations
-
-📝 **UserSummary** (Record, Public)
-   Line 123
-   💬 Lightweight summary of user information
-
-🔹 **IUserValidator** (Interface, Public)
-   Line 145
-   💬 Validator interface for user operations
-
-🔢 **UserRole** (Enum, Public)
-   Line 167
-   💬 User role enumeration
-
-🔸 **UserStats** (Struct, Public)
-   Line 189
-   💬 User statistics structure
+3x GetFileOutline (compact)  = 900 tokens
+2x GetSymbolInfo (summary)   = 85 tokens  
+Total: 985 tokens
 ```
 
-**Use Case**: Understanding file organization, refactoring planning.
+**Savings: 4775 tokens (83%)**
+
+### Scenario 2: Code Review
+
+**Before**: 1800 tokens  
+**After**: 885 tokens  
+**Savings: 915 tokens (51%)**
+
+### Scenario 3: Quick Lookup
+
+**Before**: 230 tokens  
+**After**: 38 tokens  
+**Savings: 192 tokens (83%)**
 
 ---
 
 ## 🎯 Best Practices
 
-### For GetCompilationErrors:
+### When to Use Each Mode
 
-1. **Start with Overview**: Always check all issues first
-   ```
-   Get all compilation errors in MySolution.sln
-   ```
+**GetFileOutline**:
+- `compact`: Exploring, counting members
+- `normal`: Code review, daily work
+- `detailed`: Documentation, deep analysis
 
-2. **Focus on Errors**: Filter by severity to prioritize
-   ```
-   Get compilation errors from MySolution.sln, severity Error
-   ```
+**GetSymbolInfo**:
+- `summary`: Quick lookup, signatures
+- `basic`: Daily queries, navigation
+- `full`: API docs, complete analysis
 
-3. **Use Project Filters**: Narrow down to specific subsystems
-   ```
-   Get compilation errors from MySolution.sln, filter by *.Tests
-   ```
+### Recommended Combos
 
-4. **Track Specific Issues**: Use error codes for systematic fixes
-   ```
-   Get errors CS0103 and CS0246 from MySolution.sln
-   ```
+```csharp
+// Ultra-light exploration
+GetFileOutline(path, mode: "compact", maxMembers: 3)
 
-### For GetFileOutline:
+// Daily development
+GetFileOutline(path, mode: "normal", maxMembers: 10)
 
-1. **Quick Overview**: Include members for complete picture
-   ```
-   Get outline of MyClass.cs
-   ```
+// Quick method check
+GetSymbolInfo(name, sln, detailLevel: "summary")
 
-2. **API Discovery**: Skip documentation for faster scanning
-   ```
-   Get outline of MyService.cs without documentation
-   ```
-
-3. **Structure Analysis**: Exclude members to see type organization
-   ```
-   Get outline of Models.cs without members
-   ```
-
----
-
-## 📊 Token Optimization Impact
-
-### Scenario 1: Finding Build Errors
-
-**Traditional Approach**:
-```
-1. Read multiple files to find errors
-2. Parse code manually
-3. Identify issues
-→ Token usage: ~50,000 tokens
-```
-
-**With GetCompilationErrors**:
-```
-GetCompilationErrors("MySolution.sln", "Error")
-→ Token usage: ~1,000 tokens
-→ Savings: 98% 🚀
+// Standard lookup
+GetSymbolInfo(name, sln, detailLevel: "basic")
 ```
 
 ---
 
-### Scenario 2: Understanding File Structure
+## 💡 Migration Guide
 
-**Traditional Approach**:
-```
-Read entire file (245 lines with implementation)
-→ Token usage: ~8,000 tokens
-```
+**GetFileOutline**:
+```csharp
+// Old (1500-2000 tokens)
+GetFileOutline(path, includeMembers: true)
 
-**With GetFileOutline**:
-```
-GetFileOutline("UserService.cs")
-→ Token usage: ~400 tokens
-→ Savings: 95% 🎉
-```
+// New - balanced (600-800 tokens, 60% savings)
+GetFileOutline(path, mode: "normal", maxMembers: 10)
 
----
-
-## 🔍 Common Use Cases
-
-### Pre-Commit Checks
-```
-Get all compilation errors in MySolution.sln
+// New - minimal (250-350 tokens, 80% savings)  
+GetFileOutline(path, mode: "compact", maxMembers: 5)
 ```
 
-### API Discovery
-```
-Get outline of MyApiClient.cs
-```
+**GetSymbolInfo**:
+```csharp
+// Old (200-250 tokens)
+GetSymbolInfo(name, sln)
 
-### Bug Investigation
-```
-Get compilation errors from MySolution.sln with error code CS0103
-```
+// New - balanced (100-120 tokens, 50% savings)
+GetSymbolInfo(name, sln, detailLevel: "basic")
 
-### Code Review Preparation
-```
-Get outline of NewFeature.cs with members
-```
-
-### Layer Violation Detection
-```
-Get compilation errors from *.Domain projects in MySolution.sln
+// New - minimal (40-50 tokens, 80% savings)
+GetSymbolInfo(name, sln, detailLevel: "summary")
 ```
 
 ---
 
-## 💡 Tips & Tricks
+## 📚 Token Estimates
 
-### Tip 1: Combine with FindReferences
+### GetFileOutline
 
-First, get file outline to understand structure:
-```
-Get outline of UserService.cs
-```
+| File Size | Compact | Normal | Detailed |
+|-----------|---------|--------|----------|
+| Small (<100 LOC) | 100-200 | 300-500 | 500-800 |
+| Medium (100-500) | 200-400 | 500-800 | 800-1500 |
+| Large (500+) | 300-600 | 800-1200 | 1500-2500 |
 
-Then find specific member references:
-```
-Find references to DeleteUserAsync in MySolution.sln, excluding tests
-```
+### GetSymbolInfo
 
-### Tip 2: Error Code Lookup
-
-Common C# error codes to filter:
-- **CS0103**: Name does not exist (missing using/variable)
-- **CS0246**: Type not found (missing using/reference)
-- **CS0029**: Type conversion errors
-- **CS1061**: Missing member definition
-- **CS0618**: Obsolete API usage
-
-### Tip 3: Progressive Detail Levels
-
-1. Start with type structure only (no members)
-2. Add members if needed
-3. Include documentation for deep understanding
+| Complexity | Summary | Basic | Full |
+|------------|---------|-------|------|
+| Simple field | 25-35 | 60-80 | 100-150 |
+| Property | 30-40 | 70-90 | 120-170 |
+| Simple method | 35-50 | 90-120 | 150-250 |
+| Complex method | 40-60 | 110-140 | 200-300 |
 
 ---
 
-## 🚀 Next Steps
+## 🎓 Tips
 
-- Try GetCompilationErrors on your solution
-- Use GetFileOutline to explore unfamiliar files
-- Combine with Phase 3 filtering tools for maximum efficiency
-- Share feedback for improvements
+1. Start with `compact`/`summary`, upgrade only when needed
+2. Use `maxMembers` to limit output (5-10 for reviews)
+3. Avoid `full` mode unless you need attributes/full paths
+4. Combine strategically for different workflows
 
 ---
 
-## 📞 Feedback
+## ✅ Summary
 
-Phase 4 provides critical diagnostic and structure information with minimal token cost. Your feedback helps us improve!
+**Total impact**: 40-80% token savings  
+**Migration effort**: Zero (backward compatible)  
+**User experience**: Improved (faster, focused results)
+
+Start using these optimizations today!

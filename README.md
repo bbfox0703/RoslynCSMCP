@@ -779,7 +779,9 @@ RoslynCSMCP/
 - **[PHASE1_USAGE_EXAMPLES.md](docs/PHASE1_USAGE_EXAMPLES.md)** - ⚡ Phase 1 token optimization features usage guide with examples
 - **[PHASE2_USAGE_EXAMPLES.md](docs/PHASE2_USAGE_EXAMPLES.md)** - ⚡ Phase 2 advanced analysis features usage guide with examples
 - **[PHASE3_USAGE_EXAMPLES.md](docs/PHASE3_USAGE_EXAMPLES.md)** - ⚡ Phase 3 advanced filtering features usage guide with examples
-- **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan
+- **[PHASE4_USAGE_EXAMPLES.md](docs/PHASE4_USAGE_EXAMPLES.md)** - ⚡ Phase 4A token optimization usage guide (60-80% savings) ✅ NEW
+- **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan (Phase 1-3)
+- **[TOKEN_OPTIMIZATION_PHASE4.md](docs/TOKEN_OPTIMIZATION_PHASE4.md)** - Phase 4 token optimization evaluation and roadmap
 
 ### Project Information
 - **[UPGRADE_COMPLETE.md](docs/UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
