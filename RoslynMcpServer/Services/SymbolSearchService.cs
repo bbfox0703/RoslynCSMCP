@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using RoslynMcpServer.Models;
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using MsSymbolInfo = Microsoft.CodeAnalysis.SymbolInfo;
 using SymbolInfo = RoslynMcpServer.Models.SymbolInfo;
@@ -15,13 +16,15 @@ namespace RoslynMcpServer.Services
         private readonly CodeAnalysisService _codeAnalysis;
         private readonly ILogger<SymbolSearchService> _logger;
         private readonly IMemoryCache _cache;
+        private readonly ConcurrentDictionary<string, Regex> _regexCache;
 
-        public SymbolSearchService(CodeAnalysisService codeAnalysis, 
+        public SymbolSearchService(CodeAnalysisService codeAnalysis,
             ILogger<SymbolSearchService> logger, IMemoryCache cache)
         {
             _codeAnalysis = codeAnalysis;
             _logger = logger;
             _cache = cache;
+            _regexCache = new ConcurrentDictionary<string, Regex>();
         }
 
         public async Task<IEnumerable<SymbolSearchResult>> SearchSymbolsAsync(
@@ -79,15 +82,23 @@ namespace RoslynMcpServer.Services
 
         private Regex CreateWildcardRegex(string pattern, bool ignoreCase)
         {
-            // Convert wildcard pattern to regex
-            var regexPattern = Regex.Escape(pattern)
-                .Replace("\\*", ".*")
-                .Replace("\\?", ".");
-            
-            var options = RegexOptions.Compiled;
-            if (ignoreCase) options |= RegexOptions.IgnoreCase;
-            
-            return new Regex($"^{regexPattern}$", options);
+            // Create cache key combining pattern and case sensitivity
+            var cacheKey = $"{pattern}|{ignoreCase}";
+
+            // Try to get from cache, or create and cache if not exists
+            return _regexCache.GetOrAdd(cacheKey, _ =>
+            {
+                // Convert wildcard pattern to regex
+                var regexPattern = Regex.Escape(pattern)
+                    .Replace("\\*", ".*")
+                    .Replace("\\?", ".");
+
+                var options = RegexOptions.Compiled;
+                if (ignoreCase) options |= RegexOptions.IgnoreCase;
+
+                // Add timeout to prevent ReDoS attacks
+                return new Regex($"^{regexPattern}$", options, TimeSpan.FromSeconds(1));
+            });
         }
 
         private HashSet<SymbolKind> ParseSymbolTypes(string symbolTypes)
