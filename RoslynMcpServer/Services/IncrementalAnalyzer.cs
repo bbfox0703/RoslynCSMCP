@@ -186,63 +186,144 @@ namespace RoslynMcpServer.Services
         private List<ComplexityResult> AnalyzeComplexity(SyntaxNode root, string filePath)
         {
             var complexityResults = new List<ComplexityResult>();
-            var methods = root.DescendantNodes().OfType<MethodDeclarationSyntax>();
 
+            // Analyze methods
+            var methods = root.DescendantNodes().OfType<MethodDeclarationSyntax>();
             foreach (var method in methods)
             {
-                var complexity = CalculateCyclomaticComplexity(method);
-                if (complexity >= 5) // Threshold
-                {
-                    var lineSpan = method.GetLocation().GetLineSpan();
-                    complexityResults.Add(new ComplexityResult
-                    {
-                        MethodName = method.Identifier.ValueText,
-                        FileName = Path.GetFileName(filePath),
-                        LineNumber = lineSpan.StartLinePosition.Line + 1,
-                        Complexity = complexity,
-                        ClassName = GetContainingClassName(method),
-                        Namespace = GetContainingNamespace(method)
-                    });
-                }
+                AnalyzeMemberComplexity(method, filePath, complexityResults);
+            }
+
+            // Analyze properties with getters/setters
+            var properties = root.DescendantNodes().OfType<PropertyDeclarationSyntax>()
+                .Where(p => p.ExpressionBody != null ||
+                           (p.AccessorList != null && p.AccessorList.Accessors.Any(a => a.Body != null || a.ExpressionBody != null)));
+            foreach (var property in properties)
+            {
+                AnalyzeMemberComplexity(property, filePath, complexityResults);
+            }
+
+            // Analyze constructors
+            var constructors = root.DescendantNodes().OfType<ConstructorDeclarationSyntax>();
+            foreach (var constructor in constructors)
+            {
+                AnalyzeMemberComplexity(constructor, filePath, complexityResults);
+            }
+
+            // Analyze local functions (nested functions)
+            var localFunctions = root.DescendantNodes().OfType<LocalFunctionStatementSyntax>();
+            foreach (var localFunction in localFunctions)
+            {
+                AnalyzeMemberComplexity(localFunction, filePath, complexityResults);
             }
 
             return complexityResults;
         }
 
-        private int CalculateCyclomaticComplexity(MethodDeclarationSyntax method)
+        private void AnalyzeMemberComplexity(SyntaxNode memberNode, string filePath, List<ComplexityResult> results)
+        {
+            var complexity = CalculateCyclomaticComplexity(memberNode);
+            if (complexity >= 5) // Threshold
+            {
+                var lineSpan = memberNode.GetLocation().GetLineSpan();
+                var (memberName, memberType) = GetMemberNameAndType(memberNode);
+
+                results.Add(new ComplexityResult
+                {
+                    MethodName = $"{memberName} ({memberType})",
+                    FileName = Path.GetFileName(filePath),
+                    LineNumber = lineSpan.StartLinePosition.Line + 1,
+                    Complexity = complexity,
+                    ClassName = GetContainingClassName(memberNode),
+                    Namespace = GetContainingNamespace(memberNode)
+                });
+            }
+        }
+
+        private (string name, string type) GetMemberNameAndType(SyntaxNode memberNode)
+        {
+            return memberNode switch
+            {
+                MethodDeclarationSyntax method => (method.Identifier.ValueText, "Method"),
+                PropertyDeclarationSyntax property => (property.Identifier.ValueText, "Property"),
+                ConstructorDeclarationSyntax constructor => (constructor.Identifier.ValueText, "Constructor"),
+                LocalFunctionStatementSyntax localFunc => (localFunc.Identifier.ValueText, "Local Function"),
+                _ => ("Unknown", "Unknown")
+            };
+        }
+
+        private int CalculateCyclomaticComplexity(SyntaxNode memberNode)
         {
             int complexity = 1; // Base complexity
 
-            var decisionPoints = method.DescendantNodes().Where(node => 
+            // Traditional decision points
+            var decisionPoints = memberNode.DescendantNodes().Where(node =>
                 node.IsKind(SyntaxKind.IfStatement) ||
                 node.IsKind(SyntaxKind.WhileStatement) ||
                 node.IsKind(SyntaxKind.ForStatement) ||
                 node.IsKind(SyntaxKind.ForEachStatement) ||
                 node.IsKind(SyntaxKind.SwitchStatement) ||
-                node.IsKind(SyntaxKind.CatchClause));
+                node.IsKind(SyntaxKind.CatchClause) ||
+                node.IsKind(SyntaxKind.ConditionalExpression) ||      // Ternary operator (? :)
+                node.IsKind(SyntaxKind.CoalesceExpression) ||         // Null coalescing (??)
+                node.IsKind(SyntaxKind.SwitchExpression));            // Switch expressions (C# 8.0+)
 
             complexity += decisionPoints.Count();
 
-            // Add complexity for logical operators
-            var logicalOperators = method.DescendantTokens().Where(token =>
-                token.IsKind(SyntaxKind.AmpersandAmpersandToken) ||
-                token.IsKind(SyntaxKind.BarBarToken));
+            // Logical operators
+            var logicalOperators = memberNode.DescendantTokens().Where(token =>
+                token.IsKind(SyntaxKind.AmpersandAmpersandToken) ||   // &&
+                token.IsKind(SyntaxKind.BarBarToken) ||               // ||
+                token.IsKind(SyntaxKind.QuestionQuestionToken));      // ??
 
             complexity += logicalOperators.Count();
+
+            // Switch expression arms (each arm adds complexity)
+            var switchExpressions = memberNode.DescendantNodes().OfType<SwitchExpressionSyntax>();
+            foreach (var switchExpr in switchExpressions)
+            {
+                // Each arm except the first adds complexity (first is already counted as SwitchExpression)
+                if (switchExpr.Arms.Count > 0)
+                {
+                    complexity += switchExpr.Arms.Count - 1;
+                }
+            }
+
+            // When clauses in catch/case statements
+            var whenClauses = memberNode.DescendantNodes().OfType<WhenClauseSyntax>();
+            complexity += whenClauses.Count();
 
             return complexity;
         }
 
-        private string GetContainingClassName(MethodDeclarationSyntax method)
+        private string GetContainingClassName(SyntaxNode memberNode)
         {
-            var classDeclaration = method.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault();
-            return classDeclaration?.Identifier.ValueText ?? "";
+            var classDeclaration = memberNode.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault();
+            if (classDeclaration != null)
+                return classDeclaration.Identifier.ValueText;
+
+            var structDeclaration = memberNode.Ancestors().OfType<StructDeclarationSyntax>().FirstOrDefault();
+            if (structDeclaration != null)
+                return structDeclaration.Identifier.ValueText;
+
+            var recordDeclaration = memberNode.Ancestors().OfType<RecordDeclarationSyntax>().FirstOrDefault();
+            if (recordDeclaration != null)
+                return recordDeclaration.Identifier.ValueText;
+
+            return "";
         }
 
-        private string GetContainingNamespace(MethodDeclarationSyntax method)
+        private string GetContainingNamespace(SyntaxNode memberNode)
         {
-            var namespaceDeclaration = method.Ancestors().OfType<NamespaceDeclarationSyntax>().FirstOrDefault();
-            return namespaceDeclaration?.Name.ToString() ?? "";
+            var namespaceDeclaration = memberNode.Ancestors().OfType<NamespaceDeclarationSyntax>().FirstOrDefault();
+            if (namespaceDeclaration != null)
+                return namespaceDeclaration.Name.ToString();
+
+            var fileScopedNamespace = memberNode.Ancestors().OfType<FileScopedNamespaceDeclarationSyntax>().FirstOrDefault();
+            if (fileScopedNamespace != null)
+                return fileScopedNamespace.Name.ToString();
+
+            return "";
         }
 
         private string GetSymbolCategory(ISymbol symbol)
