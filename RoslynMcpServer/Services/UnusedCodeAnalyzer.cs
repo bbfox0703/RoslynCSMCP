@@ -44,13 +44,13 @@ namespace RoslynMcpServer.Services
 
                 // Load solution
                 using var workspace = MSBuildWorkspace.Create();
-                workspace.WorkspaceFailed += (sender, e) =>
+                workspace.RegisterWorkspaceFailedHandler((e) =>
                 {
                     if (e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
                     {
                         _logger.LogWarning("Workspace loading warning: {Message}", e.Diagnostic.Message);
                     }
-                };
+                });
 
                 var solution = await workspace.OpenSolutionAsync(solutionPath);
                 results.AnalyzedProjects = solution.Projects.Count();
