@@ -1,8 +1,8 @@
 # Phase 4 Token Optimization Usage Examples
 
-**Date**: 2026-01-10  
-**Status**: ✅ Implemented  
-**Version**: 1.0
+**Date**: 2026-01-11
+**Status**: ✅ Implemented
+**Version**: 1.1
 
 ---
 
@@ -294,7 +294,7 @@ GetSymbolInfo(name, sln, detailLevel: "summary")
 
 ## 🔶 Phase 4B Token Optimization
 
-Phase 4B adds token optimization to 4 additional tools:
+Phase 4B adds token optimization to 5 additional tools:
 
 | Tool | New Parameters | Token Savings | Status |
 |------|---------------|---------------|--------|
@@ -302,6 +302,7 @@ Phase 4B adds token optimization to 4 additional tools:
 | FindAttributeUsages | `format` | 50-70% | ✅ Implemented |
 | GetClassHierarchy | `format` | 50-70% | ✅ Implemented |
 | FindImplementations | `format` | 50-70% | ✅ Implemented |
+| FindUnusedCode | `format`, `scope` | 50-70% | ✅ Implemented |
 
 ---
 
@@ -495,6 +496,203 @@ MyProject.Tests (1):
 
 **Best for**: Finding all implementations quickly
 
+## 🔷 FindUnusedCode - Token Optimization
+
+### Parameters
+
+```csharp
+string format = "normal"     // summary | normal | detailed
+string scope = "all"         // private | internal | public | all
+bool includeTests = false    // Include test projects
+```
+
+### Format Comparison
+
+| Format | Tokens | Use Case |
+|--------|--------|----------|
+| summary | 200-400 | Quick counts |
+| normal | 400-1000 | Code cleanup |
+| detailed | 800-2000 | Deep analysis |
+
+### Example 12: Summary Format (70% savings)
+
+```csharp
+FindUnusedCode(
+    solutionPath: "MyProject.sln",
+    format: "summary",
+    scope: "all"
+)
+```
+
+**Output (~250 tokens)**:
+```
+Unused code: 23 items (5 projects, 0 failed)
+
+By Accessibility:
+  Private: 18
+  Internal: 4
+  Public: 1 ⚠️
+
+By Kind:
+  Methods: 12
+  Properties: 6
+  Fields: 4
+  Classes: 1
+
+Top unused items:
+  ⚙️ Private Method: CalculateDiscount (UserService.cs:145)
+  🔧 Private Property: CachedValue (UserService.cs:78)
+  📦 Private Field: _oldLogger (UserService.cs:25)
+  ⚙️ Internal Method: ValidateInternal (ValidationHelper.cs:92)
+  🔷 Public Class: LegacyHelper (LegacyHelper.cs:10)
+  ... and 18 more (use format=normal for full list)
+```
+
+**Best for**: Quick overview of unused code, cleanup planning
+
+### Example 13: Normal Format (baseline)
+
+```csharp
+FindUnusedCode(
+    solutionPath: "MyProject.sln",
+    format: "normal",
+    scope: "private",
+    includeTests: false
+)
+```
+
+**Output (~650 tokens)**:
+```
+**Unused Code Analysis**
+
+Found 18 unused items (5 projects analyzed, 0 failed):
+
+## Private (18)
+
+### Method (10)
+
+⚙️ **CalculateDiscount**
+   In: UserService
+   📄 UserService.cs:145
+   Project: MyProject.Core
+
+⚙️ **ValidateEmail**
+   In: UserValidator
+   📄 UserValidator.cs:89
+   Project: MyProject.Core
+
+... and 8 more unused methods
+
+### Property (5)
+
+🔧 **CachedValue**
+   In: UserService
+   📄 UserService.cs:78
+   Project: MyProject.Core
+
+... and 4 more unused properties
+
+### Field (3)
+
+📦 **_oldLogger**
+   In: UserService
+   📄 UserService.cs:25
+   Project: MyProject.Core
+
+... and 2 more unused fields
+
+---
+**Summary by Accessibility:**
+  • Private: 18
+
+**Summary by Kind:**
+  • Methods: 10
+  • Properties: 5
+  • Fields: 3
+```
+
+**Best for**: Code review, systematic cleanup
+
+### Example 14: Detailed Format (comprehensive)
+
+```csharp
+FindUnusedCode(
+    solutionPath: "MyProject.sln",
+    format: "detailed",
+    scope: "all",
+    includeTests: true
+)
+```
+
+**Output (~1500 tokens)**:
+```
+**Unused Code Analysis (Detailed)**
+
+📊 **Analysis Summary:**
+  • Total unused items: 23
+  • Projects analyzed: 5
+  • Symbols analyzed: 847
+  • Projects failed: 0
+
+## Private (18)
+
+### Method (10)
+
+#### 📦 MyProject.Core (7)
+
+⚙️ **CalculateDiscount**
+   Full Name: `MyProject.Services.UserService.CalculateDiscount`
+   Signature: `decimal CalculateDiscount(decimal amount, decimal percentage)`
+   Declaring Type: UserService
+   Namespace: MyProject.Services
+   📄 Location: UserService.cs:145
+   📁 Path: D:\Github\MyProject\Core\Services\UserService.cs
+   Project: MyProject.Core
+   Reason: No references found
+
+... (all 23 items with full details)
+
+---
+**Detailed Summary:**
+
+**By Accessibility:**
+  • Private: 18
+  • Internal: 4
+  • Public: 1 ⚠️ (Breaking change - consider marking as obsolete first)
+
+**By Kind:**
+  • Classes: 1
+  • Methods: 12
+  • Properties: 6
+  • Fields: 4
+
+**Recommendations:**
+  • 1 public members are unused - these are breaking changes
+    Consider marking with [Obsolete] attribute before removal
+  • 4 internal members can be safely removed within the assembly
+  • 18 private members can be safely removed
+```
+
+**Best for**: Detailed analysis, documentation, understanding impact
+
+### Scope Usage
+
+```csharp
+// Find only private unused code (safest to remove)
+FindUnusedCode(solutionPath: "MyProject.sln", scope: "private")
+
+// Find internal unused code (safe within assembly)
+FindUnusedCode(solutionPath: "MyProject.sln", scope: "internal")
+
+// Find public unused code (breaking changes!)
+FindUnusedCode(solutionPath: "MyProject.sln", scope: "public", format: "detailed")
+
+// Find all unused code
+FindUnusedCode(solutionPath: "MyProject.sln", scope: "all")
+```
+
+**Recommendation**: Start with `scope: "private"` for safe cleanups, then move to `"internal"`, and only check `"public"` with detailed analysis.
+
 ---
 
 ## 📈 Phase 4B Real-World Savings
@@ -558,22 +756,23 @@ Total: 750 tokens
 
 ## ✅ Summary
 
-### Phase 4 Complete: 6 Tools Optimized
+### Phase 4 Complete: 7 Tools Optimized
 
 **Phase 4A (2 tools)**:
 - GetFileOutline: `mode` + `maxMembers` → 60-75% savings
 - GetSymbolInfo: `detailLevel` → 70-80% savings
 
-**Phase 4B (4 tools)**:
+**Phase 4B (5 tools)**:
 - GetCompilationErrors: `mode` → 40-60% savings
 - FindAttributeUsages: `format` → 50-70% savings
 - GetClassHierarchy: `format` → 50-70% savings
 - FindImplementations: `format` → 50-70% savings
+- FindUnusedCode: `format` + `scope` → 50-70% savings
 
 **Overall Impact**:
-- **Total impact**: 40-80% token savings across 6 core tools
+- **Total impact**: 40-80% token savings across 7 core tools
 - **Migration effort**: Zero (100% backward compatible)
 - **User experience**: Dramatically improved (faster responses, focused results)
-- **Total formatting modes**: 18 new formatting functions
+- **Total formatting modes**: 21 new formatting functions
 
 Start using these optimizations today!

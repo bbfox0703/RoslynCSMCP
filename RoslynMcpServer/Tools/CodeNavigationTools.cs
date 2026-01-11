@@ -495,6 +495,51 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find unused code (dead code) in the solution - types, methods, properties, and fields with no references")]
+        public static async Task<string> FindUnusedCode(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
+            string format = "normal",
+            [Description("Scope: private (private members only), internal (internal members only), public (public members only), all (all members). Default: all")]
+            string scope = "all",
+            [Description("Include test projects in analysis (default: false)")] bool includeTests = false,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var analyzer = serviceProvider?.GetService<UnusedCodeAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Unused code analyzer service not available.";
+                }
+
+                var results = await analyzer.AnalyzeUnusedCodeAsync(solutionPath, scope, includeTests);
+
+                // Normalize format to lowercase
+                var normalizedFormat = format.ToLowerInvariant();
+
+                return normalizedFormat switch
+                {
+                    "summary" => FormatUnusedCodeSummary(results),
+                    "detailed" => FormatUnusedCodeDetailed(results),
+                    "normal" => FormatUnusedCodeNormal(results),
+                    _ => FormatUnusedCodeNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding unused code");
+                return $"Error: An unexpected error occurred while finding unused code: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -2605,6 +2650,314 @@ namespace RoslynMcpServer.Tools
             foreach (var typeGroup in groupedByType)
             {
                 output.AppendLine($"  • {typeGroup.Key}: {typeGroup.Count()} usage{(typeGroup.Count() > 1 ? "s" : "")}");
+            }
+
+            return output.ToString();
+        }
+
+        // Summary mode: Show only statistics and counts (50-70% token savings)
+        private static string FormatUnusedCodeSummary(UnusedCodeResults results)
+        {
+            if (!results.UnusedItems.Any())
+                return $"✅ No unused code found ({results.AnalyzedProjects} projects analyzed)";
+
+            var output = new StringBuilder();
+            output.AppendLine($"Unused code: {results.UnusedItems.Count} items ({results.AnalyzedProjects} projects, {results.FailedProjects} failed)\n");
+
+            // Statistics by accessibility
+            output.AppendLine("By Accessibility:");
+            if (results.PrivateCount > 0)
+                output.AppendLine($"  Private: {results.PrivateCount}");
+            if (results.InternalCount > 0)
+                output.AppendLine($"  Internal: {results.InternalCount}");
+            if (results.PublicCount > 0)
+                output.AppendLine($"  Public: {results.PublicCount} ⚠️");
+            output.AppendLine();
+
+            // Statistics by kind
+            output.AppendLine("By Kind:");
+            if (results.ClassCount > 0)
+                output.AppendLine($"  Classes: {results.ClassCount}");
+            if (results.MethodCount > 0)
+                output.AppendLine($"  Methods: {results.MethodCount}");
+            if (results.PropertyCount > 0)
+                output.AppendLine($"  Properties: {results.PropertyCount}");
+            if (results.FieldCount > 0)
+                output.AppendLine($"  Fields: {results.FieldCount}");
+            if (results.EventCount > 0)
+                output.AppendLine($"  Events: {results.EventCount}");
+
+            // Show top 5 unused items
+            if (results.UnusedItems.Any())
+            {
+                output.AppendLine("\nTop unused items:");
+                var topItems = results.UnusedItems.Take(5);
+                foreach (var item in topItems)
+                {
+                    var icon = item.Kind switch
+                    {
+                        "NamedType" => "🔷",
+                        "Method" => "⚙️",
+                        "Property" => "🔧",
+                        "Field" => "📦",
+                        "Event" => "⚡",
+                        _ => "•"
+                    };
+                    output.AppendLine($"  {icon} {item.Accessibility} {item.Kind}: {item.Name} ({item.FileName}:{item.LineNumber})");
+                }
+
+                if (results.UnusedItems.Count > 5)
+                {
+                    output.AppendLine($"  ... and {results.UnusedItems.Count - 5} more (use format=normal for full list)");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Balanced format with grouped listings
+        private static string FormatUnusedCodeNormal(UnusedCodeResults results)
+        {
+            if (!results.UnusedItems.Any())
+                return $"✅ No unused code found. All symbols have references!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Unused Code Analysis**\n");
+            output.AppendLine($"Found {results.UnusedItems.Count} unused item{(results.UnusedItems.Count > 1 ? "s" : "")} ({results.AnalyzedProjects} projects analyzed, {results.FailedProjects} failed):\n");
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(5))
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                if (results.Warnings.Count > 5)
+                {
+                    output.AppendLine($"   ... and {results.Warnings.Count - 5} more warnings");
+                }
+                output.AppendLine();
+            }
+
+            // Group by accessibility
+            var groupedByAccessibility = results.UnusedItems.GroupBy(i => i.Accessibility).OrderBy(g => g.Key);
+            foreach (var accessGroup in groupedByAccessibility)
+            {
+                var warningIcon = accessGroup.Key == "Public" ? " ⚠️" : "";
+                output.AppendLine($"## {accessGroup.Key} ({accessGroup.Count()}){warningIcon}");
+                output.AppendLine();
+
+                // Group by kind within accessibility
+                var groupedByKind = accessGroup.GroupBy(i => i.Kind).OrderBy(g => g.Key);
+                foreach (var kindGroup in groupedByKind)
+                {
+                    output.AppendLine($"### {kindGroup.Key} ({kindGroup.Count()})");
+                    output.AppendLine();
+
+                    // Show first 10 items per kind
+                    var displayedItems = kindGroup.Take(10);
+                    foreach (var item in displayedItems)
+                    {
+                        var icon = item.Kind switch
+                        {
+                            "NamedType" => "🔷",
+                            "Method" => "⚙️",
+                            "Property" => "🔧",
+                            "Field" => "📦",
+                            "Event" => "⚡",
+                            _ => "•"
+                        };
+
+                        output.AppendLine($"{icon} **{item.Name}**");
+                        if (!string.IsNullOrWhiteSpace(item.DeclaringType))
+                        {
+                            output.AppendLine($"   In: {item.DeclaringType}");
+                        }
+                        output.AppendLine($"   📄 {item.FileName}:{item.LineNumber}");
+                        if (!string.IsNullOrWhiteSpace(item.ProjectName))
+                        {
+                            output.AppendLine($"   Project: {item.ProjectName}");
+                        }
+                        output.AppendLine();
+                    }
+
+                    if (kindGroup.Count() > 10)
+                    {
+                        output.AppendLine($"... and {kindGroup.Count() - 10} more unused {kindGroup.Key.ToLower()}{(kindGroup.Count() - 10 > 1 ? "s" : "")}");
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Summary
+            output.AppendLine("---");
+            output.AppendLine("**Summary by Accessibility:**");
+            output.AppendLine($"  • Private: {results.PrivateCount}");
+            output.AppendLine($"  • Internal: {results.InternalCount}");
+            if (results.PublicCount > 0)
+            {
+                output.AppendLine($"  • Public: {results.PublicCount} ⚠️ (Consider removing or marking as obsolete)");
+            }
+
+            output.AppendLine("\n**Summary by Kind:**");
+            if (results.ClassCount > 0)
+                output.AppendLine($"  • Classes: {results.ClassCount}");
+            if (results.MethodCount > 0)
+                output.AppendLine($"  • Methods: {results.MethodCount}");
+            if (results.PropertyCount > 0)
+                output.AppendLine($"  • Properties: {results.PropertyCount}");
+            if (results.FieldCount > 0)
+                output.AppendLine($"  • Fields: {results.FieldCount}");
+            if (results.EventCount > 0)
+                output.AppendLine($"  • Events: {results.EventCount}");
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Comprehensive format with all metadata and signatures
+        private static string FormatUnusedCodeDetailed(UnusedCodeResults results)
+        {
+            if (!results.UnusedItems.Any())
+                return $"✅ No unused code found. All symbols have references!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Symbols analyzed: {results.AnalyzedSymbols}\n  • Projects failed: {results.FailedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Unused Code Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Analysis Summary:**");
+            output.AppendLine($"  • Total unused items: {results.UnusedItems.Count}");
+            output.AppendLine($"  • Projects analyzed: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Symbols analyzed: {results.AnalyzedSymbols}");
+            output.AppendLine($"  • Projects failed: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Show all warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                    if (!string.IsNullOrWhiteSpace(warning.Details))
+                    {
+                        output.AppendLine($"     Details: {warning.Details}");
+                    }
+                }
+                output.AppendLine();
+            }
+
+            // Group by accessibility
+            var groupedByAccessibility = results.UnusedItems.GroupBy(i => i.Accessibility).OrderBy(g => g.Key);
+            foreach (var accessGroup in groupedByAccessibility)
+            {
+                var warningIcon = accessGroup.Key == "Public" ? " ⚠️" : "";
+                output.AppendLine($"## {accessGroup.Key} ({accessGroup.Count()}){warningIcon}");
+                output.AppendLine();
+
+                // Group by kind within accessibility
+                var groupedByKind = accessGroup.GroupBy(i => i.Kind).OrderBy(g => g.Key);
+                foreach (var kindGroup in groupedByKind)
+                {
+                    output.AppendLine($"### {kindGroup.Key} ({kindGroup.Count()})");
+                    output.AppendLine();
+
+                    // Group by project within kind
+                    var groupedByProject = kindGroup.GroupBy(i => i.ProjectName).OrderBy(g => g.Key);
+                    foreach (var projectGroup in groupedByProject)
+                    {
+                        if (groupedByProject.Count() > 1)
+                        {
+                            output.AppendLine($"#### 📦 {projectGroup.Key} ({projectGroup.Count()})");
+                            output.AppendLine();
+                        }
+
+                        // Show all items in detailed mode
+                        foreach (var item in projectGroup)
+                        {
+                            var icon = item.Kind switch
+                            {
+                                "NamedType" => "🔷",
+                                "Method" => "⚙️",
+                                "Property" => "🔧",
+                                "Field" => "📦",
+                                "Event" => "⚡",
+                                _ => "•"
+                            };
+
+                            output.AppendLine($"{icon} **{item.Name}**");
+                            output.AppendLine($"   Full Name: `{item.FullName}`");
+
+                            if (!string.IsNullOrWhiteSpace(item.Signature))
+                            {
+                                output.AppendLine($"   Signature: `{item.Signature}`");
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(item.DeclaringType))
+                            {
+                                output.AppendLine($"   Declaring Type: {item.DeclaringType}");
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(item.Namespace))
+                            {
+                                output.AppendLine($"   Namespace: {item.Namespace}");
+                            }
+
+                            output.AppendLine($"   📄 Location: {item.FileName}:{item.LineNumber}");
+                            output.AppendLine($"   📁 Path: {item.FilePath}");
+                            output.AppendLine($"   Project: {item.ProjectName}");
+
+                            if (item.IsTestMember)
+                            {
+                                output.AppendLine($"   🧪 Test member");
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(item.Reason))
+                            {
+                                output.AppendLine($"   Reason: {item.Reason}");
+                            }
+
+                            output.AppendLine();
+                        }
+                    }
+                }
+            }
+
+            // Detailed summary with breakdown
+            output.AppendLine("---");
+            output.AppendLine("**Detailed Summary:**");
+            output.AppendLine("\n**By Accessibility:**");
+            output.AppendLine($"  • Private: {results.PrivateCount}");
+            output.AppendLine($"  • Internal: {results.InternalCount}");
+            if (results.PublicCount > 0)
+            {
+                output.AppendLine($"  • Public: {results.PublicCount} ⚠️ (Breaking change - consider marking as obsolete first)");
+            }
+
+            output.AppendLine("\n**By Kind:**");
+            if (results.ClassCount > 0)
+                output.AppendLine($"  • Classes: {results.ClassCount}");
+            if (results.MethodCount > 0)
+                output.AppendLine($"  • Methods: {results.MethodCount}");
+            if (results.PropertyCount > 0)
+                output.AppendLine($"  • Properties: {results.PropertyCount}");
+            if (results.FieldCount > 0)
+                output.AppendLine($"  • Fields: {results.FieldCount}");
+            if (results.EventCount > 0)
+                output.AppendLine($"  • Events: {results.EventCount}");
+
+            // Recommendations
+            output.AppendLine("\n**Recommendations:**");
+            if (results.PublicCount > 0)
+            {
+                output.AppendLine($"  • {results.PublicCount} public members are unused - these are breaking changes");
+                output.AppendLine($"    Consider marking with [Obsolete] attribute before removal");
+            }
+            if (results.InternalCount > 0)
+            {
+                output.AppendLine($"  • {results.InternalCount} internal members can be safely removed within the assembly");
+            }
+            if (results.PrivateCount > 0)
+            {
+                output.AppendLine($"  • {results.PrivateCount} private members can be safely removed");
             }
 
             return output.ToString();

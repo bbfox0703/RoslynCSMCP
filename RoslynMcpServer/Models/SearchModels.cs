@@ -299,4 +299,48 @@ namespace RoslynMcpServer.Models
         public int FailedDiagnostics { get; set; }
         public List<OperationWarning> Warnings { get; set; } = new();
     }
+
+    /// <summary>
+    /// Represents an unused code item (type, method, property, field)
+    /// </summary>
+    public class UnusedItem
+    {
+        public string Name { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string Kind { get; set; } = string.Empty;  // Class, Method, Property, Field, Event
+        public string Accessibility { get; set; } = string.Empty;  // Private, Internal, Public
+        public string DeclaringType { get; set; } = string.Empty;
+        public string Namespace { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string Signature { get; set; } = string.Empty;
+        public bool IsTestMember { get; set; }  // Member in test project
+        public string Reason { get; set; } = string.Empty;  // Why it's considered unused
+    }
+
+    /// <summary>
+    /// Wrapper for unused code analysis results
+    /// </summary>
+    public class UnusedCodeResults
+    {
+        public List<UnusedItem> UnusedItems { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedSymbols { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by category
+        public int PrivateCount { get; set; }
+        public int InternalCount { get; set; }
+        public int PublicCount { get; set; }
+
+        // Statistics by kind
+        public int ClassCount { get; set; }
+        public int MethodCount { get; set; }
+        public int PropertyCount { get; set; }
+        public int FieldCount { get; set; }
+        public int EventCount { get; set; }
+    }
 }
