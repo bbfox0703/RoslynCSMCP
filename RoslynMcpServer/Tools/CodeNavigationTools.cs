@@ -686,6 +686,52 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Analyze XML documentation coverage for types and members")]
+        public static async Task<string> AnalyzeDocumentationCoverage(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (with suggestions). Default: normal")]
+            string format = "normal",
+            [Description("Scope filter: public (public only), all (all symbols). Default: public")]
+            string scope = "public",
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var analyzer = serviceProvider?.GetService<DocumentationAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Documentation analyzer service not available.";
+                }
+
+                var results = await analyzer.AnalyzeDocumentationCoverageAsync(
+                    solutionPath,
+                    scope);
+
+                // Normalize format to lowercase
+                var normalizedFormat = format.ToLowerInvariant();
+
+                return normalizedFormat switch
+                {
+                    "summary" => FormatDocumentationCoverageSummary(results),
+                    "detailed" => FormatDocumentationCoverageDetailed(results),
+                    "normal" => FormatDocumentationCoverageNormal(results),
+                    _ => FormatDocumentationCoverageNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error analyzing documentation coverage");
+                return $"Error: An unexpected error occurred while analyzing documentation coverage: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -3838,6 +3884,285 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine($"  • High similarity blocks (95%+) are prime candidates for refactoring");
                 output.AppendLine($"  • Review each duplicate carefully - some may be intentional");
             }
+
+            return output.ToString();
+        }
+
+        // ==================== Documentation Coverage Formatting ====================
+
+        // Summary mode: Quick overview with key metrics
+        private static string FormatDocumentationCoverageSummary(DocumentationCoverageResults results)
+        {
+            if (results.TotalSymbols == 0)
+                return "✅ No symbols found to analyze.";
+
+            var coverageIcon = results.CoveragePercentage >= 80 ? "✅" : results.CoveragePercentage >= 50 ? "⚠️" : "❌";
+
+            var output = new StringBuilder();
+            output.AppendLine($"{coverageIcon} **Documentation Coverage: {results.CoveragePercentage:F1}%**\n");
+            output.AppendLine($"📊 **Summary:**");
+            output.AppendLine($"  • Documented: {results.DocumentedSymbols}/{results.TotalSymbols} symbols");
+            output.AppendLine($"  • Undocumented: {results.UndocumentedCount}");
+            output.AppendLine();
+
+            if (results.UndocumentedCount > 0)
+            {
+                output.AppendLine("**Undocumented by Kind:**");
+                if (results.UndocumentedClasses > 0)
+                    output.AppendLine($"  • Classes/Types: {results.UndocumentedClasses}");
+                if (results.UndocumentedMethods > 0)
+                    output.AppendLine($"  • Methods: {results.UndocumentedMethods}");
+                if (results.UndocumentedProperties > 0)
+                    output.AppendLine($"  • Properties: {results.UndocumentedProperties}");
+                if (results.UndocumentedFields > 0)
+                    output.AppendLine($"  • Fields: {results.UndocumentedFields}");
+                if (results.UndocumentedEvents > 0)
+                    output.AppendLine($"  • Events: {results.UndocumentedEvents}");
+                output.AppendLine();
+
+                // Show top 5 undocumented symbols
+                var topUndocumented = results.UndocumentedSymbols.Take(5).ToList();
+                if (topUndocumented.Any())
+                {
+                    output.AppendLine("**Examples (first 5):**");
+                    foreach (var symbol in topUndocumented)
+                    {
+                        output.AppendLine($"  • {symbol.Kind}: {symbol.Name} ({symbol.FileName}:{symbol.LineNumber})");
+                    }
+                }
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("\n⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(3))
+                {
+                    output.AppendLine($"   - {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Balanced view with grouping
+        private static string FormatDocumentationCoverageNormal(DocumentationCoverageResults results)
+        {
+            if (results.TotalSymbols == 0)
+                return "✅ No symbols found to analyze.";
+
+            var coverageIcon = results.CoveragePercentage >= 80 ? "✅" : results.CoveragePercentage >= 50 ? "⚠️" : "❌";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Documentation Coverage Analysis**\n");
+            output.AppendLine($"{coverageIcon} **Overall Coverage: {results.CoveragePercentage:F1}%**");
+            output.AppendLine();
+            output.AppendLine($"📊 **Analysis Summary:**");
+            output.AppendLine($"  • Total symbols: {results.TotalSymbols}");
+            output.AppendLine($"  • Documented: {results.DocumentedSymbols}");
+            output.AppendLine($"  • Undocumented: {results.UndocumentedCount}");
+            output.AppendLine($"  • Projects analyzed: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Files analyzed: {results.AnalyzedFiles}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  • Failed projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            if (results.UndocumentedCount > 0)
+            {
+                output.AppendLine("**Breakdown by Kind:**");
+                if (results.UndocumentedClasses > 0)
+                    output.AppendLine($"  📦 Classes/Types: {results.UndocumentedClasses}");
+                if (results.UndocumentedMethods > 0)
+                    output.AppendLine($"  🔧 Methods: {results.UndocumentedMethods}");
+                if (results.UndocumentedProperties > 0)
+                    output.AppendLine($"  🔑 Properties: {results.UndocumentedProperties}");
+                if (results.UndocumentedFields > 0)
+                    output.AppendLine($"  📋 Fields: {results.UndocumentedFields}");
+                if (results.UndocumentedEvents > 0)
+                    output.AppendLine($"  ⚡ Events: {results.UndocumentedEvents}");
+                output.AppendLine();
+
+                // Group by namespace
+                var groupedByNamespace = results.UndocumentedSymbols
+                    .GroupBy(s => string.IsNullOrEmpty(s.Namespace) ? "(global)" : s.Namespace)
+                    .OrderByDescending(g => g.Count())
+                    .Take(10);
+
+                output.AppendLine("**Top Namespaces with Undocumented Symbols:**");
+                foreach (var group in groupedByNamespace)
+                {
+                    output.AppendLine($"\n**{group.Key}** ({group.Count()} undocumented)");
+
+                    // Show breakdown by kind within namespace
+                    var byKind = group.GroupBy(s => s.Kind).OrderByDescending(g => g.Count());
+                    foreach (var kindGroup in byKind)
+                    {
+                        output.AppendLine($"  • {kindGroup.Key}: {kindGroup.Count()}");
+
+                        // Show first 3 examples
+                        foreach (var symbol in kindGroup.Take(3))
+                        {
+                            output.AppendLine($"    - {symbol.Name} ({symbol.FileName}:{symbol.LineNumber})");
+                        }
+                    }
+                }
+            }
+            else
+            {
+                output.AppendLine("✅ **Excellent!** All symbols are documented.");
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("\n⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Comprehensive format with suggested documentation
+        private static string FormatDocumentationCoverageDetailed(DocumentationCoverageResults results)
+        {
+            if (results.TotalSymbols == 0)
+                return "✅ No symbols found to analyze.";
+
+            var coverageIcon = results.CoveragePercentage >= 80 ? "✅" : results.CoveragePercentage >= 50 ? "⚠️" : "❌";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Documentation Coverage Analysis (Detailed)**\n");
+            output.AppendLine($"{coverageIcon} **Overall Coverage: {results.CoveragePercentage:F1}%**");
+            output.AppendLine();
+            output.AppendLine($"📊 **Complete Statistics:**");
+            output.AppendLine($"  • Total symbols analyzed: {results.TotalSymbols}");
+            output.AppendLine($"  • Documented symbols: {results.DocumentedSymbols}");
+            output.AppendLine($"  • Undocumented symbols: {results.UndocumentedCount}");
+            output.AppendLine($"  • Projects analyzed: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Files analyzed: {results.AnalyzedFiles}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  • Failed projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            output.AppendLine("**By Symbol Kind:**");
+            output.AppendLine($"  📦 Classes/Types: {results.UndocumentedClasses}");
+            output.AppendLine($"  🔧 Methods: {results.UndocumentedMethods}");
+            output.AppendLine($"  🔑 Properties: {results.UndocumentedProperties}");
+            output.AppendLine($"  📋 Fields: {results.UndocumentedFields}");
+            output.AppendLine($"  ⚡ Events: {results.UndocumentedEvents}");
+            output.AppendLine();
+
+            // Show all warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            if (results.UndocumentedCount == 0)
+            {
+                output.AppendLine("✅ **Perfect!** All symbols have XML documentation.");
+                return output.ToString();
+            }
+
+            // Group by project, then namespace
+            var groupedByProject = results.UndocumentedSymbols
+                .GroupBy(s => s.ProjectName)
+                .OrderBy(g => g.Key);
+
+            foreach (var projectGroup in groupedByProject)
+            {
+                output.AppendLine($"## 📁 Project: {projectGroup.Key}");
+                output.AppendLine($"Undocumented symbols: {projectGroup.Count()}");
+                output.AppendLine();
+
+                var groupedByNamespace = projectGroup
+                    .GroupBy(s => string.IsNullOrEmpty(s.Namespace) ? "(global)" : s.Namespace)
+                    .OrderBy(g => g.Key);
+
+                foreach (var namespaceGroup in groupedByNamespace)
+                {
+                    output.AppendLine($"### Namespace: {namespaceGroup.Key}");
+                    output.AppendLine();
+
+                    var groupedByKind = namespaceGroup
+                        .GroupBy(s => s.Kind)
+                        .OrderBy(g => g.Key);
+
+                    foreach (var kindGroup in groupedByKind)
+                    {
+                        output.AppendLine($"#### {kindGroup.Key}s ({kindGroup.Count()})");
+                        output.AppendLine();
+
+                        foreach (var symbol in kindGroup)
+                        {
+                            output.AppendLine($"**{symbol.Name}**");
+                            output.AppendLine($"  📍 Location: {symbol.FileName}:{symbol.LineNumber}");
+                            output.AppendLine($"  🔒 Accessibility: {symbol.Accessibility}");
+
+                            if (!string.IsNullOrEmpty(symbol.ContainingType))
+                                output.AppendLine($"  📦 Containing Type: {symbol.ContainingType}");
+
+                            if (!string.IsNullOrEmpty(symbol.Signature))
+                                output.AppendLine($"  ✍️ Signature: `{symbol.Signature}`");
+
+                            if (symbol.Parameters?.Any() == true)
+                            {
+                                output.AppendLine($"  📝 Parameters: {string.Join(", ", symbol.Parameters)}");
+                            }
+
+                            if (!string.IsNullOrEmpty(symbol.ReturnType))
+                                output.AppendLine($"  ↩️ Returns: {symbol.ReturnType}");
+
+                            // Show suggested documentation
+                            if (!string.IsNullOrEmpty(symbol.SuggestedDocumentation))
+                            {
+                                output.AppendLine();
+                                output.AppendLine("  **Suggested Documentation:**");
+                                output.AppendLine("  ```csharp");
+                                foreach (var line in symbol.SuggestedDocumentation.Split('\n'))
+                                {
+                                    output.AppendLine($"  {line}");
+                                }
+                                output.AppendLine("  ```");
+                            }
+
+                            output.AppendLine();
+                        }
+                    }
+                }
+            }
+
+            // Final recommendations
+            output.AppendLine("---");
+            output.AppendLine("**Recommendations:**");
+            if (results.CoveragePercentage < 50)
+            {
+                output.AppendLine("  ⚠️ **Low coverage detected!** Consider documenting at least public APIs.");
+            }
+            else if (results.CoveragePercentage < 80)
+            {
+                output.AppendLine("  📝 **Moderate coverage.** Focus on documenting public classes and methods first.");
+            }
+            else
+            {
+                output.AppendLine("  ✅ **Good coverage!** Continue documenting remaining symbols.");
+            }
+
+            if (results.UndocumentedClasses > 0)
+                output.AppendLine($"  • Add XML documentation to {results.UndocumentedClasses} class{(results.UndocumentedClasses > 1 ? "es" : "")}");
+            if (results.UndocumentedMethods > 0)
+                output.AppendLine($"  • Add XML documentation to {results.UndocumentedMethods} method{(results.UndocumentedMethods > 1 ? "s" : "")}");
+            if (results.UndocumentedProperties > 0)
+                output.AppendLine($"  • Add XML documentation to {results.UndocumentedProperties} propert{(results.UndocumentedProperties > 1 ? "ies" : "y")}");
+
+            output.AppendLine("  • Use suggested documentation as a starting point");
+            output.AppendLine("  • Customize documentation to describe actual behavior and intent");
 
             return output.ToString();
         }
