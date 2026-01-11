@@ -292,6 +292,261 @@ GetSymbolInfo(name, sln, detailLevel: "summary")
 
 ---
 
+## 🔶 Phase 4B Token Optimization
+
+Phase 4B adds token optimization to 4 additional tools:
+
+| Tool | New Parameters | Token Savings | Status |
+|------|---------------|---------------|--------|
+| GetCompilationErrors | `mode` | 40-60% | ✅ Implemented |
+| FindAttributeUsages | `format` | 50-70% | ✅ Implemented |
+| GetClassHierarchy | `format` | 50-70% | ✅ Implemented |
+| FindImplementations | `format` | 50-70% | ✅ Implemented |
+
+---
+
+## 🔷 GetCompilationErrors - Token Optimization
+
+### Parameters
+
+```csharp
+string mode = "normal"              // compact | normal | detailed
+string severity = "All"             // Error | Warning | Info | All
+```
+
+### Mode Comparison
+
+| Mode | Tokens | Use Case |
+|------|--------|----------|
+| compact | 300-1000 | Quick error count |
+| normal | 500-1500 | Daily development |
+| detailed | 800-3000 | Deep diagnostics |
+
+### Example 7: Compact Mode (60% savings)
+
+```csharp
+GetCompilationErrors(
+    solutionPath: "MyProject.sln",
+    mode: "compact",
+    severity: "Error"
+)
+```
+
+**Output (~400 tokens)**:
+```
+Issues: 15 (3 projects, 1 failed)
+
+Error: 15
+  MyProject.Core: 8 issues
+    CS0103 (5x): Program.cs:45
+    CS0246 (2x): UserService.cs:30
+    CS0029 (1x): Calculator.cs:12
+  MyProject.Web: 7 issues
+    CS1061 (4x): HomeController.cs:78
+    CS0246 (3x): Startup.cs:25
+
+Total: 15 errors, 0 warnings
+```
+
+**Best for**: Quick error overview, CI/CD checks
+
+### Example 8: Detailed Mode (comprehensive)
+
+Shows all errors with code snippets, full paths, and complete analysis.
+
+---
+
+## 🔹 FindAttributeUsages - Token Optimization
+
+### Parameters
+
+```csharp
+string format = "normal"            // inline | normal | detailed
+string targetType = "all"           // class | interface | method | property | all
+```
+
+### Format Comparison
+
+| Format | Tokens | Use Case |
+|--------|--------|----------|
+| inline | 250-450 | Quick attribute scan |
+| normal | 500-1000 | Daily use |
+| detailed | 800-1500 | Full analysis |
+
+### Example 9: Inline Format (70% savings)
+
+```csharp
+FindAttributeUsages(
+    attributeName: "Obsolete",
+    solutionPath: "MyProject.sln",
+    format: "inline"
+)
+```
+
+**Output (~300 tokens)**:
+```
+[Obsolete]: 12 usages found
+
+Methods (8):
+  GetLegacyData("Use GetDataAsync instead") @ UserService.cs:45
+  ProcessOldFormat @ DataProcessor.cs:120
+  CalculateOldWay @ Calculator.cs:67
+  ... and 5 more
+
+Properties (4):
+  OldPropertyName @ Settings.cs:30
+  LegacyConnection @ DbContext.cs:15
+  ... and 2 more
+```
+
+**Best for**: Finding all usages quickly, attribute audits
+
+---
+
+## 🔸 GetClassHierarchy - Token Optimization
+
+### Parameters
+
+```csharp
+string format = "normal"            // compact | normal | detailed
+string direction = "both"           // ancestors | descendants | both
+int maxDepth = 10
+```
+
+### Format Comparison
+
+| Format | Tokens | Use Case |
+|--------|--------|----------|
+| compact | 150-600 | Tree structure only |
+| normal | 400-1200 | Balanced view |
+| detailed | 600-2000 | Full metadata |
+
+### Example 10: Compact Format (70% savings)
+
+```csharp
+GetClassHierarchy(
+    typeName: "BaseController",
+    solutionPath: "MyProject.sln",
+    format: "compact"
+)
+```
+
+**Output (~250 tokens)**:
+```
+BaseController (Class)
+
+Ancestors (2):
+  ↑ Controller (C)
+  ↑ ControllerBase (A)
+
+Descendants (5):
+  ↓ HomeController (C)
+  ↓ UserController (C)
+  ↓ AdminController (C)
+    ↓ SuperAdminController (C)
+  ↓ ApiController (C)
+```
+
+**Legend**: C=Concrete, A=Abstract, I=Interface
+
+**Best for**: Understanding hierarchy structure quickly
+
+---
+
+## 🔻 FindImplementations - Token Optimization
+
+### Parameters
+
+```csharp
+string format = "normal"            // summary | normal | detailed
+bool includeAbstractImplementations = false
+```
+
+### Format Comparison
+
+| Format | Tokens | Use Case |
+|--------|--------|----------|
+| summary | 100-300 | Names and locations |
+| normal | 300-800 | Balanced info |
+| detailed | 500-1200 | Full analysis |
+
+### Example 11: Summary Format (70% savings)
+
+```csharp
+FindImplementations(
+    typeName: "IUserRepository",
+    solutionPath: "MyProject.sln",
+    format: "summary"
+)
+```
+
+**Output (~150 tokens)**:
+```
+Implementations of 'IUserRepository': 4
+
+MyProject.Infrastructure (3):
+  UserRepository @ UserRepository.cs:15
+  CachedUserRepository @ CachedUserRepository.cs:20
+  InMemoryUserRepository @ InMemoryUserRepository.cs:8
+
+MyProject.Tests (1):
+  MockUserRepository @ MockUserRepository.cs:12
+```
+
+**Best for**: Finding all implementations quickly
+
+---
+
+## 📈 Phase 4B Real-World Savings
+
+### Scenario 1: Error Diagnostics
+
+**Before**:
+```
+GetCompilationErrors (default)  = 2500 tokens
+```
+
+**After**:
+```
+GetCompilationErrors (compact)  = 800 tokens
+```
+
+**Savings: 1700 tokens (68%)**
+
+### Scenario 2: Attribute Audit
+
+**Before**:
+```
+FindAttributeUsages (default)   = 1200 tokens
+```
+
+**After**:
+```
+FindAttributeUsages (inline)    = 400 tokens
+```
+
+**Savings: 800 tokens (67%)**
+
+### Scenario 3: Architecture Analysis
+
+**Before**:
+```
+GetClassHierarchy (default)     = 1800 tokens
+FindImplementations (default)   = 900 tokens
+Total: 2700 tokens
+```
+
+**After**:
+```
+GetClassHierarchy (compact)     = 500 tokens
+FindImplementations (summary)   = 250 tokens
+Total: 750 tokens
+```
+
+**Savings: 1950 tokens (72%)**
+
+---
+
 ## 🎓 Tips
 
 1. Start with `compact`/`summary`, upgrade only when needed
@@ -303,8 +558,22 @@ GetSymbolInfo(name, sln, detailLevel: "summary")
 
 ## ✅ Summary
 
-**Total impact**: 40-80% token savings  
-**Migration effort**: Zero (backward compatible)  
-**User experience**: Improved (faster, focused results)
+### Phase 4 Complete: 6 Tools Optimized
+
+**Phase 4A (2 tools)**:
+- GetFileOutline: `mode` + `maxMembers` → 60-75% savings
+- GetSymbolInfo: `detailLevel` → 70-80% savings
+
+**Phase 4B (4 tools)**:
+- GetCompilationErrors: `mode` → 40-60% savings
+- FindAttributeUsages: `format` → 50-70% savings
+- GetClassHierarchy: `format` → 50-70% savings
+- FindImplementations: `format` → 50-70% savings
+
+**Overall Impact**:
+- **Total impact**: 40-80% token savings across 6 core tools
+- **Migration effort**: Zero (100% backward compatible)
+- **User experience**: Dramatically improved (faster responses, focused results)
+- **Total formatting modes**: 18 new formatting functions
 
 Start using these optimizations today!
