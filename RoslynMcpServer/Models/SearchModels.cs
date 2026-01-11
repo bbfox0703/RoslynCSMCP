@@ -468,4 +468,50 @@ namespace RoslynMcpServer.Models
         public int MediumSimilarityCount { get; set; }  // 85-94%
         public int LowSimilarityCount { get; set; }  // Below 85%
     }
+
+    /// <summary>
+    /// Represents an undocumented symbol (type, method, property, etc.)
+    /// </summary>
+    public class UndocumentedSymbol
+    {
+        public string Name { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string Kind { get; set; } = string.Empty;  // Class, Method, Property, etc.
+        public string Accessibility { get; set; } = string.Empty;  // Public, Internal, etc.
+        public string ContainingType { get; set; } = string.Empty;
+        public string Namespace { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string Signature { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public string SuggestedDocumentation { get; set; } = string.Empty;  // AI-generated suggestion
+        public List<string> Parameters { get; set; } = new();  // For methods
+        public string ReturnType { get; set; } = string.Empty;  // For methods
+    }
+
+    /// <summary>
+    /// Wrapper for documentation coverage analysis results
+    /// </summary>
+    public class DocumentationCoverageResults
+    {
+        public List<UndocumentedSymbol> UndocumentedSymbols { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int TotalSymbols { get; set; }
+        public int DocumentedSymbols { get; set; }
+        public int UndocumentedCount { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by kind
+        public int UndocumentedClasses { get; set; }
+        public int UndocumentedMethods { get; set; }
+        public int UndocumentedProperties { get; set; }
+        public int UndocumentedFields { get; set; }
+        public int UndocumentedEvents { get; set; }
+
+        // Coverage percentage
+        public double CoveragePercentage => TotalSymbols > 0 ? (DocumentedSymbols * 100.0 / TotalSymbols) : 0;
+    }
 }

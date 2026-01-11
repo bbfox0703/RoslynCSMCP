@@ -35,6 +35,14 @@
    - 3 format modes (summary/normal/detailed)
    - Token optimization: 30-60% savings
 
+5. **AnalyzeDocumentationCoverage** (2026-01-11)
+   - XML documentation coverage analysis
+   - Smart documentation suggestions based on naming conventions
+   - Scope filtering (public/all)
+   - 3 format modes (summary/normal/detailed)
+   - Detailed view includes suggested XML documentation for each undocumented symbol
+   - Token optimization: 40-60% savings
+
 ---
 
 ## 📊 Current Tool Coverage
