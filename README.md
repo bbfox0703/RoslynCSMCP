@@ -756,9 +756,12 @@ RoslynCSMCP/
 │   ├── setup-claude-cli.sh       # Linux/macOS setup for Claude CLI
 │   ├── claude-desktop-config.example.json # Example Claude Desktop config
 │   └── claude-cli-config.example.json     # Example Claude CLI config
-├── docs/                         # documents
-│   ├── CLAUDE_CLI_INTEGRATION.md     # Detailed Claude CLI integration guide
-│   └── UPGRADE_COMPLETE.md           # .NET 10 upgrade documentation
+├── docs/                         # Documentation (9 active docs + archive)
+│   ├── README.md                     # 📚 Documentation index
+│   ├── TOKEN_OPTIMIZATION.md         # ⭐ Token optimization guide
+│   ├── TESTING_GUIDE.md              # Complete testing guide
+│   ├── LOGGING_CONFIGURATION.md      # Logging configuration
+│   └── archive/                      # 25 archived historical documents
 ├── .mcp.json                     # Project-scope MCP config (Claude CLI)
 ├── CLAUDE.md                     # Architecture documentation for Claude Code
 └── README.md                     # This file
@@ -766,26 +769,23 @@ RoslynCSMCP/
 
 ## Documentation
 
+**📚 Full Documentation Index**: See [docs/README.md](docs/README.md) for complete documentation catalog
+
 ### Getting Started
 - **[CLAUDE.md](CLAUDE.md)** - Development guide and architecture documentation for Claude Code
-- **[CLAUDE_CLI_INTEGRATION.md](docs/CLAUDE_CLI_INTEGRATION.md)** - Comprehensive Claude CLI integration guide
-- **[MCP_TOOL_SELECTION.md](docs/MCP_TOOL_SELECTION.md)** - How Claude chooses RoslynCSMCP tools and language-specific detection
+- **[TESTING_GUIDE.md](docs/TESTING_GUIDE.md)** - Complete testing guide (Desktop & CLI setup, MCP connection tests)
+- **[CLAUDE_CLI_INTEGRATION.md](docs/CLAUDE_CLI_INTEGRATION.md)** - Claude CLI integration guide
+- **[SOLUTION_STRUCTURE.md](docs/SOLUTION_STRUCTURE.md)** - Project structure and organization
 
-### Testing & Verification
-- **[TESTING_GUIDE.md](docs/TESTING_GUIDE.md)** - Complete testing guide (installation, unit tests, MCP integration)
-- **[TEST_IMPLEMENTATION_SUMMARY.md](docs/TEST_IMPLEMENTATION_SUMMARY.md)** - Current test status and known issues
+### Configuration & Features
+- **[LOGGING_CONFIGURATION.md](docs/LOGGING_CONFIGURATION.md)** - Serilog logging configuration (Production vs Development)
+- **[TOKEN_OPTIMIZATION.md](docs/TOKEN_OPTIMIZATION.md)** - ⭐ Token optimization guide (40-80% savings across 6 tools)
+- **[PHASE4_USAGE_EXAMPLES.md](docs/PHASE4_USAGE_EXAMPLES.md)** - Phase 4 token optimization usage examples
+- **[MCP_TOOL_SELECTION.md](docs/MCP_TOOL_SELECTION.md)** - How Claude selects and uses RoslynCSMCP tools
+- **[DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)** - Docker deployment guide
 
-### Features & Usage
-- **[PHASE1_USAGE_EXAMPLES.md](docs/PHASE1_USAGE_EXAMPLES.md)** - ⚡ Phase 1 token optimization features usage guide with examples
-- **[PHASE2_USAGE_EXAMPLES.md](docs/PHASE2_USAGE_EXAMPLES.md)** - ⚡ Phase 2 advanced analysis features usage guide with examples
-- **[PHASE3_USAGE_EXAMPLES.md](docs/PHASE3_USAGE_EXAMPLES.md)** - ⚡ Phase 3 advanced filtering features usage guide with examples
-- **[PHASE4_USAGE_EXAMPLES.md](docs/PHASE4_USAGE_EXAMPLES.md)** - ⚡ Phase 4A token optimization usage guide (60-80% savings) ✅ NEW
-- **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan (Phase 1-3)
-- **[TOKEN_OPTIMIZATION_PHASE4.md](docs/TOKEN_OPTIMIZATION_PHASE4.md)** - Phase 4 token optimization evaluation and roadmap
-
-### Project Information
-- **[UPGRADE_COMPLETE.md](docs/UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
-- **[SOLUTION_STRUCTURE.md](docs/SOLUTION_STRUCTURE.md)** - Solution file organization
+### Historical Documentation
+- **[docs/archive/](docs/archive/)** - Archived implementation progress, evaluations, and historical documents
 
 ## License
 
