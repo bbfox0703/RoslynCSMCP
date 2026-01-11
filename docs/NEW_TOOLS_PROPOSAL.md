@@ -21,6 +21,13 @@
    - Intelligent namespace mapping for common packages
    - Token optimization: 50-70% savings
 
+3. **FindSecurityIssues** (2026-01-11)
+   - Security vulnerability detection and anti-pattern analysis
+   - 5 categories: SQL injection, hardcoded secrets, weak crypto, path traversal, insecure deserialization
+   - Severity filtering: Critical, High, Medium, Low
+   - 3 format modes (summary/normal/detailed)
+   - Token optimization: 40-60% savings
+
 ---
 
 ## 📊 Current Tool Coverage

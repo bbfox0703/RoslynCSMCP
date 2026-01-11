@@ -587,6 +587,58 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find security issues and anti-patterns in the solution (SQL injection, hardcoded secrets, weak crypto, etc.)")]
+        public static async Task<string> FindSecurityIssues(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
+            string format = "normal",
+            [Description("Categories to check (comma-separated): sql-injection, secrets, crypto, path-traversal, deserialization, all. Default: all")]
+            string categories = "all",
+            [Description("Severity filter: critical, high, medium, low, all. Default: all")]
+            string severity = "all",
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var analyzer = serviceProvider?.GetService<SecurityIssueAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Security issue analyzer service not available.";
+                }
+
+                // Parse categories
+                var categoryArray = categories.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+                var results = await analyzer.AnalyzeSecurityIssuesAsync(
+                    solutionPath,
+                    categoryArray,
+                    severity);
+
+                // Normalize format to lowercase
+                var normalizedFormat = format.ToLowerInvariant();
+
+                return normalizedFormat switch
+                {
+                    "summary" => FormatSecurityIssuesSummary(results),
+                    "detailed" => FormatSecurityIssuesDetailed(results),
+                    "normal" => FormatSecurityIssuesNormal(results),
+                    _ => FormatSecurityIssuesNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding security issues");
+                return $"Error: An unexpected error occurred while finding security issues: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -3213,6 +3265,326 @@ namespace RoslynMcpServer.Tools
             {
                 output.AppendLine($"  • {results.UnusedProjectReferences} project reference{(results.UnusedProjectReferences > 1 ? "s" : "")} can be removed to simplify project structure");
                 output.AppendLine($"    Edit .csproj file and remove <ProjectReference> elements");
+            }
+
+            return output.ToString();
+        }
+
+        // Summary mode: Show only statistics and counts (40-60% token savings)
+        private static string FormatSecurityIssuesSummary(SecurityIssueResults results)
+        {
+            if (!results.Issues.Any())
+                return $"✅ No security issues found ({results.AnalyzedFiles} files analyzed)";
+
+            var output = new StringBuilder();
+            output.AppendLine($"Security issues: {results.TotalIssues} found ({results.AnalyzedFiles} files, {results.AnalyzedProjects} projects)\n");
+
+            // Statistics by severity
+            output.AppendLine("By Severity:");
+            if (results.CriticalCount > 0)
+                output.AppendLine($"  🔴 Critical: {results.CriticalCount}");
+            if (results.HighCount > 0)
+                output.AppendLine($"  🟠 High: {results.HighCount}");
+            if (results.MediumCount > 0)
+                output.AppendLine($"  🟡 Medium: {results.MediumCount}");
+            if (results.LowCount > 0)
+                output.AppendLine($"  🟢 Low: {results.LowCount}");
+            output.AppendLine();
+
+            // Statistics by category
+            output.AppendLine("By Category:");
+            if (results.SqlInjectionCount > 0)
+                output.AppendLine($"  SQL Injection: {results.SqlInjectionCount}");
+            if (results.HardcodedSecretsCount > 0)
+                output.AppendLine($"  Hardcoded Secrets: {results.HardcodedSecretsCount}");
+            if (results.WeakCryptoCount > 0)
+                output.AppendLine($"  Weak Cryptography: {results.WeakCryptoCount}");
+            if (results.PathTraversalCount > 0)
+                output.AppendLine($"  Path Traversal: {results.PathTraversalCount}");
+            if (results.DeserializationCount > 0)
+                output.AppendLine($"  Insecure Deserialization: {results.DeserializationCount}");
+            output.AppendLine();
+
+            // Show top 5 critical issues
+            var topIssues = results.Issues
+                .Where(i => i.Severity == "Critical")
+                .Take(5);
+
+            if (topIssues.Any())
+            {
+                output.AppendLine("Top critical issues:");
+                foreach (var issue in topIssues)
+                {
+                    output.AppendLine($"  🔴 {issue.Title} @ {issue.FileName}:{issue.LineNumber}");
+                }
+
+                var criticalCount = results.Issues.Count(i => i.Severity == "Critical");
+                if (criticalCount > 5)
+                {
+                    output.AppendLine($"  ... and {criticalCount - 5} more critical issues (use format=normal for full list)");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Balanced format with grouped listings
+        private static string FormatSecurityIssuesNormal(SecurityIssueResults results)
+        {
+            if (!results.Issues.Any())
+                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Security Issues Analysis**\n");
+            output.AppendLine($"Found {results.TotalIssues} issue{(results.TotalIssues > 1 ? "s" : "")} ({results.AnalyzedFiles} files, {results.AnalyzedProjects} projects):\n");
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(5))
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Group by severity
+            var groupedBySeverity = results.Issues
+                .GroupBy(i => i.Severity)
+                .OrderBy(g => g.Key == "Critical" ? 0 : g.Key == "High" ? 1 : g.Key == "Medium" ? 2 : 3);
+
+            foreach (var severityGroup in groupedBySeverity)
+            {
+                var icon = severityGroup.Key switch
+                {
+                    "Critical" => "🔴",
+                    "High" => "🟠",
+                    "Medium" => "🟡",
+                    "Low" => "🟢",
+                    _ => "⚪"
+                };
+
+                output.AppendLine($"## {icon} {severityGroup.Key} ({severityGroup.Count()})");
+                output.AppendLine();
+
+                // Group by category
+                var groupedByCategory = severityGroup.GroupBy(i => i.Category);
+                foreach (var categoryGroup in groupedByCategory)
+                {
+                    var categoryName = categoryGroup.Key switch
+                    {
+                        "sql-injection" => "SQL Injection",
+                        "secrets" => "Hardcoded Secrets",
+                        "crypto" => "Weak Cryptography",
+                        "path-traversal" => "Path Traversal",
+                        "deserialization" => "Insecure Deserialization",
+                        _ => categoryGroup.Key
+                    };
+
+                    output.AppendLine($"### {categoryName} ({categoryGroup.Count()})");
+                    output.AppendLine();
+
+                    // Show first 10 issues per category
+                    var displayedIssues = categoryGroup.Take(10);
+                    foreach (var issue in displayedIssues)
+                    {
+                        output.AppendLine($"**{issue.Title}**");
+                        output.AppendLine($"   📄 {issue.FileName}:{issue.LineNumber}");
+                        if (!string.IsNullOrWhiteSpace(issue.MethodName) && issue.MethodName != "(global)")
+                        {
+                            output.AppendLine($"   Method: {issue.MethodName}");
+                        }
+                        output.AppendLine($"   ⚠️ {issue.Description}");
+                        output.AppendLine($"   💡 {issue.Recommendation}");
+                        output.AppendLine();
+                    }
+
+                    if (categoryGroup.Count() > 10)
+                    {
+                        output.AppendLine($"... and {categoryGroup.Count() - 10} more {categoryName.ToLower()} issue{(categoryGroup.Count() - 10 > 1 ? "s" : "")}");
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Summary
+            output.AppendLine("---");
+            output.AppendLine("**Summary by Severity:**");
+            if (results.CriticalCount > 0)
+                output.AppendLine($"  🔴 Critical: {results.CriticalCount} (Fix immediately!)");
+            if (results.HighCount > 0)
+                output.AppendLine($"  🟠 High: {results.HighCount}");
+            if (results.MediumCount > 0)
+                output.AppendLine($"  🟡 Medium: {results.MediumCount}");
+            if (results.LowCount > 0)
+                output.AppendLine($"  🟢 Low: {results.LowCount}");
+
+            output.AppendLine("\n**Summary by Category:**");
+            if (results.SqlInjectionCount > 0)
+                output.AppendLine($"  • SQL Injection: {results.SqlInjectionCount}");
+            if (results.HardcodedSecretsCount > 0)
+                output.AppendLine($"  • Hardcoded Secrets: {results.HardcodedSecretsCount}");
+            if (results.WeakCryptoCount > 0)
+                output.AppendLine($"  • Weak Cryptography: {results.WeakCryptoCount}");
+            if (results.PathTraversalCount > 0)
+                output.AppendLine($"  • Path Traversal: {results.PathTraversalCount}");
+            if (results.DeserializationCount > 0)
+                output.AppendLine($"  • Insecure Deserialization: {results.DeserializationCount}");
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Comprehensive format with all metadata and code snippets
+        private static string FormatSecurityIssuesDetailed(SecurityIssueResults results)
+        {
+            if (!results.Issues.Any())
+                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Security Issues Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Analysis Summary:**");
+            output.AppendLine($"  • Total issues: {results.TotalIssues}");
+            output.AppendLine($"  • Files analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  • Projects analyzed: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Failed projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Show all warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Group by severity
+            var groupedBySeverity = results.Issues
+                .GroupBy(i => i.Severity)
+                .OrderBy(g => g.Key == "Critical" ? 0 : g.Key == "High" ? 1 : g.Key == "Medium" ? 2 : 3);
+
+            foreach (var severityGroup in groupedBySeverity)
+            {
+                var icon = severityGroup.Key switch
+                {
+                    "Critical" => "🔴",
+                    "High" => "🟠",
+                    "Medium" => "🟡",
+                    "Low" => "🟢",
+                    _ => "⚪"
+                };
+
+                output.AppendLine($"## {icon} {severityGroup.Key} Severity ({severityGroup.Count()})");
+                output.AppendLine();
+
+                // Group by category
+                var groupedByCategory = severityGroup.GroupBy(i => i.Category);
+                foreach (var categoryGroup in groupedByCategory)
+                {
+                    var categoryName = categoryGroup.Key switch
+                    {
+                        "sql-injection" => "SQL Injection",
+                        "secrets" => "Hardcoded Secrets",
+                        "crypto" => "Weak Cryptography",
+                        "path-traversal" => "Path Traversal",
+                        "deserialization" => "Insecure Deserialization",
+                        _ => categoryGroup.Key
+                    };
+
+                    output.AppendLine($"### {categoryName} ({categoryGroup.Count()})");
+                    output.AppendLine();
+
+                    // Group by project
+                    var groupedByProject = categoryGroup.GroupBy(i => i.ProjectName);
+                    foreach (var projectGroup in groupedByProject)
+                    {
+                        if (groupedByProject.Count() > 1)
+                        {
+                            output.AppendLine($"#### 📦 {projectGroup.Key} ({projectGroup.Count()})");
+                            output.AppendLine();
+                        }
+
+                        // Show all issues in detailed mode
+                        foreach (var issue in projectGroup)
+                        {
+                            output.AppendLine($"**{issue.Title}**");
+                            output.AppendLine($"   Severity: {icon} {issue.Severity}");
+                            output.AppendLine($"   Category: {categoryName}");
+                            output.AppendLine($"   📁 File: {issue.FilePath}");
+                            output.AppendLine($"   📄 Location: {issue.FileName}:{issue.LineNumber}");
+
+                            if (!string.IsNullOrWhiteSpace(issue.MethodName) && issue.MethodName != "(global)")
+                            {
+                                output.AppendLine($"   Method: {issue.MethodName}");
+                            }
+
+                            output.AppendLine($"   Project: {issue.ProjectName}");
+                            output.AppendLine();
+                            output.AppendLine($"   ⚠️ **Description**: {issue.Description}");
+                            output.AppendLine($"   💡 **Recommendation**: {issue.Recommendation}");
+
+                            if (!string.IsNullOrWhiteSpace(issue.CodeSnippet))
+                            {
+                                output.AppendLine();
+                                output.AppendLine($"   **Code Snippet**:");
+                                output.AppendLine($"   ```csharp");
+                                output.AppendLine($"   {issue.CodeSnippet}");
+                                output.AppendLine($"   ```");
+                            }
+
+                            output.AppendLine();
+                        }
+                    }
+                }
+            }
+
+            // Detailed summary
+            output.AppendLine("---");
+            output.AppendLine("**Detailed Summary:**");
+            output.AppendLine();
+            output.AppendLine("**By Severity:**");
+            if (results.CriticalCount > 0)
+                output.AppendLine($"  🔴 Critical: {results.CriticalCount} (Requires immediate attention!)");
+            if (results.HighCount > 0)
+                output.AppendLine($"  🟠 High: {results.HighCount} (Should be fixed soon)");
+            if (results.MediumCount > 0)
+                output.AppendLine($"  🟡 Medium: {results.MediumCount} (Consider fixing)");
+            if (results.LowCount > 0)
+                output.AppendLine($"  🟢 Low: {results.LowCount} (Low priority)");
+
+            output.AppendLine();
+            output.AppendLine("**By Category:**");
+            if (results.SqlInjectionCount > 0)
+                output.AppendLine($"  • SQL Injection: {results.SqlInjectionCount}");
+            if (results.HardcodedSecretsCount > 0)
+                output.AppendLine($"  • Hardcoded Secrets: {results.HardcodedSecretsCount}");
+            if (results.WeakCryptoCount > 0)
+                output.AppendLine($"  • Weak Cryptography: {results.WeakCryptoCount}");
+            if (results.PathTraversalCount > 0)
+                output.AppendLine($"  • Path Traversal: {results.PathTraversalCount}");
+            if (results.DeserializationCount > 0)
+                output.AppendLine($"  • Insecure Deserialization: {results.DeserializationCount}");
+
+            output.AppendLine();
+            output.AppendLine("**Recommendations:**");
+            if (results.CriticalCount > 0)
+            {
+                output.AppendLine($"  • {results.CriticalCount} critical security issue{(results.CriticalCount > 1 ? "s" : "")} found - fix immediately!");
+            }
+            if (results.SqlInjectionCount > 0)
+            {
+                output.AppendLine($"  • Use parameterized queries or Entity Framework to prevent SQL injection");
+            }
+            if (results.HardcodedSecretsCount > 0)
+            {
+                output.AppendLine($"  • Move secrets to configuration files, environment variables, or Azure Key Vault");
+            }
+            if (results.WeakCryptoCount > 0)
+            {
+                output.AppendLine($"  • Replace weak cryptography with modern algorithms (SHA256, AES)");
             }
 
             return output.ToString();

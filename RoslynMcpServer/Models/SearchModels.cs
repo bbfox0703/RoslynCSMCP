@@ -375,4 +375,50 @@ namespace RoslynMcpServer.Models
         // Potential savings
         public int TotalUnusedDependencies => UnusedNuGetPackages + UnusedProjectReferences;
     }
+
+    /// <summary>
+    /// Represents a security issue detected in code
+    /// </summary>
+    public class SecurityIssue
+    {
+        public string Category { get; set; } = string.Empty;  // sql-injection, secrets, crypto, etc.
+        public string Severity { get; set; } = string.Empty;  // Critical, High, Medium, Low
+        public string Title { get; set; } = string.Empty;  // Short title
+        public string Description { get; set; } = string.Empty;  // Detailed description
+        public string Recommendation { get; set; } = string.Empty;  // How to fix
+        public string MethodName { get; set; } = string.Empty;  // Method containing the issue
+        public string FileName { get; set; } = string.Empty;  // File name
+        public string FilePath { get; set; } = string.Empty;  // Full path
+        public int LineNumber { get; set; }  // Line number
+        public string CodeSnippet { get; set; } = string.Empty;  // Problematic code
+        public string ProjectName { get; set; } = string.Empty;  // Project name
+    }
+
+    /// <summary>
+    /// Wrapper for security issue analysis results
+    /// </summary>
+    public class SecurityIssueResults
+    {
+        public List<SecurityIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by severity
+        public int CriticalCount { get; set; }
+        public int HighCount { get; set; }
+        public int MediumCount { get; set; }
+        public int LowCount { get; set; }
+
+        // Statistics by category
+        public int SqlInjectionCount { get; set; }
+        public int HardcodedSecretsCount { get; set; }
+        public int WeakCryptoCount { get; set; }
+        public int PathTraversalCount { get; set; }
+        public int DeserializationCount { get; set; }
+        public int OtherCount { get; set; }
+
+        public int TotalIssues => Issues.Count;
+    }
 }
