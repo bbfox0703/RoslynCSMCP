@@ -766,13 +766,26 @@ RoslynCSMCP/
 
 ## Documentation
 
+### Getting Started
 - **[CLAUDE.md](CLAUDE.md)** - Development guide and architecture documentation for Claude Code
 - **[CLAUDE_CLI_INTEGRATION.md](docs/CLAUDE_CLI_INTEGRATION.md)** - Comprehensive Claude CLI integration guide
-- **[UPGRADE_COMPLETE.md](docs/UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
-- **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan
+- **[MCP_TOOL_SELECTION.md](docs/MCP_TOOL_SELECTION.md)** - How Claude chooses RoslynCSMCP tools and language-specific detection
+
+### Testing & Verification
+- **[TESTING_GUIDE.md](docs/TESTING_GUIDE.md)** - Complete testing guide (installation, unit tests, MCP integration)
+- **[TEST_IMPLEMENTATION_SUMMARY.md](docs/TEST_IMPLEMENTATION_SUMMARY.md)** - Current test status and known issues
+
+### Features & Usage
 - **[PHASE1_USAGE_EXAMPLES.md](docs/PHASE1_USAGE_EXAMPLES.md)** - ⚡ Phase 1 token optimization features usage guide with examples
 - **[PHASE2_USAGE_EXAMPLES.md](docs/PHASE2_USAGE_EXAMPLES.md)** - ⚡ Phase 2 advanced analysis features usage guide with examples
 - **[PHASE3_USAGE_EXAMPLES.md](docs/PHASE3_USAGE_EXAMPLES.md)** - ⚡ Phase 3 advanced filtering features usage guide with examples
+- **[PHASE4_USAGE_EXAMPLES.md](docs/PHASE4_USAGE_EXAMPLES.md)** - ⚡ Phase 4A token optimization usage guide (60-80% savings) ✅ NEW
+- **[TOKEN_OPTIMIZATION_PLAN.md](docs/TOKEN_OPTIMIZATION_PLAN.md)** - Token optimization features evaluation and implementation plan (Phase 1-3)
+- **[TOKEN_OPTIMIZATION_PHASE4.md](docs/TOKEN_OPTIMIZATION_PHASE4.md)** - Phase 4 token optimization evaluation and roadmap
+
+### Project Information
+- **[UPGRADE_COMPLETE.md](docs/UPGRADE_COMPLETE.md)** - .NET 10 upgrade report and details
+- **[SOLUTION_STRUCTURE.md](docs/SOLUTION_STRUCTURE.md)** - Solution file organization
 
 ## License
 
@@ -785,6 +798,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - Fork from [RoslynMCP](https://github.com/carquiza/RoslynMCP), originally by [Chris Arquiza](https://github.com/carquiza). For personal playground.
+- Not all scripts (installation, test, PowerShell script) are tested.
 - Built with [Roslyn](https://github.com/dotnet/roslyn) - The .NET Compiler Platform
 - Uses [Model Context Protocol](https://modelcontextprotocol.io) for Claude integration
 - Powered by [.NET 10.0](https://dotnet.microsoft.com/download/dotnet/10.0)

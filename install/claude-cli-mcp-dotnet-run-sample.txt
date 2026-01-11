@@ -2,13 +2,13 @@
 # Replace the path with your actual RoslynCSMCP location
 
 # Method 1: Using project directory (recommended)
-claude mcp add roslyn --scope user --transport stdio --env DOTNET_ENVIRONMENT=Development --env LOG_LEVEL=Information -- dotnet run --project D:\Github\RoslynCSMCP\RoslynMcpServer
+claude mcp add roslyn-mcp --scope user --transport stdio --env DOTNET_ENVIRONMENT=Development --env LOG_LEVEL=Information -- dotnet run --project D:\Github\RoslynCSMCP\RoslynMcpServer
 
 # Method 2: Using .csproj file path (alternative)
-# claude mcp add roslyn --scope user --transport stdio --env DOTNET_ENVIRONMENT=Development --env LOG_LEVEL=Information -- dotnet run --project D:\Github\RoslynCSMCP\RoslynMcpServer\RoslynMcpServer.csproj
+# claude mcp add roslyn-mcp --scope user --transport stdio --env DOTNET_ENVIRONMENT=Development --env LOG_LEVEL=Information -- dotnet run --project D:\Github\RoslynCSMCP\RoslynMcpServer\RoslynMcpServer.csproj
 
 # Method 3: Production mode with dotnet run
-# claude mcp add roslyn --scope user --transport stdio --env DOTNET_ENVIRONMENT=Production --env LOG_LEVEL=Information -- dotnet run --project D:\Github\RoslynCSMCP\RoslynMcpServer -c Release
+# claude mcp add roslyn-mcp --scope user --transport stdio --env DOTNET_ENVIRONMENT=Production --env LOG_LEVEL=Information -- dotnet run --project D:\Github\RoslynCSMCP\RoslynMcpServer -c Release
 
 # Note:
 # - The --project parameter should point to the PROJECT DIRECTORY or .csproj file
