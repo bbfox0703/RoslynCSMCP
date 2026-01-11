@@ -343,4 +343,129 @@ namespace RoslynMcpServer.Models
         public int FieldCount { get; set; }
         public int EventCount { get; set; }
     }
+
+    /// <summary>
+    /// Represents an unused dependency (NuGet package or project reference)
+    /// </summary>
+    public class UnusedDependency
+    {
+        public string Name { get; set; } = string.Empty;  // Package or project name
+        public string Version { get; set; } = string.Empty;  // Package version (empty for project refs)
+        public string Type { get; set; } = string.Empty;  // "NuGetPackage" or "ProjectReference"
+        public string ProjectName { get; set; } = string.Empty;  // Project that has this dependency
+        public string ProjectPath { get; set; } = string.Empty;  // Full path to project file
+        public string Reason { get; set; } = string.Empty;  // Why it's considered unused
+        public List<string> ExpectedNamespaces { get; set; } = new();  // Namespaces that should be used
+    }
+
+    /// <summary>
+    /// Wrapper for unused dependency analysis results
+    /// </summary>
+    public class UnusedDependencyResults
+    {
+        public List<UnusedDependency> UnusedDependencies { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by type
+        public int UnusedNuGetPackages { get; set; }
+        public int UnusedProjectReferences { get; set; }
+
+        // Potential savings
+        public int TotalUnusedDependencies => UnusedNuGetPackages + UnusedProjectReferences;
+    }
+
+    /// <summary>
+    /// Represents a security issue detected in code
+    /// </summary>
+    public class SecurityIssue
+    {
+        public string Category { get; set; } = string.Empty;  // sql-injection, secrets, crypto, etc.
+        public string Severity { get; set; } = string.Empty;  // Critical, High, Medium, Low
+        public string Title { get; set; } = string.Empty;  // Short title
+        public string Description { get; set; } = string.Empty;  // Detailed description
+        public string Recommendation { get; set; } = string.Empty;  // How to fix
+        public string MethodName { get; set; } = string.Empty;  // Method containing the issue
+        public string FileName { get; set; } = string.Empty;  // File name
+        public string FilePath { get; set; } = string.Empty;  // Full path
+        public int LineNumber { get; set; }  // Line number
+        public string CodeSnippet { get; set; } = string.Empty;  // Problematic code
+        public string ProjectName { get; set; } = string.Empty;  // Project name
+    }
+
+    /// <summary>
+    /// Wrapper for security issue analysis results
+    /// </summary>
+    public class SecurityIssueResults
+    {
+        public List<SecurityIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by severity
+        public int CriticalCount { get; set; }
+        public int HighCount { get; set; }
+        public int MediumCount { get; set; }
+        public int LowCount { get; set; }
+
+        // Statistics by category
+        public int SqlInjectionCount { get; set; }
+        public int HardcodedSecretsCount { get; set; }
+        public int WeakCryptoCount { get; set; }
+        public int PathTraversalCount { get; set; }
+        public int DeserializationCount { get; set; }
+        public int OtherCount { get; set; }
+
+        public int TotalIssues => Issues.Count;
+    }
+
+    /// <summary>
+    /// Represents a code block instance in a duplicate set
+    /// </summary>
+    public class CodeBlockInstance
+    {
+        public string MethodName { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int StartLine { get; set; }
+        public int EndLine { get; set; }
+        public int LineCount { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;  // First few lines for preview
+    }
+
+    /// <summary>
+    /// Represents a set of duplicate code blocks
+    /// </summary>
+    public class DuplicateCodeBlock
+    {
+        public int GroupId { get; set; }
+        public List<CodeBlockInstance> Instances { get; set; } = new();
+        public int SimilarityPercentage { get; set; }
+        public int LineCount { get; set; }
+        public string Hash { get; set; } = string.Empty;  // Hash of the normalized code
+    }
+
+    /// <summary>
+    /// Wrapper for duplicate code analysis results
+    /// </summary>
+    public class DuplicateCodeResults
+    {
+        public List<DuplicateCodeBlock> DuplicateBlocks { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int AnalyzedMethods { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics
+        public int TotalDuplicateBlocks => DuplicateBlocks.Count;
+        public int TotalDuplicateInstances => DuplicateBlocks.Sum(b => b.Instances.Count);
+        public int HighSimilarityCount { get; set; }  // 95%+
+        public int MediumSimilarityCount { get; set; }  // 85-94%
+        public int LowSimilarityCount { get; set; }  // Below 85%
+    }
 }

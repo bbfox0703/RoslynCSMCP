@@ -540,6 +540,152 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find unused dependencies (NuGet packages and project references) in the solution")]
+        public static async Task<string> FindUnusedDependencies(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
+            string format = "normal",
+            [Description("Include NuGet package analysis (default: true)")] bool includeNuGetPackages = true,
+            [Description("Include project reference analysis (default: true)")] bool includeProjectReferences = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var analyzer = serviceProvider?.GetService<UnusedDependencyAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Unused dependency analyzer service not available.";
+                }
+
+                var results = await analyzer.AnalyzeUnusedDependenciesAsync(
+                    solutionPath,
+                    includeNuGetPackages,
+                    includeProjectReferences);
+
+                // Normalize format to lowercase
+                var normalizedFormat = format.ToLowerInvariant();
+
+                return normalizedFormat switch
+                {
+                    "summary" => FormatUnusedDependenciesSummary(results),
+                    "detailed" => FormatUnusedDependenciesDetailed(results),
+                    "normal" => FormatUnusedDependenciesNormal(results),
+                    _ => FormatUnusedDependenciesNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding unused dependencies");
+                return $"Error: An unexpected error occurred while finding unused dependencies: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Find security issues and anti-patterns in the solution (SQL injection, hardcoded secrets, weak crypto, etc.)")]
+        public static async Task<string> FindSecurityIssues(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
+            string format = "normal",
+            [Description("Categories to check (comma-separated): sql-injection, secrets, crypto, path-traversal, deserialization, all. Default: all")]
+            string categories = "all",
+            [Description("Severity filter: critical, high, medium, low, all. Default: all")]
+            string severity = "all",
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var analyzer = serviceProvider?.GetService<SecurityIssueAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Security issue analyzer service not available.";
+                }
+
+                // Parse categories
+                var categoryArray = categories.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+                var results = await analyzer.AnalyzeSecurityIssuesAsync(
+                    solutionPath,
+                    categoryArray,
+                    severity);
+
+                // Normalize format to lowercase
+                var normalizedFormat = format.ToLowerInvariant();
+
+                return normalizedFormat switch
+                {
+                    "summary" => FormatSecurityIssuesSummary(results),
+                    "detailed" => FormatSecurityIssuesDetailed(results),
+                    "normal" => FormatSecurityIssuesNormal(results),
+                    _ => FormatSecurityIssuesNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding security issues");
+                return $"Error: An unexpected error occurred while finding security issues: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Find duplicate code blocks across the solution")]
+        public static async Task<string> FindDuplicateCode(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
+            string format = "normal",
+            [Description("Minimum lines to consider duplicate (default: 5)")] int minLines = 5,
+            [Description("Similarity threshold percentage 70-100 (default: 90)")] int similarity = 90,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var analyzer = serviceProvider?.GetService<DuplicateCodeAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Duplicate code analyzer service not available.";
+                }
+
+                var results = await analyzer.AnalyzeDuplicateCodeAsync(
+                    solutionPath,
+                    minLines,
+                    similarity);
+
+                // Normalize format to lowercase
+                var normalizedFormat = format.ToLowerInvariant();
+
+                return normalizedFormat switch
+                {
+                    "summary" => FormatDuplicateCodeSummary(results),
+                    "detailed" => FormatDuplicateCodeDetailed(results),
+                    "normal" => FormatDuplicateCodeNormal(results),
+                    _ => FormatDuplicateCodeNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding duplicate code");
+                return $"Error: An unexpected error occurred while finding duplicate code: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -2958,6 +3104,739 @@ namespace RoslynMcpServer.Tools
             if (results.PrivateCount > 0)
             {
                 output.AppendLine($"  • {results.PrivateCount} private members can be safely removed");
+            }
+
+            return output.ToString();
+        }
+
+        // Summary mode: Show only statistics and counts (50-70% token savings)
+        private static string FormatUnusedDependenciesSummary(UnusedDependencyResults results)
+        {
+            if (!results.UnusedDependencies.Any())
+                return $"✅ No unused dependencies found ({results.AnalyzedProjects} projects analyzed)";
+
+            var output = new StringBuilder();
+            output.AppendLine($"Unused dependencies: {results.TotalUnusedDependencies} items ({results.AnalyzedProjects} projects, {results.FailedProjects} failed)\n");
+
+            // Statistics by type
+            output.AppendLine("By Type:");
+            if (results.UnusedNuGetPackages > 0)
+                output.AppendLine($"  NuGet Packages: {results.UnusedNuGetPackages}");
+            if (results.UnusedProjectReferences > 0)
+                output.AppendLine($"  Project References: {results.UnusedProjectReferences}");
+            output.AppendLine();
+
+            // Show top 5 unused dependencies
+            if (results.UnusedDependencies.Any())
+            {
+                output.AppendLine("Top unused dependencies:");
+                var topItems = results.UnusedDependencies.Take(5);
+                foreach (var item in topItems)
+                {
+                    var icon = item.Type == "NuGetPackage" ? "📦" : "🔗";
+                    var version = !string.IsNullOrWhiteSpace(item.Version) ? $" ({item.Version})" : "";
+                    output.AppendLine($"  {icon} {item.Name}{version} in {item.ProjectName}");
+                }
+
+                if (results.UnusedDependencies.Count > 5)
+                {
+                    output.AppendLine($"  ... and {results.UnusedDependencies.Count - 5} more (use format=normal for full list)");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Balanced format with grouped listings
+        private static string FormatUnusedDependenciesNormal(UnusedDependencyResults results)
+        {
+            if (!results.UnusedDependencies.Any())
+                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Unused Dependencies Analysis**\n");
+            output.AppendLine($"Found {results.TotalUnusedDependencies} unused dependenc{(results.TotalUnusedDependencies > 1 ? "ies" : "y")} ({results.AnalyzedProjects} projects analyzed, {results.FailedProjects} failed):\n");
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(5))
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                if (results.Warnings.Count > 5)
+                {
+                    output.AppendLine($"   ... and {results.Warnings.Count - 5} more warnings");
+                }
+                output.AppendLine();
+            }
+
+            // Group by type (NuGet vs Project Reference)
+            var groupedByType = results.UnusedDependencies.GroupBy(d => d.Type).OrderBy(g => g.Key);
+
+            foreach (var typeGroup in groupedByType)
+            {
+                output.AppendLine($"## {typeGroup.Key}s ({typeGroup.Count()})");
+                output.AppendLine();
+
+                // Group by project
+                var groupedByProject = typeGroup.GroupBy(d => d.ProjectName).OrderBy(g => g.Key);
+                foreach (var projectGroup in groupedByProject)
+                {
+                    output.AppendLine($"### 📦 {projectGroup.Key} ({projectGroup.Count()})");
+                    output.AppendLine();
+
+                    // Show first 10 dependencies per project
+                    var displayedItems = projectGroup.Take(10);
+                    foreach (var item in displayedItems)
+                    {
+                        var icon = item.Type == "NuGetPackage" ? "📦" : "🔗";
+                        var version = !string.IsNullOrWhiteSpace(item.Version) ? $" ({item.Version})" : "";
+
+                        output.AppendLine($"{icon} **{item.Name}{version}**");
+                        output.AppendLine($"   Reason: {item.Reason}");
+
+                        if (item.ExpectedNamespaces.Any())
+                        {
+                            output.AppendLine($"   Expected namespaces: {string.Join(", ", item.ExpectedNamespaces.Take(3))}");
+                        }
+                        output.AppendLine();
+                    }
+
+                    if (projectGroup.Count() > 10)
+                    {
+                        output.AppendLine($"... and {projectGroup.Count() - 10} more unused {typeGroup.Key.ToLower()}{(projectGroup.Count() - 10 > 1 ? "s" : "")}");
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Summary
+            output.AppendLine("---");
+            output.AppendLine("**Summary:**");
+            output.AppendLine($"  • NuGet Packages: {results.UnusedNuGetPackages}");
+            output.AppendLine($"  • Project References: {results.UnusedProjectReferences}");
+            output.AppendLine($"  • Total: {results.TotalUnusedDependencies}");
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Comprehensive format with all metadata
+        private static string FormatUnusedDependenciesDetailed(UnusedDependencyResults results)
+        {
+            if (!results.UnusedDependencies.Any())
+                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Unused Dependencies Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Analysis Summary:**");
+            output.AppendLine($"  • Total unused dependencies: {results.TotalUnusedDependencies}");
+            output.AppendLine($"  • Projects analyzed: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Projects failed: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Show all warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                    if (!string.IsNullOrWhiteSpace(warning.Details))
+                    {
+                        output.AppendLine($"     Details: {warning.Details}");
+                    }
+                }
+                output.AppendLine();
+            }
+
+            // Group by type (NuGet vs Project Reference)
+            var groupedByType = results.UnusedDependencies.GroupBy(d => d.Type).OrderBy(g => g.Key);
+
+            foreach (var typeGroup in groupedByType)
+            {
+                output.AppendLine($"## {typeGroup.Key}s ({typeGroup.Count()})");
+                output.AppendLine();
+
+                // Group by project
+                var groupedByProject = typeGroup.GroupBy(d => d.ProjectName).OrderBy(g => g.Key);
+                foreach (var projectGroup in groupedByProject)
+                {
+                    output.AppendLine($"### 📦 {projectGroup.Key} ({projectGroup.Count()})");
+                    output.AppendLine();
+
+                    // Show all dependencies in detailed mode
+                    foreach (var item in projectGroup)
+                    {
+                        var icon = item.Type == "NuGetPackage" ? "📦" : "🔗";
+                        var version = !string.IsNullOrWhiteSpace(item.Version) ? $" ({item.Version})" : "";
+
+                        output.AppendLine($"{icon} **{item.Name}{version}**");
+                        output.AppendLine($"   Type: {item.Type}");
+                        output.AppendLine($"   Project: {item.ProjectName}");
+                        output.AppendLine($"   📁 Project Path: {item.ProjectPath}");
+                        output.AppendLine($"   Reason: {item.Reason}");
+
+                        if (item.ExpectedNamespaces.Any())
+                        {
+                            output.AppendLine($"   Expected namespaces:");
+                            foreach (var ns in item.ExpectedNamespaces)
+                            {
+                                output.AppendLine($"     - {ns}");
+                            }
+                        }
+
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Detailed summary
+            output.AppendLine("---");
+            output.AppendLine("**Detailed Summary:**");
+            output.AppendLine();
+            output.AppendLine("**By Type:**");
+            output.AppendLine($"  • NuGet Packages: {results.UnusedNuGetPackages}");
+            output.AppendLine($"  • Project References: {results.UnusedProjectReferences}");
+            output.AppendLine($"  • Total: {results.TotalUnusedDependencies}");
+
+            output.AppendLine();
+            output.AppendLine("**Recommendations:**");
+            if (results.UnusedNuGetPackages > 0)
+            {
+                output.AppendLine($"  • {results.UnusedNuGetPackages} NuGet package{(results.UnusedNuGetPackages > 1 ? "s" : "")} can be removed to reduce dependencies");
+                output.AppendLine($"    Use: dotnet remove package <PackageName>");
+            }
+            if (results.UnusedProjectReferences > 0)
+            {
+                output.AppendLine($"  • {results.UnusedProjectReferences} project reference{(results.UnusedProjectReferences > 1 ? "s" : "")} can be removed to simplify project structure");
+                output.AppendLine($"    Edit .csproj file and remove <ProjectReference> elements");
+            }
+
+            return output.ToString();
+        }
+
+        // Summary mode: Show only statistics and counts (40-60% token savings)
+        private static string FormatSecurityIssuesSummary(SecurityIssueResults results)
+        {
+            if (!results.Issues.Any())
+                return $"✅ No security issues found ({results.AnalyzedFiles} files analyzed)";
+
+            var output = new StringBuilder();
+            output.AppendLine($"Security issues: {results.TotalIssues} found ({results.AnalyzedFiles} files, {results.AnalyzedProjects} projects)\n");
+
+            // Statistics by severity
+            output.AppendLine("By Severity:");
+            if (results.CriticalCount > 0)
+                output.AppendLine($"  🔴 Critical: {results.CriticalCount}");
+            if (results.HighCount > 0)
+                output.AppendLine($"  🟠 High: {results.HighCount}");
+            if (results.MediumCount > 0)
+                output.AppendLine($"  🟡 Medium: {results.MediumCount}");
+            if (results.LowCount > 0)
+                output.AppendLine($"  🟢 Low: {results.LowCount}");
+            output.AppendLine();
+
+            // Statistics by category
+            output.AppendLine("By Category:");
+            if (results.SqlInjectionCount > 0)
+                output.AppendLine($"  SQL Injection: {results.SqlInjectionCount}");
+            if (results.HardcodedSecretsCount > 0)
+                output.AppendLine($"  Hardcoded Secrets: {results.HardcodedSecretsCount}");
+            if (results.WeakCryptoCount > 0)
+                output.AppendLine($"  Weak Cryptography: {results.WeakCryptoCount}");
+            if (results.PathTraversalCount > 0)
+                output.AppendLine($"  Path Traversal: {results.PathTraversalCount}");
+            if (results.DeserializationCount > 0)
+                output.AppendLine($"  Insecure Deserialization: {results.DeserializationCount}");
+            output.AppendLine();
+
+            // Show top 5 critical issues
+            var topIssues = results.Issues
+                .Where(i => i.Severity == "Critical")
+                .Take(5);
+
+            if (topIssues.Any())
+            {
+                output.AppendLine("Top critical issues:");
+                foreach (var issue in topIssues)
+                {
+                    output.AppendLine($"  🔴 {issue.Title} @ {issue.FileName}:{issue.LineNumber}");
+                }
+
+                var criticalCount = results.Issues.Count(i => i.Severity == "Critical");
+                if (criticalCount > 5)
+                {
+                    output.AppendLine($"  ... and {criticalCount - 5} more critical issues (use format=normal for full list)");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Balanced format with grouped listings
+        private static string FormatSecurityIssuesNormal(SecurityIssueResults results)
+        {
+            if (!results.Issues.Any())
+                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Security Issues Analysis**\n");
+            output.AppendLine($"Found {results.TotalIssues} issue{(results.TotalIssues > 1 ? "s" : "")} ({results.AnalyzedFiles} files, {results.AnalyzedProjects} projects):\n");
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(5))
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Group by severity
+            var groupedBySeverity = results.Issues
+                .GroupBy(i => i.Severity)
+                .OrderBy(g => g.Key == "Critical" ? 0 : g.Key == "High" ? 1 : g.Key == "Medium" ? 2 : 3);
+
+            foreach (var severityGroup in groupedBySeverity)
+            {
+                var icon = severityGroup.Key switch
+                {
+                    "Critical" => "🔴",
+                    "High" => "🟠",
+                    "Medium" => "🟡",
+                    "Low" => "🟢",
+                    _ => "⚪"
+                };
+
+                output.AppendLine($"## {icon} {severityGroup.Key} ({severityGroup.Count()})");
+                output.AppendLine();
+
+                // Group by category
+                var groupedByCategory = severityGroup.GroupBy(i => i.Category);
+                foreach (var categoryGroup in groupedByCategory)
+                {
+                    var categoryName = categoryGroup.Key switch
+                    {
+                        "sql-injection" => "SQL Injection",
+                        "secrets" => "Hardcoded Secrets",
+                        "crypto" => "Weak Cryptography",
+                        "path-traversal" => "Path Traversal",
+                        "deserialization" => "Insecure Deserialization",
+                        _ => categoryGroup.Key
+                    };
+
+                    output.AppendLine($"### {categoryName} ({categoryGroup.Count()})");
+                    output.AppendLine();
+
+                    // Show first 10 issues per category
+                    var displayedIssues = categoryGroup.Take(10);
+                    foreach (var issue in displayedIssues)
+                    {
+                        output.AppendLine($"**{issue.Title}**");
+                        output.AppendLine($"   📄 {issue.FileName}:{issue.LineNumber}");
+                        if (!string.IsNullOrWhiteSpace(issue.MethodName) && issue.MethodName != "(global)")
+                        {
+                            output.AppendLine($"   Method: {issue.MethodName}");
+                        }
+                        output.AppendLine($"   ⚠️ {issue.Description}");
+                        output.AppendLine($"   💡 {issue.Recommendation}");
+                        output.AppendLine();
+                    }
+
+                    if (categoryGroup.Count() > 10)
+                    {
+                        output.AppendLine($"... and {categoryGroup.Count() - 10} more {categoryName.ToLower()} issue{(categoryGroup.Count() - 10 > 1 ? "s" : "")}");
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Summary
+            output.AppendLine("---");
+            output.AppendLine("**Summary by Severity:**");
+            if (results.CriticalCount > 0)
+                output.AppendLine($"  🔴 Critical: {results.CriticalCount} (Fix immediately!)");
+            if (results.HighCount > 0)
+                output.AppendLine($"  🟠 High: {results.HighCount}");
+            if (results.MediumCount > 0)
+                output.AppendLine($"  🟡 Medium: {results.MediumCount}");
+            if (results.LowCount > 0)
+                output.AppendLine($"  🟢 Low: {results.LowCount}");
+
+            output.AppendLine("\n**Summary by Category:**");
+            if (results.SqlInjectionCount > 0)
+                output.AppendLine($"  • SQL Injection: {results.SqlInjectionCount}");
+            if (results.HardcodedSecretsCount > 0)
+                output.AppendLine($"  • Hardcoded Secrets: {results.HardcodedSecretsCount}");
+            if (results.WeakCryptoCount > 0)
+                output.AppendLine($"  • Weak Cryptography: {results.WeakCryptoCount}");
+            if (results.PathTraversalCount > 0)
+                output.AppendLine($"  • Path Traversal: {results.PathTraversalCount}");
+            if (results.DeserializationCount > 0)
+                output.AppendLine($"  • Insecure Deserialization: {results.DeserializationCount}");
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Comprehensive format with all metadata and code snippets
+        private static string FormatSecurityIssuesDetailed(SecurityIssueResults results)
+        {
+            if (!results.Issues.Any())
+                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Security Issues Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Analysis Summary:**");
+            output.AppendLine($"  • Total issues: {results.TotalIssues}");
+            output.AppendLine($"  • Files analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  • Projects analyzed: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Failed projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Show all warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Group by severity
+            var groupedBySeverity = results.Issues
+                .GroupBy(i => i.Severity)
+                .OrderBy(g => g.Key == "Critical" ? 0 : g.Key == "High" ? 1 : g.Key == "Medium" ? 2 : 3);
+
+            foreach (var severityGroup in groupedBySeverity)
+            {
+                var icon = severityGroup.Key switch
+                {
+                    "Critical" => "🔴",
+                    "High" => "🟠",
+                    "Medium" => "🟡",
+                    "Low" => "🟢",
+                    _ => "⚪"
+                };
+
+                output.AppendLine($"## {icon} {severityGroup.Key} Severity ({severityGroup.Count()})");
+                output.AppendLine();
+
+                // Group by category
+                var groupedByCategory = severityGroup.GroupBy(i => i.Category);
+                foreach (var categoryGroup in groupedByCategory)
+                {
+                    var categoryName = categoryGroup.Key switch
+                    {
+                        "sql-injection" => "SQL Injection",
+                        "secrets" => "Hardcoded Secrets",
+                        "crypto" => "Weak Cryptography",
+                        "path-traversal" => "Path Traversal",
+                        "deserialization" => "Insecure Deserialization",
+                        _ => categoryGroup.Key
+                    };
+
+                    output.AppendLine($"### {categoryName} ({categoryGroup.Count()})");
+                    output.AppendLine();
+
+                    // Group by project
+                    var groupedByProject = categoryGroup.GroupBy(i => i.ProjectName);
+                    foreach (var projectGroup in groupedByProject)
+                    {
+                        if (groupedByProject.Count() > 1)
+                        {
+                            output.AppendLine($"#### 📦 {projectGroup.Key} ({projectGroup.Count()})");
+                            output.AppendLine();
+                        }
+
+                        // Show all issues in detailed mode
+                        foreach (var issue in projectGroup)
+                        {
+                            output.AppendLine($"**{issue.Title}**");
+                            output.AppendLine($"   Severity: {icon} {issue.Severity}");
+                            output.AppendLine($"   Category: {categoryName}");
+                            output.AppendLine($"   📁 File: {issue.FilePath}");
+                            output.AppendLine($"   📄 Location: {issue.FileName}:{issue.LineNumber}");
+
+                            if (!string.IsNullOrWhiteSpace(issue.MethodName) && issue.MethodName != "(global)")
+                            {
+                                output.AppendLine($"   Method: {issue.MethodName}");
+                            }
+
+                            output.AppendLine($"   Project: {issue.ProjectName}");
+                            output.AppendLine();
+                            output.AppendLine($"   ⚠️ **Description**: {issue.Description}");
+                            output.AppendLine($"   💡 **Recommendation**: {issue.Recommendation}");
+
+                            if (!string.IsNullOrWhiteSpace(issue.CodeSnippet))
+                            {
+                                output.AppendLine();
+                                output.AppendLine($"   **Code Snippet**:");
+                                output.AppendLine($"   ```csharp");
+                                output.AppendLine($"   {issue.CodeSnippet}");
+                                output.AppendLine($"   ```");
+                            }
+
+                            output.AppendLine();
+                        }
+                    }
+                }
+            }
+
+            // Detailed summary
+            output.AppendLine("---");
+            output.AppendLine("**Detailed Summary:**");
+            output.AppendLine();
+            output.AppendLine("**By Severity:**");
+            if (results.CriticalCount > 0)
+                output.AppendLine($"  🔴 Critical: {results.CriticalCount} (Requires immediate attention!)");
+            if (results.HighCount > 0)
+                output.AppendLine($"  🟠 High: {results.HighCount} (Should be fixed soon)");
+            if (results.MediumCount > 0)
+                output.AppendLine($"  🟡 Medium: {results.MediumCount} (Consider fixing)");
+            if (results.LowCount > 0)
+                output.AppendLine($"  🟢 Low: {results.LowCount} (Low priority)");
+
+            output.AppendLine();
+            output.AppendLine("**By Category:**");
+            if (results.SqlInjectionCount > 0)
+                output.AppendLine($"  • SQL Injection: {results.SqlInjectionCount}");
+            if (results.HardcodedSecretsCount > 0)
+                output.AppendLine($"  • Hardcoded Secrets: {results.HardcodedSecretsCount}");
+            if (results.WeakCryptoCount > 0)
+                output.AppendLine($"  • Weak Cryptography: {results.WeakCryptoCount}");
+            if (results.PathTraversalCount > 0)
+                output.AppendLine($"  • Path Traversal: {results.PathTraversalCount}");
+            if (results.DeserializationCount > 0)
+                output.AppendLine($"  • Insecure Deserialization: {results.DeserializationCount}");
+
+            output.AppendLine();
+            output.AppendLine("**Recommendations:**");
+            if (results.CriticalCount > 0)
+            {
+                output.AppendLine($"  • {results.CriticalCount} critical security issue{(results.CriticalCount > 1 ? "s" : "")} found - fix immediately!");
+            }
+            if (results.SqlInjectionCount > 0)
+            {
+                output.AppendLine($"  • Use parameterized queries or Entity Framework to prevent SQL injection");
+            }
+            if (results.HardcodedSecretsCount > 0)
+            {
+                output.AppendLine($"  • Move secrets to configuration files, environment variables, or Azure Key Vault");
+            }
+            if (results.WeakCryptoCount > 0)
+            {
+                output.AppendLine($"  • Replace weak cryptography with modern algorithms (SHA256, AES)");
+            }
+
+            return output.ToString();
+        }
+
+        // Summary mode: Show only statistics and counts (30-60% token savings)
+        private static string FormatDuplicateCodeSummary(DuplicateCodeResults results)
+        {
+            if (!results.DuplicateBlocks.Any())
+                return $"✅ No duplicate code found ({results.AnalyzedMethods} methods analyzed)";
+
+            var output = new StringBuilder();
+            output.AppendLine($"Duplicate code: {results.TotalDuplicateBlocks} blocks, {results.TotalDuplicateInstances} instances ({results.AnalyzedMethods} methods analyzed)\n");
+
+            // Statistics
+            output.AppendLine("By Similarity:");
+            if (results.HighSimilarityCount > 0)
+                output.AppendLine($"  High (95%+): {results.HighSimilarityCount} blocks");
+            if (results.MediumSimilarityCount > 0)
+                output.AppendLine($"  Medium (85-94%): {results.MediumSimilarityCount} blocks");
+            if (results.LowSimilarityCount > 0)
+                output.AppendLine($"  Low (<85%): {results.LowSimilarityCount} blocks");
+            output.AppendLine();
+
+            // Show top 5 duplicate blocks
+            var topBlocks = results.DuplicateBlocks.Take(5);
+            if (topBlocks.Any())
+            {
+                output.AppendLine("Top duplicate blocks:");
+                foreach (var block in topBlocks)
+                {
+                    output.AppendLine($"  • {block.LineCount} lines, {block.Instances.Count} instances ({block.SimilarityPercentage}% similar)");
+                    foreach (var instance in block.Instances.Take(2))
+                    {
+                        output.AppendLine($"    - {instance.MethodName} @ {instance.FileName}:{instance.StartLine}");
+                    }
+                    if (block.Instances.Count > 2)
+                    {
+                        output.AppendLine($"    ... and {block.Instances.Count - 2} more");
+                    }
+                }
+
+                if (results.TotalDuplicateBlocks > 5)
+                {
+                    output.AppendLine($"\n  ... and {results.TotalDuplicateBlocks - 5} more duplicate blocks (use format=normal for full list)");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Balanced format with grouped listings
+        private static string FormatDuplicateCodeNormal(DuplicateCodeResults results)
+        {
+            if (!results.DuplicateBlocks.Any())
+                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Duplicate Code Analysis**\n");
+            output.AppendLine($"Found {results.TotalDuplicateBlocks} duplicate block{(results.TotalDuplicateBlocks > 1 ? "s" : "")} ({results.TotalDuplicateInstances} instances, {results.AnalyzedMethods} methods analyzed):\n");
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(5))
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Show top 15 duplicate blocks
+            var displayedBlocks = results.DuplicateBlocks.Take(15);
+            int blockNum = 1;
+
+            foreach (var block in displayedBlocks)
+            {
+                output.AppendLine($"## Block #{blockNum}: {block.LineCount} lines, {block.Instances.Count} instances ({block.SimilarityPercentage}% similar)");
+                output.AppendLine();
+
+                // Show code snippet from first instance
+                if (block.Instances.Any() && !string.IsNullOrWhiteSpace(block.Instances[0].CodeSnippet))
+                {
+                    output.AppendLine("**Code Preview:**");
+                    output.AppendLine("```csharp");
+                    output.AppendLine(block.Instances[0].CodeSnippet);
+                    output.AppendLine("```");
+                    output.AppendLine();
+                }
+
+                output.AppendLine("**Instances:**");
+                foreach (var instance in block.Instances)
+                {
+                    output.AppendLine($"  • **{instance.MethodName}**");
+                    output.AppendLine($"    📄 {instance.FileName}:{instance.StartLine}-{instance.EndLine}");
+                    output.AppendLine($"    Project: {instance.ProjectName}");
+                }
+
+                output.AppendLine();
+                blockNum++;
+            }
+
+            if (results.TotalDuplicateBlocks > 15)
+            {
+                output.AppendLine($"... and {results.TotalDuplicateBlocks - 15} more duplicate blocks (use format=detailed for all blocks)");
+                output.AppendLine();
+            }
+
+            // Summary
+            output.AppendLine("---");
+            output.AppendLine("**Summary:**");
+            output.AppendLine($"  • Total duplicate blocks: {results.TotalDuplicateBlocks}");
+            output.AppendLine($"  • Total instances: {results.TotalDuplicateInstances}");
+            output.AppendLine($"  • High similarity (95%+): {results.HighSimilarityCount}");
+            output.AppendLine($"  • Medium similarity (85-94%): {results.MediumSimilarityCount}");
+            output.AppendLine($"  • Low similarity (<85%): {results.LowSimilarityCount}");
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Comprehensive format with all blocks and metadata
+        private static string FormatDuplicateCodeDetailed(DuplicateCodeResults results)
+        {
+            if (!results.DuplicateBlocks.Any())
+                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Duplicate Code Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Analysis Summary:**");
+            output.AppendLine($"  • Total duplicate blocks: {results.TotalDuplicateBlocks}");
+            output.AppendLine($"  • Total instances: {results.TotalDuplicateInstances}");
+            output.AppendLine($"  • Methods analyzed: {results.AnalyzedMethods}");
+            output.AppendLine($"  • Files analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  • Projects analyzed: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Failed projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Show all warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Show all duplicate blocks
+            int blockNum = 1;
+            foreach (var block in results.DuplicateBlocks)
+            {
+                var similarityIcon = block.SimilarityPercentage >= 95 ? "🔴" : block.SimilarityPercentage >= 85 ? "🟠" : "🟡";
+
+                output.AppendLine($"## {similarityIcon} Block #{blockNum}: {block.LineCount} lines, {block.Instances.Count} instances");
+                output.AppendLine();
+                output.AppendLine($"**Similarity**: {block.SimilarityPercentage}%");
+                output.AppendLine($"**Line Count**: {block.LineCount}");
+                output.AppendLine($"**Hash**: {block.Hash.Substring(0, Math.Min(16, block.Hash.Length))}...");
+                output.AppendLine();
+
+                // Show code snippet from first instance
+                if (block.Instances.Any() && !string.IsNullOrWhiteSpace(block.Instances[0].CodeSnippet))
+                {
+                    output.AppendLine("**Code Preview:**");
+                    output.AppendLine("```csharp");
+                    output.AppendLine(block.Instances[0].CodeSnippet);
+                    output.AppendLine("```");
+                    output.AppendLine();
+                }
+
+                output.AppendLine("**All Instances:**");
+                output.AppendLine();
+
+                foreach (var instance in block.Instances)
+                {
+                    output.AppendLine($"  **{instance.MethodName}**");
+                    output.AppendLine($"     File: {instance.FileName}");
+                    output.AppendLine($"     📁 Path: {instance.FilePath}");
+                    output.AppendLine($"     📄 Lines: {instance.StartLine}-{instance.EndLine} ({instance.LineCount} lines)");
+                    output.AppendLine($"     Project: {instance.ProjectName}");
+                    output.AppendLine();
+                }
+
+                blockNum++;
+            }
+
+            // Detailed summary
+            output.AppendLine("---");
+            output.AppendLine("**Detailed Summary:**");
+            output.AppendLine();
+            output.AppendLine("**By Similarity:**");
+            output.AppendLine($"  🔴 High (95%+): {results.HighSimilarityCount} blocks");
+            output.AppendLine($"  🟠 Medium (85-94%): {results.MediumSimilarityCount} blocks");
+            output.AppendLine($"  🟡 Low (<85%): {results.LowSimilarityCount} blocks");
+
+            output.AppendLine();
+            output.AppendLine("**Recommendations:**");
+            if (results.TotalDuplicateBlocks > 0)
+            {
+                output.AppendLine($"  • {results.TotalDuplicateBlocks} duplicate code block{(results.TotalDuplicateBlocks > 1 ? "s" : "")} found");
+                output.AppendLine($"  • Consider extracting common code into shared methods or base classes");
+                output.AppendLine($"  • High similarity blocks (95%+) are prime candidates for refactoring");
+                output.AppendLine($"  • Review each duplicate carefully - some may be intentional");
             }
 
             return output.ToString();

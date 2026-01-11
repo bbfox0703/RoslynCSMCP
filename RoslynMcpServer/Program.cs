@@ -99,6 +99,9 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<TestDiscoveryService>();
                 builder.Services.AddSingleton<AttributeSearchService>();
                 builder.Services.AddSingleton<UnusedCodeAnalyzer>();
+                builder.Services.AddSingleton<UnusedDependencyAnalyzer>();
+                builder.Services.AddSingleton<SecurityIssueAnalyzer>();
+                builder.Services.AddSingleton<DuplicateCodeAnalyzer>();
                 builder.Services.AddSingleton<SecurityValidator>();
                 builder.Services.AddSingleton<DiagnosticLogger>();
                 builder.Services.AddSingleton<IncrementalAnalyzer>();

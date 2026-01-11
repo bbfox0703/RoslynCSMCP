@@ -7,11 +7,33 @@
 
 ## 🎉 Implementation Status
 
-**✅ Implemented**: FindUnusedCode (2026-01-11)
-- Dead code detection with 3 format modes (summary/normal/detailed)
-- Scope filtering (private/internal/public/all)
-- Token optimization: 50-70% savings
-- Documentation: See PHASE4_USAGE_EXAMPLES.md
+**✅ Implemented**:
+
+1. **FindUnusedCode** (2026-01-11)
+   - Dead code detection with 3 format modes (summary/normal/detailed)
+   - Scope filtering (private/internal/public/all)
+   - Token optimization: 50-70% savings
+   - Documentation: See PHASE4_USAGE_EXAMPLES.md
+
+2. **FindUnusedDependencies** (2026-01-11)
+   - NuGet package and project reference analysis
+   - 3 format modes (summary/normal/detailed)
+   - Intelligent namespace mapping for common packages
+   - Token optimization: 50-70% savings
+
+3. **FindSecurityIssues** (2026-01-11)
+   - Security vulnerability detection and anti-pattern analysis
+   - 5 categories: SQL injection, hardcoded secrets, weak crypto, path traversal, insecure deserialization
+   - Severity filtering: Critical, High, Medium, Low
+   - 3 format modes (summary/normal/detailed)
+   - Token optimization: 40-60% savings
+
+4. **FindDuplicateCode** (2026-01-11)
+   - Code clone detection using syntax tree analysis
+   - SHA256 hashing for exact duplicate detection
+   - Configurable minimum line count and similarity threshold
+   - 3 format modes (summary/normal/detailed)
+   - Token optimization: 30-60% savings
 
 ---
 
