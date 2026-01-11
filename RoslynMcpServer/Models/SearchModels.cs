@@ -421,4 +421,51 @@ namespace RoslynMcpServer.Models
 
         public int TotalIssues => Issues.Count;
     }
+
+    /// <summary>
+    /// Represents a code block instance in a duplicate set
+    /// </summary>
+    public class CodeBlockInstance
+    {
+        public string MethodName { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int StartLine { get; set; }
+        public int EndLine { get; set; }
+        public int LineCount { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;  // First few lines for preview
+    }
+
+    /// <summary>
+    /// Represents a set of duplicate code blocks
+    /// </summary>
+    public class DuplicateCodeBlock
+    {
+        public int GroupId { get; set; }
+        public List<CodeBlockInstance> Instances { get; set; } = new();
+        public int SimilarityPercentage { get; set; }
+        public int LineCount { get; set; }
+        public string Hash { get; set; } = string.Empty;  // Hash of the normalized code
+    }
+
+    /// <summary>
+    /// Wrapper for duplicate code analysis results
+    /// </summary>
+    public class DuplicateCodeResults
+    {
+        public List<DuplicateCodeBlock> DuplicateBlocks { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int AnalyzedMethods { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics
+        public int TotalDuplicateBlocks => DuplicateBlocks.Count;
+        public int TotalDuplicateInstances => DuplicateBlocks.Sum(b => b.Instances.Count);
+        public int HighSimilarityCount { get; set; }  // 95%+
+        public int MediumSimilarityCount { get; set; }  // 85-94%
+        public int LowSimilarityCount { get; set; }  // Below 85%
+    }
 }

@@ -28,6 +28,13 @@
    - 3 format modes (summary/normal/detailed)
    - Token optimization: 40-60% savings
 
+4. **FindDuplicateCode** (2026-01-11)
+   - Code clone detection using syntax tree analysis
+   - SHA256 hashing for exact duplicate detection
+   - Configurable minimum line count and similarity threshold
+   - 3 format modes (summary/normal/detailed)
+   - Token optimization: 30-60% savings
+
 ---
 
 ## 📊 Current Tool Coverage

@@ -639,6 +639,53 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find duplicate code blocks across the solution")]
+        public static async Task<string> FindDuplicateCode(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
+            string format = "normal",
+            [Description("Minimum lines to consider duplicate (default: 5)")] int minLines = 5,
+            [Description("Similarity threshold percentage 70-100 (default: 90)")] int similarity = 90,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var analyzer = serviceProvider?.GetService<DuplicateCodeAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Duplicate code analyzer service not available.";
+                }
+
+                var results = await analyzer.AnalyzeDuplicateCodeAsync(
+                    solutionPath,
+                    minLines,
+                    similarity);
+
+                // Normalize format to lowercase
+                var normalizedFormat = format.ToLowerInvariant();
+
+                return normalizedFormat switch
+                {
+                    "summary" => FormatDuplicateCodeSummary(results),
+                    "detailed" => FormatDuplicateCodeDetailed(results),
+                    "normal" => FormatDuplicateCodeNormal(results),
+                    _ => FormatDuplicateCodeNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding duplicate code");
+                return $"Error: An unexpected error occurred while finding duplicate code: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -3585,6 +3632,211 @@ namespace RoslynMcpServer.Tools
             if (results.WeakCryptoCount > 0)
             {
                 output.AppendLine($"  • Replace weak cryptography with modern algorithms (SHA256, AES)");
+            }
+
+            return output.ToString();
+        }
+
+        // Summary mode: Show only statistics and counts (30-60% token savings)
+        private static string FormatDuplicateCodeSummary(DuplicateCodeResults results)
+        {
+            if (!results.DuplicateBlocks.Any())
+                return $"✅ No duplicate code found ({results.AnalyzedMethods} methods analyzed)";
+
+            var output = new StringBuilder();
+            output.AppendLine($"Duplicate code: {results.TotalDuplicateBlocks} blocks, {results.TotalDuplicateInstances} instances ({results.AnalyzedMethods} methods analyzed)\n");
+
+            // Statistics
+            output.AppendLine("By Similarity:");
+            if (results.HighSimilarityCount > 0)
+                output.AppendLine($"  High (95%+): {results.HighSimilarityCount} blocks");
+            if (results.MediumSimilarityCount > 0)
+                output.AppendLine($"  Medium (85-94%): {results.MediumSimilarityCount} blocks");
+            if (results.LowSimilarityCount > 0)
+                output.AppendLine($"  Low (<85%): {results.LowSimilarityCount} blocks");
+            output.AppendLine();
+
+            // Show top 5 duplicate blocks
+            var topBlocks = results.DuplicateBlocks.Take(5);
+            if (topBlocks.Any())
+            {
+                output.AppendLine("Top duplicate blocks:");
+                foreach (var block in topBlocks)
+                {
+                    output.AppendLine($"  • {block.LineCount} lines, {block.Instances.Count} instances ({block.SimilarityPercentage}% similar)");
+                    foreach (var instance in block.Instances.Take(2))
+                    {
+                        output.AppendLine($"    - {instance.MethodName} @ {instance.FileName}:{instance.StartLine}");
+                    }
+                    if (block.Instances.Count > 2)
+                    {
+                        output.AppendLine($"    ... and {block.Instances.Count - 2} more");
+                    }
+                }
+
+                if (results.TotalDuplicateBlocks > 5)
+                {
+                    output.AppendLine($"\n  ... and {results.TotalDuplicateBlocks - 5} more duplicate blocks (use format=normal for full list)");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Balanced format with grouped listings
+        private static string FormatDuplicateCodeNormal(DuplicateCodeResults results)
+        {
+            if (!results.DuplicateBlocks.Any())
+                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Duplicate Code Analysis**\n");
+            output.AppendLine($"Found {results.TotalDuplicateBlocks} duplicate block{(results.TotalDuplicateBlocks > 1 ? "s" : "")} ({results.TotalDuplicateInstances} instances, {results.AnalyzedMethods} methods analyzed):\n");
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(5))
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Show top 15 duplicate blocks
+            var displayedBlocks = results.DuplicateBlocks.Take(15);
+            int blockNum = 1;
+
+            foreach (var block in displayedBlocks)
+            {
+                output.AppendLine($"## Block #{blockNum}: {block.LineCount} lines, {block.Instances.Count} instances ({block.SimilarityPercentage}% similar)");
+                output.AppendLine();
+
+                // Show code snippet from first instance
+                if (block.Instances.Any() && !string.IsNullOrWhiteSpace(block.Instances[0].CodeSnippet))
+                {
+                    output.AppendLine("**Code Preview:**");
+                    output.AppendLine("```csharp");
+                    output.AppendLine(block.Instances[0].CodeSnippet);
+                    output.AppendLine("```");
+                    output.AppendLine();
+                }
+
+                output.AppendLine("**Instances:**");
+                foreach (var instance in block.Instances)
+                {
+                    output.AppendLine($"  • **{instance.MethodName}**");
+                    output.AppendLine($"    📄 {instance.FileName}:{instance.StartLine}-{instance.EndLine}");
+                    output.AppendLine($"    Project: {instance.ProjectName}");
+                }
+
+                output.AppendLine();
+                blockNum++;
+            }
+
+            if (results.TotalDuplicateBlocks > 15)
+            {
+                output.AppendLine($"... and {results.TotalDuplicateBlocks - 15} more duplicate blocks (use format=detailed for all blocks)");
+                output.AppendLine();
+            }
+
+            // Summary
+            output.AppendLine("---");
+            output.AppendLine("**Summary:**");
+            output.AppendLine($"  • Total duplicate blocks: {results.TotalDuplicateBlocks}");
+            output.AppendLine($"  • Total instances: {results.TotalDuplicateInstances}");
+            output.AppendLine($"  • High similarity (95%+): {results.HighSimilarityCount}");
+            output.AppendLine($"  • Medium similarity (85-94%): {results.MediumSimilarityCount}");
+            output.AppendLine($"  • Low similarity (<85%): {results.LowSimilarityCount}");
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Comprehensive format with all blocks and metadata
+        private static string FormatDuplicateCodeDetailed(DuplicateCodeResults results)
+        {
+            if (!results.DuplicateBlocks.Any())
+                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Duplicate Code Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Analysis Summary:**");
+            output.AppendLine($"  • Total duplicate blocks: {results.TotalDuplicateBlocks}");
+            output.AppendLine($"  • Total instances: {results.TotalDuplicateInstances}");
+            output.AppendLine($"  • Methods analyzed: {results.AnalyzedMethods}");
+            output.AppendLine($"  • Files analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  • Projects analyzed: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Failed projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Show all warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Show all duplicate blocks
+            int blockNum = 1;
+            foreach (var block in results.DuplicateBlocks)
+            {
+                var similarityIcon = block.SimilarityPercentage >= 95 ? "🔴" : block.SimilarityPercentage >= 85 ? "🟠" : "🟡";
+
+                output.AppendLine($"## {similarityIcon} Block #{blockNum}: {block.LineCount} lines, {block.Instances.Count} instances");
+                output.AppendLine();
+                output.AppendLine($"**Similarity**: {block.SimilarityPercentage}%");
+                output.AppendLine($"**Line Count**: {block.LineCount}");
+                output.AppendLine($"**Hash**: {block.Hash.Substring(0, Math.Min(16, block.Hash.Length))}...");
+                output.AppendLine();
+
+                // Show code snippet from first instance
+                if (block.Instances.Any() && !string.IsNullOrWhiteSpace(block.Instances[0].CodeSnippet))
+                {
+                    output.AppendLine("**Code Preview:**");
+                    output.AppendLine("```csharp");
+                    output.AppendLine(block.Instances[0].CodeSnippet);
+                    output.AppendLine("```");
+                    output.AppendLine();
+                }
+
+                output.AppendLine("**All Instances:**");
+                output.AppendLine();
+
+                foreach (var instance in block.Instances)
+                {
+                    output.AppendLine($"  **{instance.MethodName}**");
+                    output.AppendLine($"     File: {instance.FileName}");
+                    output.AppendLine($"     📁 Path: {instance.FilePath}");
+                    output.AppendLine($"     📄 Lines: {instance.StartLine}-{instance.EndLine} ({instance.LineCount} lines)");
+                    output.AppendLine($"     Project: {instance.ProjectName}");
+                    output.AppendLine();
+                }
+
+                blockNum++;
+            }
+
+            // Detailed summary
+            output.AppendLine("---");
+            output.AppendLine("**Detailed Summary:**");
+            output.AppendLine();
+            output.AppendLine("**By Similarity:**");
+            output.AppendLine($"  🔴 High (95%+): {results.HighSimilarityCount} blocks");
+            output.AppendLine($"  🟠 Medium (85-94%): {results.MediumSimilarityCount} blocks");
+            output.AppendLine($"  🟡 Low (<85%): {results.LowSimilarityCount} blocks");
+
+            output.AppendLine();
+            output.AppendLine("**Recommendations:**");
+            if (results.TotalDuplicateBlocks > 0)
+            {
+                output.AppendLine($"  • {results.TotalDuplicateBlocks} duplicate code block{(results.TotalDuplicateBlocks > 1 ? "s" : "")} found");
+                output.AppendLine($"  • Consider extracting common code into shared methods or base classes");
+                output.AppendLine($"  • High similarity blocks (95%+) are prime candidates for refactoring");
+                output.AppendLine($"  • Review each duplicate carefully - some may be intentional");
             }
 
             return output.ToString();
