@@ -343,4 +343,36 @@ namespace RoslynMcpServer.Models
         public int FieldCount { get; set; }
         public int EventCount { get; set; }
     }
+
+    /// <summary>
+    /// Represents an unused dependency (NuGet package or project reference)
+    /// </summary>
+    public class UnusedDependency
+    {
+        public string Name { get; set; } = string.Empty;  // Package or project name
+        public string Version { get; set; } = string.Empty;  // Package version (empty for project refs)
+        public string Type { get; set; } = string.Empty;  // "NuGetPackage" or "ProjectReference"
+        public string ProjectName { get; set; } = string.Empty;  // Project that has this dependency
+        public string ProjectPath { get; set; } = string.Empty;  // Full path to project file
+        public string Reason { get; set; } = string.Empty;  // Why it's considered unused
+        public List<string> ExpectedNamespaces { get; set; } = new();  // Namespaces that should be used
+    }
+
+    /// <summary>
+    /// Wrapper for unused dependency analysis results
+    /// </summary>
+    public class UnusedDependencyResults
+    {
+        public List<UnusedDependency> UnusedDependencies { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by type
+        public int UnusedNuGetPackages { get; set; }
+        public int UnusedProjectReferences { get; set; }
+
+        // Potential savings
+        public int TotalUnusedDependencies => UnusedNuGetPackages + UnusedProjectReferences;
+    }
 }

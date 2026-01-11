@@ -540,6 +540,53 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find unused dependencies (NuGet packages and project references) in the solution")]
+        public static async Task<string> FindUnusedDependencies(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
+            string format = "normal",
+            [Description("Include NuGet package analysis (default: true)")] bool includeNuGetPackages = true,
+            [Description("Include project reference analysis (default: true)")] bool includeProjectReferences = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                var analyzer = serviceProvider?.GetService<UnusedDependencyAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Unused dependency analyzer service not available.";
+                }
+
+                var results = await analyzer.AnalyzeUnusedDependenciesAsync(
+                    solutionPath,
+                    includeNuGetPackages,
+                    includeProjectReferences);
+
+                // Normalize format to lowercase
+                var normalizedFormat = format.ToLowerInvariant();
+
+                return normalizedFormat switch
+                {
+                    "summary" => FormatUnusedDependenciesSummary(results),
+                    "detailed" => FormatUnusedDependenciesDetailed(results),
+                    "normal" => FormatUnusedDependenciesNormal(results),
+                    _ => FormatUnusedDependenciesNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
+                logger?.LogError(ex, "Error finding unused dependencies");
+                return $"Error: An unexpected error occurred while finding unused dependencies: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -2958,6 +3005,214 @@ namespace RoslynMcpServer.Tools
             if (results.PrivateCount > 0)
             {
                 output.AppendLine($"  • {results.PrivateCount} private members can be safely removed");
+            }
+
+            return output.ToString();
+        }
+
+        // Summary mode: Show only statistics and counts (50-70% token savings)
+        private static string FormatUnusedDependenciesSummary(UnusedDependencyResults results)
+        {
+            if (!results.UnusedDependencies.Any())
+                return $"✅ No unused dependencies found ({results.AnalyzedProjects} projects analyzed)";
+
+            var output = new StringBuilder();
+            output.AppendLine($"Unused dependencies: {results.TotalUnusedDependencies} items ({results.AnalyzedProjects} projects, {results.FailedProjects} failed)\n");
+
+            // Statistics by type
+            output.AppendLine("By Type:");
+            if (results.UnusedNuGetPackages > 0)
+                output.AppendLine($"  NuGet Packages: {results.UnusedNuGetPackages}");
+            if (results.UnusedProjectReferences > 0)
+                output.AppendLine($"  Project References: {results.UnusedProjectReferences}");
+            output.AppendLine();
+
+            // Show top 5 unused dependencies
+            if (results.UnusedDependencies.Any())
+            {
+                output.AppendLine("Top unused dependencies:");
+                var topItems = results.UnusedDependencies.Take(5);
+                foreach (var item in topItems)
+                {
+                    var icon = item.Type == "NuGetPackage" ? "📦" : "🔗";
+                    var version = !string.IsNullOrWhiteSpace(item.Version) ? $" ({item.Version})" : "";
+                    output.AppendLine($"  {icon} {item.Name}{version} in {item.ProjectName}");
+                }
+
+                if (results.UnusedDependencies.Count > 5)
+                {
+                    output.AppendLine($"  ... and {results.UnusedDependencies.Count - 5} more (use format=normal for full list)");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Balanced format with grouped listings
+        private static string FormatUnusedDependenciesNormal(UnusedDependencyResults results)
+        {
+            if (!results.UnusedDependencies.Any())
+                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Unused Dependencies Analysis**\n");
+            output.AppendLine($"Found {results.TotalUnusedDependencies} unused dependenc{(results.TotalUnusedDependencies > 1 ? "ies" : "y")} ({results.AnalyzedProjects} projects analyzed, {results.FailedProjects} failed):\n");
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(5))
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+                if (results.Warnings.Count > 5)
+                {
+                    output.AppendLine($"   ... and {results.Warnings.Count - 5} more warnings");
+                }
+                output.AppendLine();
+            }
+
+            // Group by type (NuGet vs Project Reference)
+            var groupedByType = results.UnusedDependencies.GroupBy(d => d.Type).OrderBy(g => g.Key);
+
+            foreach (var typeGroup in groupedByType)
+            {
+                output.AppendLine($"## {typeGroup.Key}s ({typeGroup.Count()})");
+                output.AppendLine();
+
+                // Group by project
+                var groupedByProject = typeGroup.GroupBy(d => d.ProjectName).OrderBy(g => g.Key);
+                foreach (var projectGroup in groupedByProject)
+                {
+                    output.AppendLine($"### 📦 {projectGroup.Key} ({projectGroup.Count()})");
+                    output.AppendLine();
+
+                    // Show first 10 dependencies per project
+                    var displayedItems = projectGroup.Take(10);
+                    foreach (var item in displayedItems)
+                    {
+                        var icon = item.Type == "NuGetPackage" ? "📦" : "🔗";
+                        var version = !string.IsNullOrWhiteSpace(item.Version) ? $" ({item.Version})" : "";
+
+                        output.AppendLine($"{icon} **{item.Name}{version}**");
+                        output.AppendLine($"   Reason: {item.Reason}");
+
+                        if (item.ExpectedNamespaces.Any())
+                        {
+                            output.AppendLine($"   Expected namespaces: {string.Join(", ", item.ExpectedNamespaces.Take(3))}");
+                        }
+                        output.AppendLine();
+                    }
+
+                    if (projectGroup.Count() > 10)
+                    {
+                        output.AppendLine($"... and {projectGroup.Count() - 10} more unused {typeGroup.Key.ToLower()}{(projectGroup.Count() - 10 > 1 ? "s" : "")}");
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Summary
+            output.AppendLine("---");
+            output.AppendLine("**Summary:**");
+            output.AppendLine($"  • NuGet Packages: {results.UnusedNuGetPackages}");
+            output.AppendLine($"  • Project References: {results.UnusedProjectReferences}");
+            output.AppendLine($"  • Total: {results.TotalUnusedDependencies}");
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Comprehensive format with all metadata
+        private static string FormatUnusedDependenciesDetailed(UnusedDependencyResults results)
+        {
+            if (!results.UnusedDependencies.Any())
+                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Unused Dependencies Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Analysis Summary:**");
+            output.AppendLine($"  • Total unused dependencies: {results.TotalUnusedDependencies}");
+            output.AppendLine($"  • Projects analyzed: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Projects failed: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Show all warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                    if (!string.IsNullOrWhiteSpace(warning.Details))
+                    {
+                        output.AppendLine($"     Details: {warning.Details}");
+                    }
+                }
+                output.AppendLine();
+            }
+
+            // Group by type (NuGet vs Project Reference)
+            var groupedByType = results.UnusedDependencies.GroupBy(d => d.Type).OrderBy(g => g.Key);
+
+            foreach (var typeGroup in groupedByType)
+            {
+                output.AppendLine($"## {typeGroup.Key}s ({typeGroup.Count()})");
+                output.AppendLine();
+
+                // Group by project
+                var groupedByProject = typeGroup.GroupBy(d => d.ProjectName).OrderBy(g => g.Key);
+                foreach (var projectGroup in groupedByProject)
+                {
+                    output.AppendLine($"### 📦 {projectGroup.Key} ({projectGroup.Count()})");
+                    output.AppendLine();
+
+                    // Show all dependencies in detailed mode
+                    foreach (var item in projectGroup)
+                    {
+                        var icon = item.Type == "NuGetPackage" ? "📦" : "🔗";
+                        var version = !string.IsNullOrWhiteSpace(item.Version) ? $" ({item.Version})" : "";
+
+                        output.AppendLine($"{icon} **{item.Name}{version}**");
+                        output.AppendLine($"   Type: {item.Type}");
+                        output.AppendLine($"   Project: {item.ProjectName}");
+                        output.AppendLine($"   📁 Project Path: {item.ProjectPath}");
+                        output.AppendLine($"   Reason: {item.Reason}");
+
+                        if (item.ExpectedNamespaces.Any())
+                        {
+                            output.AppendLine($"   Expected namespaces:");
+                            foreach (var ns in item.ExpectedNamespaces)
+                            {
+                                output.AppendLine($"     - {ns}");
+                            }
+                        }
+
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Detailed summary
+            output.AppendLine("---");
+            output.AppendLine("**Detailed Summary:**");
+            output.AppendLine();
+            output.AppendLine("**By Type:**");
+            output.AppendLine($"  • NuGet Packages: {results.UnusedNuGetPackages}");
+            output.AppendLine($"  • Project References: {results.UnusedProjectReferences}");
+            output.AppendLine($"  • Total: {results.TotalUnusedDependencies}");
+
+            output.AppendLine();
+            output.AppendLine("**Recommendations:**");
+            if (results.UnusedNuGetPackages > 0)
+            {
+                output.AppendLine($"  • {results.UnusedNuGetPackages} NuGet package{(results.UnusedNuGetPackages > 1 ? "s" : "")} can be removed to reduce dependencies");
+                output.AppendLine($"    Use: dotnet remove package <PackageName>");
+            }
+            if (results.UnusedProjectReferences > 0)
+            {
+                output.AppendLine($"  • {results.UnusedProjectReferences} project reference{(results.UnusedProjectReferences > 1 ? "s" : "")} can be removed to simplify project structure");
+                output.AppendLine($"    Edit .csproj file and remove <ProjectReference> elements");
             }
 
             return output.ToString();

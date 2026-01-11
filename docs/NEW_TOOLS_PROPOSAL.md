@@ -7,11 +7,19 @@
 
 ## 🎉 Implementation Status
 
-**✅ Implemented**: FindUnusedCode (2026-01-11)
-- Dead code detection with 3 format modes (summary/normal/detailed)
-- Scope filtering (private/internal/public/all)
-- Token optimization: 50-70% savings
-- Documentation: See PHASE4_USAGE_EXAMPLES.md
+**✅ Implemented**:
+
+1. **FindUnusedCode** (2026-01-11)
+   - Dead code detection with 3 format modes (summary/normal/detailed)
+   - Scope filtering (private/internal/public/all)
+   - Token optimization: 50-70% savings
+   - Documentation: See PHASE4_USAGE_EXAMPLES.md
+
+2. **FindUnusedDependencies** (2026-01-11)
+   - NuGet package and project reference analysis
+   - 3 format modes (summary/normal/detailed)
+   - Intelligent namespace mapping for common packages
+   - Token optimization: 50-70% savings
 
 ---
 
