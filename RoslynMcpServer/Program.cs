@@ -54,28 +54,35 @@ namespace RoslynMcpServer
                 var builder = Host.CreateApplicationBuilder(args);
 
                 // Configure Serilog from appsettings.json
+                // Configuration is environment-aware (reads appsettings.Development.json in Development mode)
                 builder.Services.AddSerilog((services, loggerConfiguration) =>
                 {
+                    var environment = builder.Environment.EnvironmentName;
+
                     loggerConfiguration
                         .ReadFrom.Configuration(builder.Configuration)
-                        .Enrich.FromLogContext();
+                        .Enrich.FromLogContext()
+                        .Enrich.WithProperty("Environment", environment);
 
-                    // Override file path with platform-specific log directory
-                    var environment = builder.Environment.EnvironmentName;
+                    // Override file paths to use platform-specific log directory
                     var logFileName = environment == "Development" ? "debug-.log" : "roslyn-mcp-.log";
                     var retainedFiles = environment == "Development" ? 7 : 30;
                     var minLevel = environment == "Development" ? LogEventLevel.Verbose : LogEventLevel.Warning;
+                    var outputTemplate = environment == "Development"
+                        ? "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Properties:j}{NewLine}{Exception}"
+                        : "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}";
 
+                    // Add File sink with platform-specific path (overrides appsettings.json path)
                     loggerConfiguration
-                        .WriteTo.Console(
-                            outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
-                            standardErrorFromLevel: LogEventLevel.Verbose)
                         .WriteTo.File(
                             path: Path.Combine(logDirectory, logFileName),
                             rollingInterval: RollingInterval.Day,
                             retainedFileCountLimit: retainedFiles,
                             restrictedToMinimumLevel: minLevel,
-                            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Properties:j}{NewLine}{Exception}");
+                            outputTemplate: outputTemplate);
+
+                    Log.Information("Configured logging for environment: {Environment}, MinLevel: {MinLevel}, LogFile: {LogFile}",
+                        environment, minLevel, Path.Combine(logDirectory, logFileName));
                 });
 
                 // Register services
