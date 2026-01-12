@@ -681,4 +681,96 @@ namespace RoslynMcpServer.Models
         public FileStatistics? Statistics { get; set; }
         public List<OperationWarning> Warnings { get; set; } = new();
     }
+
+    /// <summary>
+    /// Represents a NuGet package in a project
+    /// </summary>
+    public class PackageInfo
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Version { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public string ProjectPath { get; set; } = string.Empty;
+        public bool IsUsed { get; set; } = true;  // Whether the package is actually used
+        public List<string> UsedNamespaces { get; set; } = new();  // Namespaces from this package that are used
+        public List<string> ExpectedNamespaces { get; set; } = new();  // Common namespaces for this package
+    }
+
+    /// <summary>
+    /// Represents a security vulnerability in a package
+    /// </summary>
+    public class PackageVulnerability
+    {
+        public string PackageName { get; set; } = string.Empty;
+        public string AffectedVersion { get; set; } = string.Empty;
+        public string Severity { get; set; } = string.Empty;  // Critical, High, Medium, Low
+        public string VulnerabilityId { get; set; } = string.Empty;  // CVE ID or similar
+        public string Description { get; set; } = string.Empty;
+        public string RecommendedVersion { get; set; } = string.Empty;  // Minimum safe version
+        public List<string> AffectedProjects { get; set; } = new();  // Projects using this vulnerable version
+    }
+
+    /// <summary>
+    /// Represents an available package update
+    /// </summary>
+    public class PackageUpdate
+    {
+        public string PackageName { get; set; } = string.Empty;
+        public string CurrentVersion { get; set; } = string.Empty;
+        public string LatestVersion { get; set; } = string.Empty;
+        public int MajorVersionsAhead { get; set; }
+        public int MinorVersionsAhead { get; set; }
+        public int PatchVersionsAhead { get; set; }
+        public List<string> AffectedProjects { get; set; } = new();
+        public bool IsBreakingChange { get; set; }  // Major version change
+    }
+
+    /// <summary>
+    /// Represents a version conflict between projects
+    /// </summary>
+    public class PackageConflict
+    {
+        public string PackageName { get; set; } = string.Empty;
+        public List<PackageVersionUsage> VersionUsages { get; set; } = new();
+        public string RecommendedVersion { get; set; } = string.Empty;  // Version to standardize to
+    }
+
+    /// <summary>
+    /// Represents usage of a specific package version in a project
+    /// </summary>
+    public class PackageVersionUsage
+    {
+        public string ProjectName { get; set; } = string.Empty;
+        public string Version { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Wrapper for package analysis results
+    /// </summary>
+    public class PackageAnalysisResults
+    {
+        public List<PackageInfo> AllPackages { get; set; } = new();
+        public List<PackageVulnerability> Vulnerabilities { get; set; } = new();
+        public List<PackageUpdate> AvailableUpdates { get; set; } = new();
+        public List<PackageConflict> VersionConflicts { get; set; } = new();
+        public List<PackageInfo> UnusedPackages { get; set; } = new();
+
+        public int AnalyzedProjects { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics
+        public int TotalPackages => AllPackages.Count;
+        public int UniquePackages => AllPackages.Select(p => p.Name).Distinct().Count();
+        public int UpToDatePackages => TotalPackages - AvailableUpdates.Sum(u => u.AffectedProjects.Count);
+        public int VulnerablePackages => Vulnerabilities.Count;
+        public int UnusedPackagesCount => UnusedPackages.Count;
+        public int ConflictingPackages => VersionConflicts.Count;
+
+        // Severity counts
+        public int CriticalVulnerabilities => Vulnerabilities.Count(v => v.Severity == "Critical");
+        public int HighVulnerabilities => Vulnerabilities.Count(v => v.Severity == "High");
+        public int MediumVulnerabilities => Vulnerabilities.Count(v => v.Severity == "Medium");
+        public int LowVulnerabilities => Vulnerabilities.Count(v => v.Severity == "Low");
+    }
 }

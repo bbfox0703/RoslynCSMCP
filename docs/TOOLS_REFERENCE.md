@@ -3,7 +3,9 @@
 This document lists all available MCP tools provided by RoslynCSMCP server for C# code analysis.
 
 > **Last Updated**: 2026-01-12
-> **Total Tools**: 24
+> **Total Tools**: 29
+>
+> **Recent Additions**: FindTODOComments, FindLargeFiles, FindDeprecatedAPIs, GetFileStatistics, AnalyzePackages
 
 ---
 
@@ -230,7 +232,35 @@ Use FindReferences tool with:
 
 ---
 
-### 19. AnalyzeDependencies
+### 19. AnalyzePackages
+**Description**: Comprehensive NuGet package analysis including version management, update detection, security audits, and usage tracking
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `checkUpdates` (bool, optional): Check for available package updates (default: true)
+- `checkVulnerabilities` (bool, optional): Check for security vulnerabilities (default: true)
+- `analyzeUsage` (bool, optional): Analyze package usage to detect unused packages (default: true)
+
+**Example Usage**:
+```
+Use AnalyzePackages tool with:
+- solutionPath: "D:\MyProject\MyProject.sln"
+- format: "normal"
+- checkUpdates: true
+```
+
+**Features**:
+- Lists all NuGet packages across all projects
+- Detects outdated packages and available updates
+- Identifies version conflicts between projects
+- Finds unused packages (packages with no namespace usage)
+- Checks for security vulnerabilities (placeholder - requires external API)
+- Recommends version standardization
+
+---
+
+### 20. AnalyzeDependencies
 **Description**: Analyze project dependencies and symbol usage patterns
 
 **Parameters**:
@@ -239,7 +269,7 @@ Use FindReferences tool with:
 
 ---
 
-### 20. GetDependencyGraph
+### 21. GetDependencyGraph
 **Description**: Get project dependency graph in various formats
 
 **Parameters**:
@@ -251,7 +281,7 @@ Use FindReferences tool with:
 
 ## 🔧 Development Tools
 
-### 21. GetCallHierarchy
+### 22. GetCallHierarchy
 **Description**: Get call hierarchy showing callers and callees for a method
 
 **Parameters**:
@@ -262,7 +292,7 @@ Use FindReferences tool with:
 
 ---
 
-### 22. GetCompilationErrors
+### 23. GetCompilationErrors
 **Description**: Get compilation errors and warnings from solution to quickly identify build issues without running full build
 
 **Parameters**:
@@ -274,7 +304,7 @@ Use FindReferences tool with:
 
 ---
 
-### 23. FindTestsForType
+### 24. FindTestsForType
 **Description**: Find test classes and methods for a given type
 
 **Parameters**:
@@ -286,7 +316,50 @@ Use FindReferences tool with:
 
 ## 🚀 Utility Tools
 
-### 24. BatchQuery
+### 25. FindTODOComments
+**Description**: Find all TODO, FIXME, HACK, and NOTE comments across the solution
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary, normal, detailed (default: normal)
+- `commentTypes` (string, optional): Comment types to find (comma-separated): TODO, FIXME, HACK, NOTE, BUG, XXX (default: all)
+- `includeFilePath` (bool, optional): Include file paths in results (default: true)
+
+---
+
+### 26. FindLargeFiles
+**Description**: Find large source files that may need refactoring
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary, normal, detailed (default: normal)
+- `minLines` (int, optional): Minimum lines to consider large (default: 500)
+- `includeMetrics` (bool, optional): Include code metrics for large files (default: true)
+
+---
+
+### 27. FindDeprecatedAPIs
+**Description**: Find usages of deprecated/obsolete APIs (both internal and .NET framework)
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary, normal, detailed (default: normal)
+- `includeFrameworkAPIs` (bool, optional): Include .NET framework obsolete APIs (default: true)
+- `groupByAPI` (bool, optional): Group results by API instead of location (default: true)
+
+---
+
+### 28. GetFileStatistics
+**Description**: Get detailed statistics for a specific C# source file
+
+**Parameters**:
+- `filePath` (string): Path to C# source file (.cs)
+- `includeComplexity` (bool, optional): Include complexity metrics (default: true)
+- `includeTypeInfo` (bool, optional): Include type and member counts (default: true)
+
+---
+
+### 29. BatchQuery
 **Description**: Execute multiple queries in a single batch request
 
 **Parameters**:

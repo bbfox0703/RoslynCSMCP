@@ -911,6 +911,61 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Analyze NuGet packages in solution: check for updates, version conflicts, unused packages, and security vulnerabilities")]
+        public static async Task<string> AnalyzePackages(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+            string format = "normal",
+            [Description("Check for available package updates (default: true)")] bool checkUpdates = true,
+            [Description("Check for security vulnerabilities (default: true)")] bool checkVulnerabilities = true,
+            [Description("Analyze package usage to detect unused packages (default: true)")] bool analyzeUsage = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<PackageAnalysisService>>();
+
+            try
+            {
+                // Validate solution path
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<PackageAnalysisService>();
+                if (analyzer == null)
+                {
+                    return "Error: Package analysis service not available.";
+                }
+
+                // Perform analysis
+                var diagnosticLogger = serviceProvider?.GetService<DiagnosticLogger>();
+                Func<Task<PackageAnalysisResults>> operation = async () =>
+                    await analyzer.AnalyzePackagesAsync(solutionPath, checkUpdates, checkVulnerabilities, analyzeUsage);
+
+                var results = diagnosticLogger != null
+                    ? await diagnosticLogger.LoggedExecutionAsync(
+                        "AnalyzePackages",
+                        operation,
+                        new { solutionPath, format, checkUpdates, checkVulnerabilities, analyzeUsage })
+                    : await operation();
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatPackageAnalysisSummary(results),
+                    "detailed" => FormatPackageAnalysisDetailed(results),
+                    _ => FormatPackageAnalysisNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error analyzing packages");
+                return $"Error: An unexpected error occurred while analyzing packages: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -5698,6 +5753,292 @@ namespace RoslynMcpServer.Tools
             }
 
             return recommendations;
+        }
+
+        // Formatter: Package Analysis - Summary
+        private static string FormatPackageAnalysisSummary(PackageAnalysisResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"📦 Package Analysis Summary ({Path.GetFileName(results.AllPackages.FirstOrDefault()?.ProjectPath ?? "N/A")})");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  - {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Overall statistics
+            output.AppendLine("📊 Overall Statistics:");
+            output.AppendLine($"  Total Packages: {results.TotalPackages} ({results.UniquePackages} unique)");
+            output.AppendLine($"  Analyzed Projects: {results.AnalyzedProjects}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  Failed Projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Security vulnerabilities
+            if (results.Vulnerabilities.Any())
+            {
+                output.AppendLine($"🔴 Security Vulnerabilities: {results.VulnerablePackages}");
+                output.AppendLine($"  Critical: {results.CriticalVulnerabilities}, High: {results.HighVulnerabilities}");
+                output.AppendLine();
+            }
+
+            // Available updates
+            if (results.AvailableUpdates.Any())
+            {
+                var majorUpdates = results.AvailableUpdates.Count(u => u.IsBreakingChange);
+                output.AppendLine($"📦 Updates Available: {results.AvailableUpdates.Count}");
+                if (majorUpdates > 0)
+                    output.AppendLine($"  ⚠️ Major version updates (breaking): {majorUpdates}");
+                output.AppendLine();
+            }
+
+            // Version conflicts
+            if (results.VersionConflicts.Any())
+            {
+                output.AppendLine($"⚠️ Version Conflicts: {results.ConflictingPackages} packages");
+                output.AppendLine();
+            }
+
+            // Unused packages
+            if (results.UnusedPackagesCount > 0)
+            {
+                output.AppendLine($"🗑️ Unused Packages: {results.UnusedPackagesCount}");
+                output.AppendLine();
+            }
+
+            // Status summary
+            if (!results.Vulnerabilities.Any() && !results.VersionConflicts.Any() && results.AvailableUpdates.Count < 5)
+            {
+                output.AppendLine("✅ Package health looks good!");
+            }
+            else
+            {
+                output.AppendLine("⚠️ Action recommended - See detailed view for more information");
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Package Analysis - Normal
+        private static string FormatPackageAnalysisNormal(PackageAnalysisResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"📦 Package Analysis: {Path.GetFileName(results.AllPackages.FirstOrDefault()?.ProjectPath ?? "N/A")}");
+            output.AppendLine();
+
+            // Statistics
+            output.AppendLine("📊 Statistics:");
+            output.AppendLine($"  Total Packages: {results.TotalPackages} ({results.UniquePackages} unique)");
+            output.AppendLine($"  Up to Date: {results.UpToDatePackages}");
+            output.AppendLine($"  Updates Available: {results.AvailableUpdates.Count}");
+            output.AppendLine($"  Version Conflicts: {results.ConflictingPackages}");
+            output.AppendLine($"  Unused Packages: {results.UnusedPackagesCount}");
+            output.AppendLine($"  Analyzed Projects: {results.AnalyzedProjects}");
+            output.AppendLine();
+
+            // Security vulnerabilities
+            if (results.Vulnerabilities.Any())
+            {
+                output.AppendLine($"🔴 Security Vulnerabilities ({results.VulnerablePackages}):");
+                foreach (var vuln in results.Vulnerabilities.OrderByDescending(v => v.Severity).Take(5))
+                {
+                    output.AppendLine($"  {GetSeverityIcon(vuln.Severity)} {vuln.PackageName} {vuln.AffectedVersion}");
+                    output.AppendLine($"     → {vuln.VulnerabilityId}: {vuln.Description}");
+                    output.AppendLine($"     → Fix: Upgrade to {vuln.RecommendedVersion}+");
+                    output.AppendLine($"     → Affected projects: {string.Join(", ", vuln.AffectedProjects)}");
+                    output.AppendLine();
+                }
+            }
+
+            // Outdated packages (top 10)
+            if (results.AvailableUpdates.Any())
+            {
+                output.AppendLine($"📦 Outdated Packages (showing top 10 of {results.AvailableUpdates.Count}):");
+                foreach (var update in results.AvailableUpdates.OrderByDescending(u => u.MajorVersionsAhead).Take(10))
+                {
+                    var icon = update.IsBreakingChange ? "🔴" : "🔶";
+                    var updateType = update.IsBreakingChange ? "MAJOR" :
+                                     update.MinorVersionsAhead > 0 ? "MINOR" : "PATCH";
+                    output.AppendLine($"  {icon} {update.PackageName}");
+                    output.AppendLine($"     Current: {update.CurrentVersion} → Latest: {update.LatestVersion} ({updateType})");
+                    output.AppendLine($"     Projects: {string.Join(", ", update.AffectedProjects)}");
+                    output.AppendLine();
+                }
+            }
+
+            // Version conflicts
+            if (results.VersionConflicts.Any())
+            {
+                output.AppendLine($"⚠️ Version Conflicts ({results.ConflictingPackages}):");
+                foreach (var conflict in results.VersionConflicts.Take(5))
+                {
+                    output.AppendLine($"  {conflict.PackageName}:");
+                    foreach (var usage in conflict.VersionUsages)
+                    {
+                        output.AppendLine($"    - {usage.ProjectName}: {usage.Version}");
+                    }
+                    output.AppendLine($"    → Recommendation: Standardize to {conflict.RecommendedVersion}");
+                    output.AppendLine();
+                }
+            }
+
+            // Unused packages (top 10)
+            if (results.UnusedPackagesCount > 0)
+            {
+                output.AppendLine($"🗑️ Unused Packages (showing top 10 of {results.UnusedPackagesCount}):");
+                foreach (var pkg in results.UnusedPackages.Take(10))
+                {
+                    output.AppendLine($"  {pkg.Name} ({pkg.Version}) - {pkg.ProjectName}");
+                    if (pkg.ExpectedNamespaces.Any())
+                    {
+                        output.AppendLine($"    Expected namespaces: {string.Join(", ", pkg.ExpectedNamespaces)}");
+                    }
+                }
+                output.AppendLine();
+            }
+
+            // Warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  - {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Package Analysis - Detailed
+        private static string FormatPackageAnalysisDetailed(PackageAnalysisResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"📦 Comprehensive Package Analysis");
+            output.AppendLine($"Solution: {Path.GetFileName(results.AllPackages.FirstOrDefault()?.ProjectPath ?? "N/A")}");
+            output.AppendLine();
+
+            // Full statistics
+            output.AppendLine("📊 Complete Statistics:");
+            output.AppendLine($"  Total Packages: {results.TotalPackages}");
+            output.AppendLine($"  Unique Packages: {results.UniquePackages}");
+            output.AppendLine($"  Up to Date: {results.UpToDatePackages}");
+            output.AppendLine($"  Updates Available: {results.AvailableUpdates.Count}");
+            output.AppendLine($"  Version Conflicts: {results.ConflictingPackages}");
+            output.AppendLine($"  Unused Packages: {results.UnusedPackagesCount}");
+            output.AppendLine($"  Analyzed Projects: {results.AnalyzedProjects}");
+            output.AppendLine($"  Failed Projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // All vulnerabilities
+            if (results.Vulnerabilities.Any())
+            {
+                output.AppendLine($"🔴 Security Vulnerabilities ({results.VulnerablePackages}):");
+                output.AppendLine($"  Critical: {results.CriticalVulnerabilities}, High: {results.HighVulnerabilities}, " +
+                                  $"Medium: {results.MediumVulnerabilities}, Low: {results.LowVulnerabilities}");
+                output.AppendLine();
+                foreach (var vuln in results.Vulnerabilities.OrderByDescending(v => v.Severity))
+                {
+                    output.AppendLine($"  {GetSeverityIcon(vuln.Severity)} {vuln.Severity} - {vuln.PackageName} {vuln.AffectedVersion}");
+                    output.AppendLine($"     ID: {vuln.VulnerabilityId}");
+                    output.AppendLine($"     Description: {vuln.Description}");
+                    output.AppendLine($"     Recommended Version: {vuln.RecommendedVersion}+");
+                    output.AppendLine($"     Affected Projects: {string.Join(", ", vuln.AffectedProjects)}");
+                    output.AppendLine();
+                }
+            }
+
+            // All available updates
+            if (results.AvailableUpdates.Any())
+            {
+                output.AppendLine($"📦 All Available Updates ({results.AvailableUpdates.Count}):");
+                foreach (var update in results.AvailableUpdates.OrderByDescending(u => u.MajorVersionsAhead)
+                                                                .ThenByDescending(u => u.MinorVersionsAhead))
+                {
+                    var icon = update.IsBreakingChange ? "🔴" : "🔶";
+                    output.AppendLine($"  {icon} {update.PackageName}");
+                    output.AppendLine($"     Current: {update.CurrentVersion}");
+                    output.AppendLine($"     Latest: {update.LatestVersion}");
+                    output.AppendLine($"     Version gap: +{update.MajorVersionsAhead} major, +{update.MinorVersionsAhead} minor, +{update.PatchVersionsAhead} patch");
+                    output.AppendLine($"     Breaking change: {(update.IsBreakingChange ? "YES ⚠️" : "No")}");
+                    output.AppendLine($"     Affected projects: {string.Join(", ", update.AffectedProjects)}");
+                    output.AppendLine();
+                }
+            }
+
+            // All version conflicts
+            if (results.VersionConflicts.Any())
+            {
+                output.AppendLine($"⚠️ All Version Conflicts ({results.ConflictingPackages}):");
+                foreach (var conflict in results.VersionConflicts)
+                {
+                    output.AppendLine($"  {conflict.PackageName}:");
+                    foreach (var usage in conflict.VersionUsages)
+                    {
+                        output.AppendLine($"    - {usage.ProjectName}: {usage.Version}");
+                    }
+                    output.AppendLine($"    → Recommended version: {conflict.RecommendedVersion}");
+                    output.AppendLine();
+                }
+            }
+
+            // All unused packages
+            if (results.UnusedPackagesCount > 0)
+            {
+                output.AppendLine($"🗑️ All Unused Packages ({results.UnusedPackagesCount}):");
+                var groupedByProject = results.UnusedPackages.GroupBy(p => p.ProjectName);
+                foreach (var projectGroup in groupedByProject)
+                {
+                    output.AppendLine($"  {projectGroup.Key}:");
+                    foreach (var pkg in projectGroup)
+                    {
+                        output.AppendLine($"    - {pkg.Name} ({pkg.Version})");
+                        if (pkg.ExpectedNamespaces.Any())
+                        {
+                            output.AppendLine($"      Expected namespaces: {string.Join(", ", pkg.ExpectedNamespaces)}");
+                        }
+                    }
+                    output.AppendLine();
+                }
+            }
+
+            // Warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Analysis Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                    if (!string.IsNullOrWhiteSpace(warning.Details))
+                    {
+                        output.AppendLine($"    Details: {warning.Details}");
+                    }
+                }
+                output.AppendLine();
+            }
+
+            return output.ToString();
+        }
+
+        // Helper: Get severity icon
+        private static string GetSeverityIcon(string severity)
+        {
+            return severity.ToLower() switch
+            {
+                "critical" => "🔴",
+                "high" => "🔶",
+                "medium" => "🟡",
+                "low" => "🔵",
+                _ => "⚪"
+            };
         }
 
         #endregion
