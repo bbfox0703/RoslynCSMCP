@@ -514,4 +514,171 @@ namespace RoslynMcpServer.Models
         // Coverage percentage
         public double CoveragePercentage => TotalSymbols > 0 ? (DocumentedSymbols * 100.0 / TotalSymbols) : 0;
     }
+
+    /// <summary>
+    /// Represents a TODO/FIXME/HACK comment found in code
+    /// </summary>
+    public class TODOComment
+    {
+        public string Type { get; set; } = string.Empty;  // TODO, FIXME, HACK, NOTE, BUG
+        public string Message { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public string Author { get; set; } = string.Empty;  // If present in comment
+        public string CodeContext { get; set; } = string.Empty;  // Surrounding code
+    }
+
+    /// <summary>
+    /// Results from TODO comment analysis
+    /// </summary>
+    public class TODOCommentResults
+    {
+        public List<TODOComment> Comments { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by type
+        public int TODOCount { get; set; }
+        public int FIXMECount { get; set; }
+        public int HACKCount { get; set; }
+        public int NOTECount { get; set; }
+        public int BUGCount { get; set; }
+        public int OtherCount { get; set; }
+
+        public int TotalComments => Comments.Count;
+    }
+
+    /// <summary>
+    /// Represents a large source file
+    /// </summary>
+    public class LargeFile
+    {
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineCount { get; set; }
+        public long SizeInBytes { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public int TypeCount { get; set; }  // Number of classes/interfaces/structs
+        public int MethodCount { get; set; }  // Number of methods
+    }
+
+    /// <summary>
+    /// Results from large file analysis
+    /// </summary>
+    public class LargeFileResults
+    {
+        public List<LargeFile> LargeFiles { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalLargeFiles => LargeFiles.Count;
+        public int AverageLineCount => LargeFiles.Any() ? (int)LargeFiles.Average(f => f.LineCount) : 0;
+        public int MaxLineCount => LargeFiles.Any() ? LargeFiles.Max(f => f.LineCount) : 0;
+        public long TotalSizeInBytes => LargeFiles.Sum(f => f.SizeInBytes);
+    }
+
+    /// <summary>
+    /// Represents a usage of a deprecated/obsolete API
+    /// </summary>
+    public class DeprecatedAPIUsage
+    {
+        public string APIName { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public string ObsoleteMessage { get; set; } = string.Empty;
+        public bool IsError { get; set; }  // ObsoleteAttribute with IsError=true
+        public string CodeContext { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Represents a deprecated API with all its usages
+    /// </summary>
+    public class DeprecatedAPI
+    {
+        public string APIName { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string ObsoleteMessage { get; set; } = string.Empty;
+        public bool IsError { get; set; }
+        public List<DeprecatedAPIUsage> Usages { get; set; } = new();
+        public string Suggestion { get; set; } = string.Empty;  // Migration suggestion
+    }
+
+    /// <summary>
+    /// Results from deprecated API analysis
+    /// </summary>
+    public class DeprecatedAPIResults
+    {
+        public List<DeprecatedAPI> DeprecatedAPIs { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalDeprecatedAPIs => DeprecatedAPIs.Count;
+        public int TotalUsages => DeprecatedAPIs.Sum(api => api.Usages.Count);
+        public int ErrorAPIs => DeprecatedAPIs.Count(api => api.IsError);
+        public int WarningAPIs => DeprecatedAPIs.Count(api => !api.IsError);
+    }
+
+    /// <summary>
+    /// Statistics for a single file
+    /// </summary>
+    public class FileStatistics
+    {
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+
+        // Line counts
+        public int TotalLines { get; set; }
+        public int CodeLines { get; set; }
+        public int CommentLines { get; set; }
+        public int BlankLines { get; set; }
+
+        // File info
+        public long SizeInBytes { get; set; }
+
+        // Code elements
+        public int ClassCount { get; set; }
+        public int InterfaceCount { get; set; }
+        public int StructCount { get; set; }
+        public int EnumCount { get; set; }
+        public int MethodCount { get; set; }
+        public int PropertyCount { get; set; }
+        public int FieldCount { get; set; }
+
+        // Complexity
+        public int CyclomaticComplexity { get; set; }
+        public int MaxMethodComplexity { get; set; }
+        public string MostComplexMethod { get; set; } = string.Empty;
+
+        // Dependencies
+        public int UsingDirectivesCount { get; set; }
+        public List<string> Namespaces { get; set; } = new();
+
+        // Documentation
+        public int DocumentedMembers { get; set; }
+        public int UndocumentedMembers { get; set; }
+        public double DocumentationCoverage => (DocumentedMembers + UndocumentedMembers) > 0
+            ? (DocumentedMembers * 100.0 / (DocumentedMembers + UndocumentedMembers))
+            : 0;
+    }
+
+    /// <summary>
+    /// Results from file statistics analysis
+    /// </summary>
+    public class FileStatisticsResults
+    {
+        public FileStatistics? Statistics { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+    }
 }

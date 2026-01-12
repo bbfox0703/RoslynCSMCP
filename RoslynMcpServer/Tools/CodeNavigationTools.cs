@@ -732,6 +732,185 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find TODO, FIXME, HACK, and other special comments in code")]
+        public static async Task<string> FindTODOComments(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (with code context). Default: normal")]
+            string format = "normal",
+            [Description("Comment types to find (comma-separated): TODO, FIXME, HACK, NOTE, BUG, XXX, OPTIMIZE, REFACTOR. Default: all")]
+            string types = "all",
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<TODOCommentAnalyzer>>();
+            var securityValidator = serviceProvider?.GetService<SecurityValidator>();
+
+            try
+            {
+                // Validate solution path
+                if (securityValidator != null && !securityValidator.ValidateSolutionPath(solutionPath))
+                {
+                    logger?.LogWarning("Invalid solution path: {SolutionPath}", solutionPath);
+                    return $"Error: Invalid solution path: {solutionPath}";
+                }
+
+                // Parse comment types
+                string[]? commentTypes = null;
+                if (!string.IsNullOrWhiteSpace(types) && types.ToLowerInvariant() != "all")
+                {
+                    commentTypes = types.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<TODOCommentAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: TODO comment analyzer service not available.";
+                }
+
+                // Perform analysis
+                var results = await analyzer.AnalyzeTODOCommentsAsync(solutionPath, commentTypes!);
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatTODOCommentsSummary(results),
+                    "detailed" => FormatTODOCommentsDetailed(results),
+                    _ => FormatTODOCommentsNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error finding TODO comments");
+                return $"Error: An unexpected error occurred while finding TODO comments: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Find large source files that may need refactoring")]
+        public static async Task<string> FindLargeFiles(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (top files only), normal (balanced), detailed (with metrics). Default: normal")]
+            string format = "normal",
+            [Description("Minimum line count threshold (default: 500)")] int threshold = 500,
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<LargeFileAnalyzer>>();
+            var securityValidator = serviceProvider?.GetService<SecurityValidator>();
+
+            try
+            {
+                // Validate solution path
+                if (securityValidator != null && !securityValidator.ValidateSolutionPath(solutionPath))
+                {
+                    logger?.LogWarning("Invalid solution path: {SolutionPath}", solutionPath);
+                    return $"Error: Invalid solution path: {solutionPath}";
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<LargeFileAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Large file analyzer service not available.";
+                }
+
+                // Perform analysis
+                var results = await analyzer.AnalyzeLargeFilesAsync(solutionPath, threshold);
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatLargeFilesSummary(results, threshold),
+                    "detailed" => FormatLargeFilesDetailed(results, threshold),
+                    _ => FormatLargeFilesNormal(results, threshold)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error finding large files");
+                return $"Error: An unexpected error occurred while finding large files: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Find usages of deprecated/obsolete APIs in the solution")]
+        public static async Task<string> FindDeprecatedAPIs(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts and top APIs), normal (grouped by API), detailed (with code context). Default: normal")]
+            string format = "normal",
+            [Description("Include .NET Framework obsolete APIs (default: true)")] bool includeFrameworkAPIs = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<DeprecatedAPIAnalyzer>>();
+            var securityValidator = serviceProvider?.GetService<SecurityValidator>();
+
+            try
+            {
+                // Validate solution path
+                if (securityValidator != null && !securityValidator.ValidateSolutionPath(solutionPath))
+                {
+                    logger?.LogWarning("Invalid solution path: {SolutionPath}", solutionPath);
+                    return $"Error: Invalid solution path: {solutionPath}";
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<DeprecatedAPIAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Deprecated API analyzer service not available.";
+                }
+
+                // Perform analysis
+                var results = await analyzer.AnalyzeDeprecatedAPIsAsync(solutionPath, includeFrameworkAPIs);
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatDeprecatedAPIsSummary(results),
+                    "detailed" => FormatDeprecatedAPIsDetailed(results),
+                    _ => FormatDeprecatedAPIsNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error finding deprecated APIs");
+                return $"Error: An unexpected error occurred while finding deprecated APIs: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Get comprehensive statistics for a C# file (LOC, complexity, dependencies, documentation coverage)")]
+        public static async Task<string> GetFileStatistics(
+            [Description("Path to C# source file (.cs)")] string filePath,
+            [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+            string format = "normal",
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<FileStatisticsAnalyzer>>();
+
+            try
+            {
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<FileStatisticsAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: File statistics analyzer service not available.";
+                }
+
+                // Perform analysis
+                var results = await analyzer.AnalyzeFileStatisticsAsync(filePath);
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatFileStatisticsSummary(results),
+                    "detailed" => FormatFileStatisticsDetailed(results),
+                    _ => FormatFileStatisticsNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error getting file statistics");
+                return $"Error: An unexpected error occurred while getting file statistics: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -4166,5 +4345,1361 @@ namespace RoslynMcpServer.Tools
 
             return output.ToString();
         }
+
+        // ==================== TODO Comments Formatting ====================
+
+        // Summary mode: Quick overview with counts by type
+        private static string FormatTODOCommentsSummary(TODOCommentResults results)
+        {
+            if (results.TotalComments == 0)
+                return "✅ No TODO/FIXME/HACK comments found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"📝 **TODO Comments Found: {results.TotalComments}**\n");
+            output.AppendLine($"**By Type:**");
+            if (results.TODOCount > 0)
+                output.AppendLine($"  📌 TODO: {results.TODOCount}");
+            if (results.FIXMECount > 0)
+                output.AppendLine($"  🔧 FIXME: {results.FIXMECount}");
+            if (results.HACKCount > 0)
+                output.AppendLine($"  ⚠️ HACK: {results.HACKCount}");
+            if (results.BUGCount > 0)
+                output.AppendLine($"  🐛 BUG: {results.BUGCount}");
+            if (results.NOTECount > 0)
+                output.AppendLine($"  📋 NOTE: {results.NOTECount}");
+            if (results.OtherCount > 0)
+                output.AppendLine($"  ➕ Other: {results.OtherCount}");
+
+            output.AppendLine();
+            output.AppendLine($"**Files Analyzed:** {results.AnalyzedFiles}");
+            output.AppendLine($"**Projects:** {results.AnalyzedProjects}");
+
+            // Show top 5 most urgent (FIXME, BUG, HACK)
+            var urgentComments = results.Comments
+                .Where(c => c.Type == "FIXME" || c.Type == "BUG" || c.Type == "HACK")
+                .Take(5)
+                .ToList();
+
+            if (urgentComments.Any())
+            {
+                output.AppendLine();
+                output.AppendLine("**Most Urgent (first 5):**");
+                foreach (var comment in urgentComments)
+                {
+                    var icon = comment.Type switch
+                    {
+                        "FIXME" => "🔧",
+                        "BUG" => "🐛",
+                        "HACK" => "⚠️",
+                        _ => "📌"
+                    };
+                    output.AppendLine($"  {icon} {comment.Type}: {TruncateMessage(comment.Message, 60)} ({comment.FileName}:{comment.LineNumber})");
+                }
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("\n⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(3))
+                {
+                    output.AppendLine($"   - {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Grouped by type with file locations
+        private static string FormatTODOCommentsNormal(TODOCommentResults results)
+        {
+            if (results.TotalComments == 0)
+                return "✅ No TODO/FIXME/HACK comments found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**TODO Comments Analysis**\n");
+            output.AppendLine($"📊 **Summary:** {results.TotalComments} comments found");
+            output.AppendLine();
+
+            output.AppendLine("**Breakdown by Type:**");
+            if (results.TODOCount > 0)
+                output.AppendLine($"  📌 TODO: {results.TODOCount}");
+            if (results.FIXMECount > 0)
+                output.AppendLine($"  🔧 FIXME: {results.FIXMECount}");
+            if (results.HACKCount > 0)
+                output.AppendLine($"  ⚠️ HACK: {results.HACKCount}");
+            if (results.BUGCount > 0)
+                output.AppendLine($"  🐛 BUG: {results.BUGCount}");
+            if (results.NOTECount > 0)
+                output.AppendLine($"  📋 NOTE: {results.NOTECount}");
+            if (results.OtherCount > 0)
+                output.AppendLine($"  ➕ Other: {results.OtherCount}");
+
+            output.AppendLine();
+            output.AppendLine($"📁 **Files:** {results.AnalyzedFiles} | **Projects:** {results.AnalyzedProjects}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"⚠️ **Failed Projects:** {results.FailedProjects}");
+
+            // Group by type
+            var commentsByType = results.Comments.GroupBy(c => c.Type).OrderByDescending(g => GetTypePriority(g.Key));
+
+            foreach (var typeGroup in commentsByType)
+            {
+                var icon = typeGroup.Key switch
+                {
+                    "TODO" => "📌",
+                    "FIXME" => "🔧",
+                    "HACK" => "⚠️",
+                    "BUG" => "🐛",
+                    "NOTE" => "📋",
+                    _ => "➕"
+                };
+
+                output.AppendLine();
+                output.AppendLine($"## {icon} {typeGroup.Key} Comments ({typeGroup.Count()})");
+                output.AppendLine();
+
+                // Group by project
+                var byProject = typeGroup.GroupBy(c => c.ProjectName).OrderBy(g => g.Key);
+                foreach (var projectGroup in byProject)
+                {
+                    output.AppendLine($"**{projectGroup.Key}** ({projectGroup.Count()}):");
+
+                    // Show up to 10 comments per project for this type
+                    foreach (var comment in projectGroup.Take(10))
+                    {
+                        var authorInfo = !string.IsNullOrWhiteSpace(comment.Author) ? $" [{comment.Author}]" : "";
+                        output.AppendLine($"  • {comment.FileName}:{comment.LineNumber}{authorInfo}");
+                        output.AppendLine($"    {TruncateMessage(comment.Message, 80)}");
+                    }
+
+                    if (projectGroup.Count() > 10)
+                    {
+                        output.AppendLine($"  ... and {projectGroup.Count() - 10} more");
+                    }
+
+                    output.AppendLine();
+                }
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Full information with code context
+        private static string FormatTODOCommentsDetailed(TODOCommentResults results)
+        {
+            if (results.TotalComments == 0)
+                return "✅ No TODO/FIXME/HACK comments found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**TODO Comments Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Total Comments:** {results.TotalComments}");
+            output.AppendLine();
+
+            output.AppendLine("**Statistics:**");
+            output.AppendLine($"  📌 TODO: {results.TODOCount}");
+            output.AppendLine($"  🔧 FIXME: {results.FIXMECount}");
+            output.AppendLine($"  ⚠️ HACK: {results.HACKCount}");
+            output.AppendLine($"  🐛 BUG: {results.BUGCount}");
+            output.AppendLine($"  📋 NOTE: {results.NOTECount}");
+            if (results.OtherCount > 0)
+                output.AppendLine($"  ➕ Other: {results.OtherCount}");
+            output.AppendLine();
+
+            output.AppendLine($"📁 **Files Analyzed:** {results.AnalyzedFiles}");
+            output.AppendLine($"📦 **Projects:** {results.AnalyzedProjects}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"⚠️ **Failed Projects:** {results.FailedProjects}");
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine();
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            output.AppendLine();
+
+            // Group by project, then by type
+            var groupedByProject = results.Comments.GroupBy(c => c.ProjectName).OrderBy(g => g.Key);
+
+            foreach (var projectGroup in groupedByProject)
+            {
+                output.AppendLine($"## 📁 Project: {projectGroup.Key}");
+                output.AppendLine($"Comments: {projectGroup.Count()}");
+                output.AppendLine();
+
+                var groupedByType = projectGroup.GroupBy(c => c.Type).OrderByDescending(g => GetTypePriority(g.Key));
+
+                foreach (var typeGroup in groupedByType)
+                {
+                    var icon = typeGroup.Key switch
+                    {
+                        "TODO" => "📌",
+                        "FIXME" => "🔧",
+                        "HACK" => "⚠️",
+                        "BUG" => "🐛",
+                        "NOTE" => "📋",
+                        _ => "➕"
+                    };
+
+                    output.AppendLine($"### {icon} {typeGroup.Key} ({typeGroup.Count()})");
+                    output.AppendLine();
+
+                    foreach (var comment in typeGroup)
+                    {
+                        output.AppendLine($"**{comment.FileName}:{comment.LineNumber}**");
+                        if (!string.IsNullOrWhiteSpace(comment.Author))
+                            output.AppendLine($"  👤 Author: {comment.Author}");
+                        output.AppendLine($"  💬 Message: {comment.Message}");
+
+                        if (!string.IsNullOrWhiteSpace(comment.CodeContext))
+                        {
+                            output.AppendLine();
+                            output.AppendLine("  **Code Context:**");
+                            output.AppendLine("  ```csharp");
+                            foreach (var line in comment.CodeContext.Split('\n'))
+                            {
+                                output.AppendLine($"  {line}");
+                            }
+                            output.AppendLine("  ```");
+                        }
+
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Recommendations
+            output.AppendLine("---");
+            output.AppendLine("**Recommendations:**");
+            if (results.BUGCount > 0)
+                output.AppendLine($"  🐛 Address {results.BUGCount} BUG comment{(results.BUGCount > 1 ? "s" : "")} immediately");
+            if (results.FIXMECount > 0)
+                output.AppendLine($"  🔧 Fix {results.FIXMECount} FIXME item{(results.FIXMECount > 1 ? "s" : "")} in upcoming sprints");
+            if (results.HACKCount > 0)
+                output.AppendLine($"  ⚠️ Refactor {results.HACKCount} HACK{(results.HACKCount > 1 ? "s" : "")} to proper solutions");
+            if (results.TODOCount > 0)
+                output.AppendLine($"  📌 Plan work for {results.TODOCount} TODO item{(results.TODOCount > 1 ? "s" : "")}");
+
+            output.AppendLine("  • Consider creating issues/tickets for high-priority items");
+            output.AppendLine("  • Review and remove outdated comments");
+
+            return output.ToString();
+        }
+
+        // Helper: Get priority for comment type sorting
+        private static int GetTypePriority(string type)
+        {
+            return type switch
+            {
+                "BUG" => 5,
+                "FIXME" => 4,
+                "HACK" => 3,
+                "TODO" => 2,
+                "NOTE" => 1,
+                _ => 0
+            };
+        }
+
+        // Helper: Truncate message for summary views
+        private static string TruncateMessage(string message, int maxLength)
+        {
+            if (string.IsNullOrEmpty(message))
+                return string.Empty;
+
+            if (message.Length <= maxLength)
+                return message;
+
+            return message.Substring(0, maxLength - 3) + "...";
+        }
+
+        // ==================== Large Files Formatting ====================
+
+        // Summary mode: Top large files only
+        private static string FormatLargeFilesSummary(LargeFileResults results, int threshold)
+        {
+            if (results.TotalLargeFiles == 0)
+                return $"✅ No files found above {threshold} lines.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"📄 **Large Files Found: {results.TotalLargeFiles}** (> {threshold} lines)\n");
+            output.AppendLine($"**Statistics:**");
+            output.AppendLine($"  • Average: {results.AverageLineCount} lines");
+            output.AppendLine($"  • Largest: {results.MaxLineCount} lines");
+            output.AppendLine($"  • Total Size: {FormatFileSize(results.TotalSizeInBytes)}");
+            output.AppendLine();
+
+            // Show top 10 largest files
+            output.AppendLine("**Top 10 Largest Files:**");
+            foreach (var file in results.LargeFiles.Take(10))
+            {
+                output.AppendLine($"  {file.LineCount,6} lines - {file.FileName} ({file.ProjectName})");
+            }
+
+            if (results.TotalLargeFiles > 10)
+            {
+                output.AppendLine($"  ... and {results.TotalLargeFiles - 10} more files");
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("\n⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(3))
+                {
+                    output.AppendLine($"   - {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Grouped by project with metrics
+        private static string FormatLargeFilesNormal(LargeFileResults results, int threshold)
+        {
+            if (results.TotalLargeFiles == 0)
+                return $"✅ No files found above {threshold} lines.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Large Files Analysis**\n");
+            output.AppendLine($"📊 **Summary:** {results.TotalLargeFiles} files > {threshold} lines");
+            output.AppendLine();
+
+            output.AppendLine("**Overall Statistics:**");
+            output.AppendLine($"  • Files Analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  • Large Files: {results.TotalLargeFiles}");
+            output.AppendLine($"  • Average Lines: {results.AverageLineCount}");
+            output.AppendLine($"  • Max Lines: {results.MaxLineCount}");
+            output.AppendLine($"  • Total Size: {FormatFileSize(results.TotalSizeInBytes)}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  • Failed Projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Group by project
+            var byProject = results.LargeFiles.GroupBy(f => f.ProjectName).OrderByDescending(g => g.Count());
+
+            foreach (var projectGroup in byProject)
+            {
+                output.AppendLine($"## 📁 {projectGroup.Key} ({projectGroup.Count()} files)");
+                output.AppendLine();
+
+                foreach (var file in projectGroup.Take(15))
+                {
+                    var sizeStr = FormatFileSize(file.SizeInBytes);
+                    output.AppendLine($"  **{file.FileName}**");
+                    output.AppendLine($"    📏 Lines: {file.LineCount} | 💾 Size: {sizeStr} | 📦 Types: {file.TypeCount} | 🔧 Methods: {file.MethodCount}");
+                }
+
+                if (projectGroup.Count() > 15)
+                {
+                    output.AppendLine($"  ... and {projectGroup.Count() - 15} more files");
+                }
+
+                output.AppendLine();
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Full information with refactoring suggestions
+        private static string FormatLargeFilesDetailed(LargeFileResults results, int threshold)
+        {
+            if (results.TotalLargeFiles == 0)
+                return $"✅ No files found above {threshold} lines.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Large Files Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Threshold:** {threshold} lines");
+            output.AppendLine();
+
+            output.AppendLine("**Complete Statistics:**");
+            output.AppendLine($"  • Files Analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  • Projects: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Large Files Found: {results.TotalLargeFiles}");
+            output.AppendLine($"  • Average Lines: {results.AverageLineCount}");
+            output.AppendLine($"  • Max Lines: {results.MaxLineCount}");
+            output.AppendLine($"  • Total Size: {FormatFileSize(results.TotalSizeInBytes)}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  • Failed Projects: {results.FailedProjects}");
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine();
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            output.AppendLine();
+
+            // Group by size category
+            var hugeFiles = results.LargeFiles.Where(f => f.LineCount >= 2000).ToList();
+            var veryLargeFiles = results.LargeFiles.Where(f => f.LineCount >= 1000 && f.LineCount < 2000).ToList();
+            var largeFiles = results.LargeFiles.Where(f => f.LineCount < 1000).ToList();
+
+            if (hugeFiles.Any())
+            {
+                output.AppendLine($"## 🔴 Huge Files (>= 2000 lines): {hugeFiles.Count}");
+                output.AppendLine("**These files urgently need refactoring!**");
+                output.AppendLine();
+
+                foreach (var file in hugeFiles)
+                {
+                    OutputFileDetails(output, file);
+                }
+            }
+
+            if (veryLargeFiles.Any())
+            {
+                output.AppendLine($"## 🟠 Very Large Files (1000-1999 lines): {veryLargeFiles.Count}");
+                output.AppendLine("**Consider refactoring these files.**");
+                output.AppendLine();
+
+                foreach (var file in veryLargeFiles)
+                {
+                    OutputFileDetails(output, file);
+                }
+            }
+
+            if (largeFiles.Any())
+            {
+                output.AppendLine($"## 🟡 Large Files ({threshold}-999 lines): {largeFiles.Count}");
+                output.AppendLine("**Monitor these files for growth.**");
+                output.AppendLine();
+
+                foreach (var file in largeFiles.Take(20))
+                {
+                    OutputFileDetails(output, file);
+                }
+
+                if (largeFiles.Count > 20)
+                {
+                    output.AppendLine($"... and {largeFiles.Count - 20} more files");
+                    output.AppendLine();
+                }
+            }
+
+            // Recommendations
+            output.AppendLine("---");
+            output.AppendLine("**Refactoring Recommendations:**");
+            if (hugeFiles.Any())
+                output.AppendLine($"  🔴 **Urgent**: Refactor {hugeFiles.Count} huge file{(hugeFiles.Count > 1 ? "s" : "")} (>= 2000 lines)");
+            if (veryLargeFiles.Any())
+                output.AppendLine($"  🟠 **High Priority**: Consider refactoring {veryLargeFiles.Count} very large file{(veryLargeFiles.Count > 1 ? "s" : "")} (1000-1999 lines)");
+            if (largeFiles.Any())
+                output.AppendLine($"  🟡 **Monitor**: Watch {largeFiles.Count} large file{(largeFiles.Count > 1 ? "s" : "")} ({threshold}-999 lines) for growth");
+
+            output.AppendLine();
+            output.AppendLine("**Refactoring Strategies:**");
+            output.AppendLine("  • Extract classes: Split into multiple files by responsibility");
+            output.AppendLine("  • Extract methods: Break down large methods into smaller ones");
+            output.AppendLine("  • Use partial classes: Divide functionality across files");
+            output.AppendLine("  • Move nested types: Extract nested classes to separate files");
+            output.AppendLine("  • Separate concerns: Apply Single Responsibility Principle");
+
+            return output.ToString();
+        }
+
+        // Helper: Output file details for detailed mode
+        private static void OutputFileDetails(StringBuilder output, LargeFile file)
+        {
+            output.AppendLine($"**{file.FileName}**");
+            output.AppendLine($"  📍 Project: {file.ProjectName}");
+            output.AppendLine($"  📏 Lines: {file.LineCount:N0}");
+            output.AppendLine($"  💾 Size: {FormatFileSize(file.SizeInBytes)}");
+            output.AppendLine($"  📦 Types: {file.TypeCount}");
+            output.AppendLine($"  🔧 Methods: {file.MethodCount}");
+
+            // Suggest refactoring if metrics are concerning
+            var suggestions = new List<string>();
+            if (file.LineCount >= 2000)
+                suggestions.Add("Very large file - urgent refactoring needed");
+            if (file.TypeCount > 5)
+                suggestions.Add($"Multiple types ({file.TypeCount}) - consider splitting");
+            if (file.MethodCount > 50)
+                suggestions.Add($"Many methods ({file.MethodCount}) - check cohesion");
+
+            if (suggestions.Any())
+            {
+                output.AppendLine($"  💡 Suggestions:");
+                foreach (var suggestion in suggestions)
+                {
+                    output.AppendLine($"     - {suggestion}");
+                }
+            }
+
+            output.AppendLine($"  📁 Path: {file.FilePath}");
+            output.AppendLine();
+        }
+
+        // Helper: Format file size
+        private static string FormatFileSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len = len / 1024;
+            }
+            return $"{len:0.##} {sizes[order]}";
+        }
+
+        // ==================== Deprecated APIs Formatting ====================
+
+        // Summary mode: Counts and top deprecated APIs
+        private static string FormatDeprecatedAPIsSummary(DeprecatedAPIResults results)
+        {
+            if (results.TotalDeprecatedAPIs == 0)
+                return "✅ No deprecated APIs found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"⚠️ **Deprecated APIs Found: {results.TotalDeprecatedAPIs}** ({results.TotalUsages} usages)\n");
+            output.AppendLine($"**Summary:**");
+            if (results.ErrorAPIs > 0)
+                output.AppendLine($"  🔴 Errors (IsError=true): {results.ErrorAPIs}");
+            if (results.WarningAPIs > 0)
+                output.AppendLine($"  ⚠️ Warnings: {results.WarningAPIs}");
+            output.AppendLine($"  📁 Files Analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  📦 Projects: {results.AnalyzedProjects}");
+            output.AppendLine();
+
+            // Show top 5 most used deprecated APIs
+            output.AppendLine("**Most Used Deprecated APIs (Top 5):**");
+            foreach (var api in results.DeprecatedAPIs.Take(5))
+            {
+                var icon = api.IsError ? "🔴" : "⚠️";
+                output.AppendLine($"  {icon} **{api.APIName}** - {api.Usages.Count} usage{(api.Usages.Count > 1 ? "s" : "")}");
+                if (!string.IsNullOrWhiteSpace(api.ObsoleteMessage))
+                    output.AppendLine($"     Message: {TruncateMessage(api.ObsoleteMessage, 60)}");
+                if (!string.IsNullOrWhiteSpace(api.Suggestion))
+                    output.AppendLine($"     💡 {api.Suggestion}");
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("\n⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(3))
+                {
+                    output.AppendLine($"   - {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Grouped by API with usage locations
+        private static string FormatDeprecatedAPIsNormal(DeprecatedAPIResults results)
+        {
+            if (results.TotalDeprecatedAPIs == 0)
+                return "✅ No deprecated APIs found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Deprecated API Analysis**\n");
+            output.AppendLine($"📊 **Summary:** {results.TotalDeprecatedAPIs} deprecated APIs, {results.TotalUsages} total usages");
+            output.AppendLine();
+
+            output.AppendLine("**Breakdown:**");
+            if (results.ErrorAPIs > 0)
+                output.AppendLine($"  🔴 Error-level (IsError=true): {results.ErrorAPIs}");
+            if (results.WarningAPIs > 0)
+                output.AppendLine($"  ⚠️ Warning-level: {results.WarningAPIs}");
+            output.AppendLine($"  📁 Files: {results.AnalyzedFiles} | 📦 Projects: {results.AnalyzedProjects}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  ❌ Failed Projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Group by error/warning
+            var errorAPIs = results.DeprecatedAPIs.Where(api => api.IsError).ToList();
+            var warningAPIs = results.DeprecatedAPIs.Where(api => !api.IsError).ToList();
+
+            if (errorAPIs.Any())
+            {
+                output.AppendLine($"## 🔴 Error-Level Deprecated APIs ({errorAPIs.Count})");
+                output.AppendLine("**These must be fixed immediately!**");
+                output.AppendLine();
+
+                foreach (var api in errorAPIs)
+                {
+                    OutputAPIDetails(output, api, showTop: 5);
+                }
+            }
+
+            if (warningAPIs.Any())
+            {
+                output.AppendLine($"## ⚠️ Warning-Level Deprecated APIs ({warningAPIs.Count})");
+                output.AppendLine("**Consider migrating these soon.**");
+                output.AppendLine();
+
+                foreach (var api in warningAPIs.Take(10))
+                {
+                    OutputAPIDetails(output, api, showTop: 5);
+                }
+
+                if (warningAPIs.Count > 10)
+                {
+                    output.AppendLine($"... and {warningAPIs.Count - 10} more deprecated APIs");
+                    output.AppendLine();
+                }
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Full information with code context
+        private static string FormatDeprecatedAPIsDetailed(DeprecatedAPIResults results)
+        {
+            if (results.TotalDeprecatedAPIs == 0)
+                return "✅ No deprecated APIs found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Deprecated API Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Total:** {results.TotalDeprecatedAPIs} deprecated APIs, {results.TotalUsages} usages");
+            output.AppendLine();
+
+            output.AppendLine("**Complete Statistics:**");
+            output.AppendLine($"  🔴 Error-level APIs: {results.ErrorAPIs}");
+            output.AppendLine($"  ⚠️ Warning-level APIs: {results.WarningAPIs}");
+            output.AppendLine($"  📁 Files Analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  📦 Projects: {results.AnalyzedProjects}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  ❌ Failed Projects: {results.FailedProjects}");
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine();
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            output.AppendLine();
+
+            // Group by error/warning
+            var errorAPIs = results.DeprecatedAPIs.Where(api => api.IsError).ToList();
+            var warningAPIs = results.DeprecatedAPIs.Where(api => !api.IsError).ToList();
+
+            if (errorAPIs.Any())
+            {
+                output.AppendLine($"## 🔴 Error-Level Deprecated APIs ({errorAPIs.Count})");
+                output.AppendLine("**Must be fixed - will become compilation errors!**");
+                output.AppendLine();
+
+                foreach (var api in errorAPIs)
+                {
+                    OutputAPIDetailsVerbose(output, api);
+                }
+            }
+
+            if (warningAPIs.Any())
+            {
+                output.AppendLine($"## ⚠️ Warning-Level Deprecated APIs ({warningAPIs.Count})");
+                output.AppendLine("**Should be migrated to avoid future issues.**");
+                output.AppendLine();
+
+                foreach (var api in warningAPIs)
+                {
+                    OutputAPIDetailsVerbose(output, api);
+                }
+            }
+
+            // Migration recommendations
+            output.AppendLine("---");
+            output.AppendLine("**Migration Recommendations:**");
+            if (errorAPIs.Any())
+                output.AppendLine($"  🔴 **Urgent**: Fix {errorAPIs.Sum(a => a.Usages.Count)} usage{(errorAPIs.Sum(a => a.Usages.Count) > 1 ? "s" : "")} of error-level deprecated APIs");
+            if (warningAPIs.Any())
+                output.AppendLine($"  ⚠️ **High Priority**: Migrate {warningAPIs.Sum(a => a.Usages.Count)} usage{(warningAPIs.Sum(a => a.Usages.Count) > 1 ? "s" : "")} of warning-level deprecated APIs");
+
+            output.AppendLine();
+            output.AppendLine("**Migration Steps:**");
+            output.AppendLine("  1. Review the suggested replacements above");
+            output.AppendLine("  2. Test the new APIs in a development environment");
+            output.AppendLine("  3. Update code and dependencies incrementally");
+            output.AppendLine("  4. Run tests to ensure functionality is preserved");
+            output.AppendLine("  5. Update documentation if needed");
+
+            return output.ToString();
+        }
+
+        // Helper: Output API details for normal mode
+        private static void OutputAPIDetails(StringBuilder output, DeprecatedAPI api, int showTop = 5)
+        {
+            var icon = api.IsError ? "🔴" : "⚠️";
+            output.AppendLine($"### {icon} {api.APIName}");
+            output.AppendLine($"**Full Name:** `{api.FullName}`");
+            output.AppendLine($"**Usages:** {api.Usages.Count}");
+
+            if (!string.IsNullOrWhiteSpace(api.ObsoleteMessage))
+                output.AppendLine($"**Message:** {api.ObsoleteMessage}");
+
+            if (!string.IsNullOrWhiteSpace(api.Suggestion))
+                output.AppendLine($"**💡 Suggestion:** {api.Suggestion}");
+
+            output.AppendLine();
+            output.AppendLine($"**Usage Locations (showing top {Math.Min(showTop, api.Usages.Count)}):**");
+
+            foreach (var usage in api.Usages.Take(showTop))
+            {
+                output.AppendLine($"  • {usage.ProjectName} / {usage.FileName}:{usage.LineNumber}");
+            }
+
+            if (api.Usages.Count > showTop)
+            {
+                output.AppendLine($"  ... and {api.Usages.Count - showTop} more usage{(api.Usages.Count - showTop > 1 ? "s" : "")}");
+            }
+
+            output.AppendLine();
+        }
+
+        // Helper: Output API details for detailed mode with code context
+        private static void OutputAPIDetailsVerbose(StringBuilder output, DeprecatedAPI api)
+        {
+            var icon = api.IsError ? "🔴" : "⚠️";
+            output.AppendLine($"### {icon} {api.APIName}");
+            output.AppendLine($"**Full Name:** `{api.FullName}`");
+            output.AppendLine($"**Total Usages:** {api.Usages.Count}");
+            output.AppendLine($"**Status:** {(api.IsError ? "Error (IsError=true)" : "Warning")}");
+
+            if (!string.IsNullOrWhiteSpace(api.ObsoleteMessage))
+                output.AppendLine($"**Obsolete Message:** {api.ObsoleteMessage}");
+
+            if (!string.IsNullOrWhiteSpace(api.Suggestion))
+            {
+                output.AppendLine();
+                output.AppendLine($"**💡 Migration Suggestion:**");
+                output.AppendLine($"  {api.Suggestion}");
+            }
+
+            output.AppendLine();
+            output.AppendLine("**All Usage Locations:**");
+            output.AppendLine();
+
+            // Group by project
+            var byProject = api.Usages.GroupBy(u => u.ProjectName).OrderBy(g => g.Key);
+
+            foreach (var projectGroup in byProject)
+            {
+                output.AppendLine($"**{projectGroup.Key}** ({projectGroup.Count()} usage{(projectGroup.Count() > 1 ? "s" : "")}):");
+
+                foreach (var usage in projectGroup)
+                {
+                    output.AppendLine($"  📍 {usage.FileName}:{usage.LineNumber}");
+
+                    if (!string.IsNullOrWhiteSpace(usage.CodeContext))
+                    {
+                        output.AppendLine("  ```csharp");
+                        foreach (var line in usage.CodeContext.Split('\n'))
+                        {
+                            output.AppendLine($"  {line}");
+                        }
+                        output.AppendLine("  ```");
+                    }
+
+                    output.AppendLine();
+                }
+            }
+
+            output.AppendLine();
+        }
+
+        #region GetFileStatistics Formatting
+
+        /// <summary>
+        /// Format file statistics in summary mode (key metrics only)
+        /// </summary>
+        private static string FormatFileStatisticsSummary(FileStatisticsResults results)
+        {
+            var output = new StringBuilder();
+
+            if (results.Statistics == null)
+            {
+                output.AppendLine("❌ **No statistics available**");
+                if (results.Warnings.Any())
+                {
+                    output.AppendLine();
+                    output.AppendLine("**Warnings:**");
+                    foreach (var warning in results.Warnings)
+                    {
+                        output.AppendLine($"  • {warning.Context}: {warning.Message}");
+                    }
+                }
+                return output.ToString();
+            }
+
+            var stats = results.Statistics;
+
+            output.AppendLine($"# File Statistics Summary: {stats.FileName}");
+            output.AppendLine();
+
+            // Key metrics
+            output.AppendLine("## 📊 Key Metrics");
+            output.AppendLine($"**Total Lines:** {stats.TotalLines:N0} ({FormatFileSize(stats.SizeInBytes)})");
+            output.AppendLine($"  • Code: {stats.CodeLines:N0} ({GetPercentage(stats.CodeLines, stats.TotalLines)})");
+            output.AppendLine($"  • Comments: {stats.CommentLines:N0} ({GetPercentage(stats.CommentLines, stats.TotalLines)})");
+            output.AppendLine($"  • Blank: {stats.BlankLines:N0} ({GetPercentage(stats.BlankLines, stats.TotalLines)})");
+            output.AppendLine();
+
+            output.AppendLine("## 🧩 Code Elements");
+            var totalTypes = stats.ClassCount + stats.InterfaceCount + stats.StructCount + stats.EnumCount;
+            output.AppendLine($"**Types:** {totalTypes} (Classes: {stats.ClassCount}, Interfaces: {stats.InterfaceCount}, Structs: {stats.StructCount}, Enums: {stats.EnumCount})");
+            output.AppendLine($"**Members:** Methods: {stats.MethodCount}, Properties: {stats.PropertyCount}, Fields: {stats.FieldCount}");
+            output.AppendLine();
+
+            output.AppendLine("## 🔀 Complexity");
+            output.AppendLine($"**Total Cyclomatic Complexity:** {stats.CyclomaticComplexity}");
+            if (stats.MethodCount > 0)
+            {
+                var avgComplexity = stats.CyclomaticComplexity / (double)stats.MethodCount;
+                output.AppendLine($"**Average per Method:** {avgComplexity:F1}");
+            }
+            if (!string.IsNullOrEmpty(stats.MostComplexMethod))
+            {
+                output.AppendLine($"**Most Complex Method:** `{stats.MostComplexMethod}` (complexity: {stats.MaxMethodComplexity})");
+            }
+            output.AppendLine();
+
+            output.AppendLine("## 📚 Documentation");
+            var totalMembers = stats.DocumentedMembers + stats.UndocumentedMembers;
+            if (totalMembers > 0)
+            {
+                output.AppendLine($"**Coverage:** {stats.DocumentationCoverage:F1}% ({stats.DocumentedMembers}/{totalMembers} public members documented)");
+            }
+            else
+            {
+                output.AppendLine("**Coverage:** No public members to document");
+            }
+
+            return output.ToString();
+        }
+
+        /// <summary>
+        /// Format file statistics in normal mode (balanced view)
+        /// </summary>
+        private static string FormatFileStatisticsNormal(FileStatisticsResults results)
+        {
+            var output = new StringBuilder();
+
+            if (results.Statistics == null)
+            {
+                output.AppendLine("❌ **No statistics available**");
+                if (results.Warnings.Any())
+                {
+                    output.AppendLine();
+                    output.AppendLine("**Warnings:**");
+                    foreach (var warning in results.Warnings)
+                    {
+                        output.AppendLine($"  • {warning.Context}: {warning.Message}");
+                    }
+                }
+                return output.ToString();
+            }
+
+            var stats = results.Statistics;
+
+            output.AppendLine($"# File Statistics: {stats.FileName}");
+            output.AppendLine($"**Path:** {stats.FilePath}");
+            if (!string.IsNullOrEmpty(stats.ProjectName) && stats.ProjectName != "(standalone)")
+            {
+                output.AppendLine($"**Project:** {stats.ProjectName}");
+            }
+            output.AppendLine();
+
+            // Line counts
+            output.AppendLine("## 📏 Line Counts");
+            output.AppendLine($"**Total Lines:** {stats.TotalLines:N0}");
+            output.AppendLine($"**Code Lines:** {stats.CodeLines:N0} ({GetPercentage(stats.CodeLines, stats.TotalLines)})");
+            output.AppendLine($"**Comment Lines:** {stats.CommentLines:N0} ({GetPercentage(stats.CommentLines, stats.TotalLines)})");
+            output.AppendLine($"**Blank Lines:** {stats.BlankLines:N0} ({GetPercentage(stats.BlankLines, stats.TotalLines)})");
+            output.AppendLine($"**File Size:** {FormatFileSize(stats.SizeInBytes)}");
+            output.AppendLine();
+
+            // Code elements breakdown
+            output.AppendLine("## 🧩 Code Elements");
+            var totalTypes = stats.ClassCount + stats.InterfaceCount + stats.StructCount + stats.EnumCount;
+            output.AppendLine($"**Total Types:** {totalTypes}");
+            if (stats.ClassCount > 0) output.AppendLine($"  • Classes: {stats.ClassCount}");
+            if (stats.InterfaceCount > 0) output.AppendLine($"  • Interfaces: {stats.InterfaceCount}");
+            if (stats.StructCount > 0) output.AppendLine($"  • Structs: {stats.StructCount}");
+            if (stats.EnumCount > 0) output.AppendLine($"  • Enums: {stats.EnumCount}");
+            output.AppendLine();
+
+            output.AppendLine($"**Total Members:** {stats.MethodCount + stats.PropertyCount + stats.FieldCount}");
+            if (stats.MethodCount > 0) output.AppendLine($"  • Methods: {stats.MethodCount}");
+            if (stats.PropertyCount > 0) output.AppendLine($"  • Properties: {stats.PropertyCount}");
+            if (stats.FieldCount > 0) output.AppendLine($"  • Fields: {stats.FieldCount}");
+            output.AppendLine();
+
+            // Complexity details
+            output.AppendLine("## 🔀 Complexity Metrics");
+            output.AppendLine($"**Total Cyclomatic Complexity:** {stats.CyclomaticComplexity}");
+            if (stats.MethodCount > 0)
+            {
+                var avgComplexity = stats.CyclomaticComplexity / (double)stats.MethodCount;
+                output.AppendLine($"**Average per Method:** {avgComplexity:F1}");
+                output.AppendLine($"**Max Method Complexity:** {stats.MaxMethodComplexity}");
+            }
+            if (!string.IsNullOrEmpty(stats.MostComplexMethod))
+            {
+                output.AppendLine($"**Most Complex Method:** `{stats.MostComplexMethod}` (complexity: {stats.MaxMethodComplexity})");
+
+                var complexityRating = GetComplexityRating(stats.MaxMethodComplexity);
+                output.AppendLine($"**Complexity Rating:** {complexityRating}");
+            }
+            output.AppendLine();
+
+            // Dependencies
+            output.AppendLine("## 📦 Dependencies");
+            output.AppendLine($"**Using Directives:** {stats.UsingDirectivesCount}");
+            if (stats.Namespaces.Any())
+            {
+                var topNamespaces = stats.Namespaces.Take(10).ToList();
+                output.AppendLine($"**Top Namespaces (showing {topNamespaces.Count}):**");
+                foreach (var ns in topNamespaces)
+                {
+                    output.AppendLine($"  • {ns}");
+                }
+                if (stats.Namespaces.Count > 10)
+                {
+                    output.AppendLine($"  ... and {stats.Namespaces.Count - 10} more");
+                }
+            }
+            output.AppendLine();
+
+            // Documentation coverage
+            output.AppendLine("## 📚 Documentation Coverage");
+            var totalMembers = stats.DocumentedMembers + stats.UndocumentedMembers;
+            if (totalMembers > 0)
+            {
+                output.AppendLine($"**Coverage:** {stats.DocumentationCoverage:F1}%");
+                output.AppendLine($"**Documented:** {stats.DocumentedMembers} public members");
+                output.AppendLine($"**Undocumented:** {stats.UndocumentedMembers} public members");
+
+                var docRating = GetDocumentationRating(stats.DocumentationCoverage);
+                output.AppendLine($"**Rating:** {docRating}");
+            }
+            else
+            {
+                output.AppendLine("**Coverage:** No public members found");
+            }
+
+            return output.ToString();
+        }
+
+        /// <summary>
+        /// Format file statistics in detailed mode (comprehensive view with recommendations)
+        /// </summary>
+        private static string FormatFileStatisticsDetailed(FileStatisticsResults results)
+        {
+            var output = new StringBuilder();
+
+            if (results.Statistics == null)
+            {
+                output.AppendLine("❌ **No statistics available**");
+                if (results.Warnings.Any())
+                {
+                    output.AppendLine();
+                    output.AppendLine("**Warnings:**");
+                    foreach (var warning in results.Warnings)
+                    {
+                        output.AppendLine($"  • {warning.Context}: {warning.Message}");
+                    }
+                }
+                return output.ToString();
+            }
+
+            var stats = results.Statistics;
+
+            output.AppendLine($"# Detailed File Statistics: {stats.FileName}");
+            output.AppendLine($"**Full Path:** `{stats.FilePath}`");
+            if (!string.IsNullOrEmpty(stats.ProjectName) && stats.ProjectName != "(standalone)")
+            {
+                output.AppendLine($"**Project:** {stats.ProjectName}");
+            }
+            output.AppendLine();
+
+            // Overall quality score
+            var qualityScore = CalculateQualityScore(stats);
+            output.AppendLine("## ⭐ Overall Quality Score");
+            output.AppendLine($"**Score:** {qualityScore.Score}/100 - {qualityScore.Rating}");
+            output.AppendLine($"**Details:** {qualityScore.Details}");
+            output.AppendLine();
+
+            // Line counts with detailed breakdown
+            output.AppendLine("## 📏 Line Analysis");
+            output.AppendLine($"**Total Lines:** {stats.TotalLines:N0}");
+            output.AppendLine($"**Code Lines:** {stats.CodeLines:N0} ({GetPercentage(stats.CodeLines, stats.TotalLines)})");
+            output.AppendLine($"**Comment Lines:** {stats.CommentLines:N0} ({GetPercentage(stats.CommentLines, stats.TotalLines)})");
+            output.AppendLine($"**Blank Lines:** {stats.BlankLines:N0} ({GetPercentage(stats.BlankLines, stats.TotalLines)})");
+            output.AppendLine($"**File Size:** {FormatFileSize(stats.SizeInBytes)}");
+
+            var commentRatio = stats.TotalLines > 0 ? (stats.CommentLines * 100.0 / stats.CodeLines) : 0;
+            output.AppendLine($"**Comment/Code Ratio:** {commentRatio:F1}%");
+            output.AppendLine();
+
+            // Code elements detailed breakdown
+            output.AppendLine("## 🧩 Code Elements Breakdown");
+            var totalTypes = stats.ClassCount + stats.InterfaceCount + stats.StructCount + stats.EnumCount;
+            output.AppendLine($"**Total Types:** {totalTypes}");
+            output.AppendLine($"  • Classes: {stats.ClassCount}");
+            output.AppendLine($"  • Interfaces: {stats.InterfaceCount}");
+            output.AppendLine($"  • Structs: {stats.StructCount}");
+            output.AppendLine($"  • Enums: {stats.EnumCount}");
+            output.AppendLine();
+
+            var totalMembers = stats.MethodCount + stats.PropertyCount + stats.FieldCount;
+            output.AppendLine($"**Total Members:** {totalMembers}");
+            output.AppendLine($"  • Methods: {stats.MethodCount}");
+            output.AppendLine($"  • Properties: {stats.PropertyCount}");
+            output.AppendLine($"  • Fields: {stats.FieldCount}");
+
+            if (totalTypes > 0)
+            {
+                var avgMembersPerType = totalMembers / (double)totalTypes;
+                output.AppendLine($"**Average Members per Type:** {avgMembersPerType:F1}");
+            }
+            output.AppendLine();
+
+            // Complexity detailed analysis
+            output.AppendLine("## 🔀 Complexity Analysis");
+            output.AppendLine($"**Total Cyclomatic Complexity:** {stats.CyclomaticComplexity}");
+            if (stats.MethodCount > 0)
+            {
+                var avgComplexity = stats.CyclomaticComplexity / (double)stats.MethodCount;
+                output.AppendLine($"**Average per Method:** {avgComplexity:F1}");
+                output.AppendLine($"**Max Method Complexity:** {stats.MaxMethodComplexity}");
+
+                if (!string.IsNullOrEmpty(stats.MostComplexMethod))
+                {
+                    output.AppendLine($"**Most Complex Method:** `{stats.MostComplexMethod}` (complexity: {stats.MaxMethodComplexity})");
+                }
+
+                var complexityRating = GetComplexityRating(stats.MaxMethodComplexity);
+                output.AppendLine($"**Complexity Rating:** {complexityRating}");
+
+                // Recommendations based on complexity
+                if (stats.MaxMethodComplexity > 10)
+                {
+                    output.AppendLine();
+                    output.AppendLine("⚠️ **Complexity Warning:**");
+                    output.AppendLine($"  The method `{stats.MostComplexMethod}` has high complexity ({stats.MaxMethodComplexity}).");
+                    output.AppendLine("  Consider refactoring into smaller, more maintainable methods.");
+                }
+            }
+            output.AppendLine();
+
+            // Dependencies - complete list
+            output.AppendLine("## 📦 Dependencies");
+            output.AppendLine($"**Using Directives Count:** {stats.UsingDirectivesCount}");
+            if (stats.Namespaces.Any())
+            {
+                output.AppendLine($"**All Namespaces ({stats.Namespaces.Count}):**");
+
+                // Group namespaces by category
+                var systemNs = stats.Namespaces.Where(ns => ns.StartsWith("System")).ToList();
+                var microsoftNs = stats.Namespaces.Where(ns => ns.StartsWith("Microsoft") && !ns.StartsWith("System")).ToList();
+                var otherNs = stats.Namespaces.Where(ns => !ns.StartsWith("System") && !ns.StartsWith("Microsoft")).ToList();
+
+                if (systemNs.Any())
+                {
+                    output.AppendLine($"  **System ({systemNs.Count}):**");
+                    foreach (var ns in systemNs)
+                    {
+                        output.AppendLine($"    • {ns}");
+                    }
+                }
+
+                if (microsoftNs.Any())
+                {
+                    output.AppendLine($"  **Microsoft ({microsoftNs.Count}):**");
+                    foreach (var ns in microsoftNs)
+                    {
+                        output.AppendLine($"    • {ns}");
+                    }
+                }
+
+                if (otherNs.Any())
+                {
+                    output.AppendLine($"  **Other ({otherNs.Count}):**");
+                    foreach (var ns in otherNs)
+                    {
+                        output.AppendLine($"    • {ns}");
+                    }
+                }
+            }
+            output.AppendLine();
+
+            // Documentation coverage detailed
+            output.AppendLine("## 📚 Documentation Coverage");
+            var totalDocMembers = stats.DocumentedMembers + stats.UndocumentedMembers;
+            if (totalDocMembers > 0)
+            {
+                output.AppendLine($"**Coverage:** {stats.DocumentationCoverage:F1}%");
+                output.AppendLine($"**Documented Members:** {stats.DocumentedMembers}");
+                output.AppendLine($"**Undocumented Members:** {stats.UndocumentedMembers}");
+                output.AppendLine($"**Total Public Members:** {totalDocMembers}");
+
+                var docRating = GetDocumentationRating(stats.DocumentationCoverage);
+                output.AppendLine($"**Rating:** {docRating}");
+
+                if (stats.DocumentationCoverage < 80)
+                {
+                    output.AppendLine();
+                    output.AppendLine("💡 **Documentation Recommendation:**");
+                    output.AppendLine($"  Add XML documentation comments for {stats.UndocumentedMembers} undocumented public members.");
+                    output.AppendLine("  Good documentation improves code maintainability and IDE experience.");
+                }
+            }
+            else
+            {
+                output.AppendLine("**Coverage:** No public members found");
+            }
+            output.AppendLine();
+
+            // File quality recommendations
+            output.AppendLine("## 💡 Recommendations");
+            var recommendations = GenerateRecommendations(stats);
+            if (recommendations.Any())
+            {
+                foreach (var recommendation in recommendations)
+                {
+                    output.AppendLine($"  {recommendation}");
+                }
+            }
+            else
+            {
+                output.AppendLine("  ✅ No specific recommendations - file quality looks good!");
+            }
+
+            return output.ToString();
+        }
+
+        // Helper: Get percentage string
+        private static string GetPercentage(int part, int total)
+        {
+            if (total == 0) return "0%";
+            return $"{part * 100.0 / total:F1}%";
+        }
+
+        // Helper: Get complexity rating
+        private static string GetComplexityRating(int complexity)
+        {
+            if (complexity <= 5)
+                return "✅ Low - Easy to maintain";
+            if (complexity <= 10)
+                return "⚠️ Moderate - Acceptable complexity";
+            if (complexity <= 20)
+                return "🔶 High - Consider refactoring";
+            return "🔴 Very High - Refactoring recommended";
+        }
+
+        // Helper: Get documentation rating
+        private static string GetDocumentationRating(double coverage)
+        {
+            if (coverage >= 90)
+                return "✅ Excellent";
+            if (coverage >= 70)
+                return "✅ Good";
+            if (coverage >= 50)
+                return "⚠️ Fair";
+            if (coverage >= 30)
+                return "🔶 Poor";
+            return "🔴 Very Poor";
+        }
+
+        // Helper: Calculate overall quality score
+        private static (int Score, string Rating, string Details) CalculateQualityScore(FileStatistics stats)
+        {
+            int score = 100;
+            var issues = new List<string>();
+
+            // Deduct for size issues
+            if (stats.TotalLines > 1000)
+            {
+                score -= 10;
+                issues.Add("Large file (>1000 lines)");
+            }
+            else if (stats.TotalLines > 500)
+            {
+                score -= 5;
+                issues.Add("Moderately large file");
+            }
+
+            // Deduct for complexity
+            if (stats.MethodCount > 0)
+            {
+                var avgComplexity = stats.CyclomaticComplexity / (double)stats.MethodCount;
+                if (avgComplexity > 10)
+                {
+                    score -= 20;
+                    issues.Add("High average complexity");
+                }
+                else if (avgComplexity > 5)
+                {
+                    score -= 10;
+                    issues.Add("Moderate complexity");
+                }
+            }
+
+            if (stats.MaxMethodComplexity > 20)
+            {
+                score -= 15;
+                issues.Add($"Very complex method ({stats.MaxMethodComplexity})");
+            }
+            else if (stats.MaxMethodComplexity > 10)
+            {
+                score -= 10;
+                issues.Add("High method complexity");
+            }
+
+            // Deduct for poor documentation
+            var totalMembers = stats.DocumentedMembers + stats.UndocumentedMembers;
+            if (totalMembers > 0)
+            {
+                if (stats.DocumentationCoverage < 30)
+                {
+                    score -= 20;
+                    issues.Add("Very poor documentation");
+                }
+                else if (stats.DocumentationCoverage < 50)
+                {
+                    score -= 15;
+                    issues.Add("Poor documentation");
+                }
+                else if (stats.DocumentationCoverage < 70)
+                {
+                    score -= 10;
+                    issues.Add("Fair documentation");
+                }
+            }
+
+            // Bonus for good comment ratio
+            if (stats.CodeLines > 0)
+            {
+                var commentRatio = stats.CommentLines * 100.0 / stats.CodeLines;
+                if (commentRatio > 20 && commentRatio < 50)
+                {
+                    score = Math.Min(100, score + 5);
+                }
+            }
+
+            score = Math.Max(0, score);
+
+            string rating;
+            if (score >= 90)
+                rating = "Excellent ⭐⭐⭐⭐⭐";
+            else if (score >= 75)
+                rating = "Good ⭐⭐⭐⭐";
+            else if (score >= 60)
+                rating = "Fair ⭐⭐⭐";
+            else if (score >= 40)
+                rating = "Poor ⭐⭐";
+            else
+                rating = "Needs Improvement ⭐";
+
+            var details = issues.Any() ? string.Join(", ", issues) : "No major issues";
+
+            return (score, rating, details);
+        }
+
+        // Helper: Generate recommendations
+        private static List<string> GenerateRecommendations(FileStatistics stats)
+        {
+            var recommendations = new List<string>();
+
+            // File size recommendations
+            if (stats.TotalLines > 1000)
+            {
+                recommendations.Add("🔶 **Large File:** Consider splitting this file into multiple smaller files for better maintainability.");
+            }
+
+            // Complexity recommendations
+            if (stats.MethodCount > 0)
+            {
+                var avgComplexity = stats.CyclomaticComplexity / (double)stats.MethodCount;
+                if (avgComplexity > 10)
+                {
+                    recommendations.Add("🔶 **High Complexity:** Average method complexity is high. Refactor complex methods into smaller units.");
+                }
+            }
+
+            if (stats.MaxMethodComplexity > 15)
+            {
+                recommendations.Add($"🔴 **Complex Method:** `{stats.MostComplexMethod}` has complexity {stats.MaxMethodComplexity}. Break it down into smaller methods.");
+            }
+
+            // Documentation recommendations
+            var totalMembers = stats.DocumentedMembers + stats.UndocumentedMembers;
+            if (totalMembers > 0 && stats.DocumentationCoverage < 70)
+            {
+                recommendations.Add($"📚 **Documentation:** Add XML comments for {stats.UndocumentedMembers} undocumented public members.");
+            }
+
+            // Code density recommendations
+            if (stats.CodeLines > 0)
+            {
+                var commentRatio = stats.CommentLines * 100.0 / stats.CodeLines;
+                if (commentRatio < 5)
+                {
+                    recommendations.Add("💬 **Comments:** Consider adding more inline comments to explain complex logic.");
+                }
+            }
+
+            // Type count recommendations
+            var totalTypes = stats.ClassCount + stats.InterfaceCount + stats.StructCount + stats.EnumCount;
+            if (totalTypes > 5)
+            {
+                recommendations.Add($"🧩 **Multiple Types:** File contains {totalTypes} types. Consider one type per file for better organization.");
+            }
+
+            // Member count recommendations
+            var totalTypeMembers = stats.MethodCount + stats.PropertyCount + stats.FieldCount;
+            if (totalTypes > 0)
+            {
+                var avgMembersPerType = totalTypeMembers / (double)totalTypes;
+                if (avgMembersPerType > 30)
+                {
+                    recommendations.Add("🔧 **Large Types:** Some types have many members. Consider extracting related functionality.");
+                }
+            }
+
+            return recommendations;
+        }
+
+        #endregion
     }
 }

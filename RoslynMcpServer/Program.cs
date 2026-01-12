@@ -103,12 +103,19 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<SecurityIssueAnalyzer>();
                 builder.Services.AddSingleton<DuplicateCodeAnalyzer>();
                 builder.Services.AddSingleton<DocumentationAnalyzer>();
+                builder.Services.AddSingleton<TODOCommentAnalyzer>();
+                builder.Services.AddSingleton<LargeFileAnalyzer>();
+                builder.Services.AddSingleton<DeprecatedAPIAnalyzer>();
+                builder.Services.AddSingleton<FileStatisticsAnalyzer>();
                 builder.Services.AddSingleton<SecurityValidator>();
                 builder.Services.AddSingleton<DiagnosticLogger>();
                 builder.Services.AddSingleton<IncrementalAnalyzer>();
                 builder.Services.AddSingleton<IPersistentCache, FilePersistentCache>();
                 builder.Services.AddSingleton<MultiLevelCacheManager>();
                 builder.Services.AddMemoryCache();
+
+                // Register HeartbeatService as a background service
+                builder.Services.AddHostedService<HeartbeatService>();
 
                 // Configure MCP server
                 builder.Services

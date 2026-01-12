@@ -166,6 +166,19 @@ The server uses Serilog for structured logging with dual output:
 - `appsettings.Development.json` - Development settings
 - Logs are written asynchronously with automatic daily rolling
 
+**Heartbeat Service**:
+- Background service logs periodic heartbeat messages every 15-30 minutes (default: 20 minutes)
+- Confirms the MCP server is running and provides health metrics:
+  - Uptime since server start
+  - Memory usage (working set in MB)
+  - Thread count
+  - Current timestamp
+- Configure interval via environment variable: `HEARTBEAT_INTERVAL_MINUTES` (5-60 minutes)
+- Heartbeat logs include:
+  ```
+  💓 HEARTBEAT #1 | Uptime: 0d 0h 20m | Memory: 125.50 MB | Threads: 18 | Time: 2026-01-12 09:30:00 UTC
+  ```
+
 ### Working with Roslyn
 
 When analyzing code:
