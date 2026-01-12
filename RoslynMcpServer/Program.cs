@@ -110,6 +110,9 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<MultiLevelCacheManager>();
                 builder.Services.AddMemoryCache();
 
+                // Register HeartbeatService as a background service
+                builder.Services.AddHostedService<HeartbeatService>();
+
                 // Configure MCP server
                 builder.Services
                     .AddMcpServer()
