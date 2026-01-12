@@ -3,7 +3,9 @@
 This document lists all available MCP tools provided by RoslynCSMCP server for C# code analysis.
 
 > **Last Updated**: 2026-01-12
-> **Total Tools**: 24
+> **Total Tools**: 34
+>
+> **Recent Additions**: FindTODOComments, FindLargeFiles, FindDeprecatedAPIs, GetFileStatistics, AnalyzePackages, GetTestCoverage, GetChangeImpact, FindPerformanceIssues, AnalyzeNamingConventions, AnalyzeAPIChanges
 
 ---
 
@@ -230,7 +232,35 @@ Use FindReferences tool with:
 
 ---
 
-### 19. AnalyzeDependencies
+### 19. AnalyzePackages
+**Description**: Comprehensive NuGet package analysis including version management, update detection, security audits, and usage tracking
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `checkUpdates` (bool, optional): Check for available package updates (default: true)
+- `checkVulnerabilities` (bool, optional): Check for security vulnerabilities (default: true)
+- `analyzeUsage` (bool, optional): Analyze package usage to detect unused packages (default: true)
+
+**Example Usage**:
+```
+Use AnalyzePackages tool with:
+- solutionPath: "D:\MyProject\MyProject.sln"
+- format: "normal"
+- checkUpdates: true
+```
+
+**Features**:
+- Lists all NuGet packages across all projects
+- Detects outdated packages and available updates
+- Identifies version conflicts between projects
+- Finds unused packages (packages with no namespace usage)
+- Checks for security vulnerabilities (placeholder - requires external API)
+- Recommends version standardization
+
+---
+
+### 20. AnalyzeDependencies
 **Description**: Analyze project dependencies and symbol usage patterns
 
 **Parameters**:
@@ -239,7 +269,7 @@ Use FindReferences tool with:
 
 ---
 
-### 20. GetDependencyGraph
+### 21. GetDependencyGraph
 **Description**: Get project dependency graph in various formats
 
 **Parameters**:
@@ -251,7 +281,7 @@ Use FindReferences tool with:
 
 ## 🔧 Development Tools
 
-### 21. GetCallHierarchy
+### 22. GetCallHierarchy
 **Description**: Get call hierarchy showing callers and callees for a method
 
 **Parameters**:
@@ -262,7 +292,7 @@ Use FindReferences tool with:
 
 ---
 
-### 22. GetCompilationErrors
+### 23. GetCompilationErrors
 **Description**: Get compilation errors and warnings from solution to quickly identify build issues without running full build
 
 **Parameters**:
@@ -274,7 +304,7 @@ Use FindReferences tool with:
 
 ---
 
-### 23. FindTestsForType
+### 24. FindTestsForType
 **Description**: Find test classes and methods for a given type
 
 **Parameters**:
@@ -284,9 +314,149 @@ Use FindReferences tool with:
 
 ---
 
+### 25. GetTestCoverage
+**Description**: Comprehensive test coverage analysis - identify untested code, calculate coverage percentages, and assess high-risk areas
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `scope` (string, optional): Scope: public (only public types), all (all types). Default: public
+- `groupBy` (string, optional): Group by: project, namespace. Default: project
+
+**Example Usage**:
+```
+Use GetTestCoverage tool with:
+- solutionPath: "D:\MyProject\MyProject.sln"
+- format: "normal"
+- groupBy: "project"
+```
+
+**Features**:
+- Analyzes test coverage for all types in non-test projects
+- Calculates type-level and member-level coverage percentages
+- Identifies uncovered types and methods
+- Assesses risk levels based on complexity and test coverage:
+  - **Critical Risk**: High complexity, no tests
+  - **High Risk**: Medium complexity, no tests
+  - **Medium Risk**: Low complexity without tests or high complexity with partial tests
+  - **Low Risk**: Well-tested code
+- Groups coverage statistics by project or namespace
+- Identifies high-risk areas requiring immediate testing attention
+- Calculates cyclomatic complexity for each type and method
+
+**Output Information**:
+- Overall type coverage percentage
+- Overall member coverage percentage
+- Coverage breakdown by project/namespace
+- List of high-risk uncovered types
+- Detailed member coverage for critical types
+- Risk analysis summary
+
+---
+
+### 26. GetChangeImpact
+**Description**: Analyze the impact of changing a symbol - identify all dependent code, assess risk level, and get actionable recommendations before refactoring
+
+**Parameters**:
+- `symbolName` (string): Symbol name to analyze (class, method, property, etc.)
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `maxDepth` (int, optional): Maximum depth for indirect dependency analysis (default: 3)
+- `includeIndirectReferences` (bool, optional): Include indirect references (default: true)
+
+**Example Usage**:
+```
+Use GetChangeImpact tool with:
+- symbolName: "UserService"
+- solutionPath: "D:\MyProject\MyProject.sln"
+- format: "normal"
+- maxDepth: 3
+```
+
+**Features**:
+- Identifies all code that references the target symbol
+- Distinguishes between direct and indirect dependencies
+- Builds dependency chains showing how changes propagate
+- Calculates impact radius (files, projects affected)
+- Assesses risk level (Critical/High/Medium/Low) based on:
+  - Public API exposure
+  - Number of references
+  - Cross-project dependencies
+  - Interface/abstract class changes
+- Detects breaking changes automatically
+- Provides actionable recommendations for safe refactoring
+
+**Risk Assessment Criteria**:
+- **Critical**: Public API with 20+ references
+- **High**: 50+ references or 5+ projects impacted
+- **Medium**: 10+ references or 2+ projects impacted
+- **Low**: Limited impact, internal use only
+
+**Output Information**:
+- Target symbol details (name, kind, accessibility, location)
+- Impact statistics (direct/indirect references, impacted projects/files)
+- Impact breakdown by project
+- Dependency chains (showing propagation paths)
+- Risk level with detailed reasoning
+- Breaking change detection and reasons
+- Specific recommendations based on impact analysis
+- Code locations for all impacted symbols
+
+**Recommendations Include**:
+- Versioning and deprecation strategies for public APIs
+- Migration guide suggestions for high-impact changes
+- Team coordination for cross-project changes
+- Testing strategies for breaking changes
+- Alternative approaches (extension methods, default implementations)
+
+---
+
 ## 🚀 Utility Tools
 
-### 24. BatchQuery
+### 27. FindTODOComments
+**Description**: Find all TODO, FIXME, HACK, and NOTE comments across the solution
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary, normal, detailed (default: normal)
+- `commentTypes` (string, optional): Comment types to find (comma-separated): TODO, FIXME, HACK, NOTE, BUG, XXX (default: all)
+- `includeFilePath` (bool, optional): Include file paths in results (default: true)
+
+---
+
+### 28. FindLargeFiles
+**Description**: Find large source files that may need refactoring
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary, normal, detailed (default: normal)
+- `minLines` (int, optional): Minimum lines to consider large (default: 500)
+- `includeMetrics` (bool, optional): Include code metrics for large files (default: true)
+
+---
+
+### 29. FindDeprecatedAPIs
+**Description**: Find usages of deprecated/obsolete APIs (both internal and .NET framework)
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary, normal, detailed (default: normal)
+- `includeFrameworkAPIs` (bool, optional): Include .NET framework obsolete APIs (default: true)
+- `groupByAPI` (bool, optional): Group results by API instead of location (default: true)
+
+---
+
+### 30. GetFileStatistics
+**Description**: Get detailed statistics for a specific C# source file
+
+**Parameters**:
+- `filePath` (string): Path to C# source file (.cs)
+- `includeComplexity` (bool, optional): Include complexity metrics (default: true)
+- `includeTypeInfo` (bool, optional): Include type and member counts (default: true)
+
+---
+
+### 31. BatchQuery
 **Description**: Execute multiple queries in a single batch request
 
 **Parameters**:
@@ -311,6 +481,156 @@ Use FindReferences tool with:
   }
 ]
 ```
+
+### 32. FindPerformanceIssues
+**Description**: Find common performance anti-patterns and issues in C# code - detects LINQ misuse, string concatenation in loops, sync-over-async patterns, IDisposable not disposed, and exception handling anti-patterns
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `issueTypes` (string, optional): Comma-separated issue types to check: LinqMisuse, StringConcatenation, SyncOverAsync, DisposableNotDisposed, ExceptionHandling. Default: all
+
+**Example Usage**:
+```
+Use FindPerformanceIssues tool with:
+- solutionPath: "D:\MyProject\MyProject.sln"
+- format: "normal"
+- issueTypes: "LinqMisuse,SyncOverAsync"
+```
+
+**Features**:
+- Detects LINQ misuse patterns (Count() vs Any(), multiple ToList() calls, unnecessary materialization)
+- Identifies string concatenation in loops (recommends StringBuilder)
+- Finds sync-over-async anti-patterns (.Result, .Wait() in async methods)
+- Detects IDisposable objects not properly disposed
+- Identifies exception handling anti-patterns (empty catch blocks, catching base Exception)
+- Provides severity levels (Critical, High, Medium, Low)
+- Estimates performance impact (0-10 scale)
+- Includes fix recommendations and code examples
+- Groups issues by type, project, file, and severity
+- Shows line numbers and code context
+
+**Issue Types**:
+- **LinqMisuse**: Inefficient LINQ patterns that enumerate collections unnecessarily
+- **StringConcatenation**: String += in loops creating many intermediate objects
+- **SyncOverAsync**: Blocking calls (.Result, .Wait) in async methods causing deadlocks
+- **DisposableNotDisposed**: IDisposable objects without using statements causing resource leaks
+- **ExceptionHandling**: Empty catch blocks and improper exception handling hiding bugs
+
+**Output Formats**:
+- **summary**: Key metrics, issue counts by severity, top issue types
+- **normal**: Statistics, issues by type/project, top 10 critical and high severity issues
+- **detailed**: Complete analysis with all issues grouped by severity and type, file statistics, recommendations
+
+### 33. AnalyzeNamingConventions
+**Description**: Analyze C# naming convention compliance and detect violations - checks interfaces, types, methods, properties, fields, parameters, and type parameters against C# naming standards
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `violationTypes` (string, optional): Comma-separated violation types to check: InterfaceNaming, TypeNaming, MethodNaming, PropertyNaming, FieldNaming, ParameterNaming, TypeParameterNaming. Default: all
+- `scope` (string, optional): Analysis scope: all, public, internal. Default: all
+
+**Example Usage**:
+```
+Use AnalyzeNamingConventions tool with:
+- solutionPath: "D:\MyProject\MyProject.sln"
+- format: "normal"
+- violationTypes: "InterfaceNaming,FieldNaming"
+- scope: "public"
+```
+
+**Features**:
+- Checks interface naming (should start with 'I' followed by PascalCase)
+- Validates type naming (PascalCase for classes, structs, enums, delegates)
+- Verifies method naming (PascalCase)
+- Checks property naming (PascalCase)
+- Validates field naming (private/protected: _camelCase, public: PascalCase, constants: PascalCase or UPPER_CASE)
+- Checks parameter naming (camelCase)
+- Validates type parameter naming (TPascalCase - starts with 'T')
+- Provides suggested names for violations
+- Severity classification (High, Medium, Low)
+- Calculates compliance score (percentage of symbols following conventions)
+- Groups violations by type, symbol kind, project, and file
+- Scope filtering (all/public/internal symbols)
+
+**Violation Types**:
+- **InterfaceNaming**: Interfaces not starting with 'I' (e.g., IUserService)
+- **TypeNaming**: Types not using PascalCase (e.g., UserService, OrderProcessor)
+- **MethodNaming**: Methods not using PascalCase (e.g., GetUser, ProcessOrder)
+- **PropertyNaming**: Properties not using PascalCase (e.g., UserName, OrderDate)
+- **PrivateFieldNaming**: Private/protected fields not using _camelCase (e.g., _userName, _orderDate)
+- **PublicFieldNaming**: Public fields not using PascalCase
+- **ConstantNaming**: Constants not using PascalCase or UPPER_CASE
+- **ParameterNaming**: Parameters not using camelCase (e.g., userName, orderDate)
+- **TypeParameterNaming**: Type parameters not using TPascalCase (e.g., TKey, TValue, TEntity)
+
+**Output Formats**:
+- **summary**: Key metrics, violation counts by severity, compliance score, top violation types
+- **normal**: Statistics, violations by type/symbol kind, top 10 high and medium severity violations with suggestions
+- **detailed**: Complete analysis with all violations grouped by severity and type, convention guidelines, file statistics
+
+### 34. AnalyzeAPIChanges
+**Description**: Analyze API changes between two versions of a solution - detect breaking changes, additions, removals, and get semantic versioning recommendations for proper version management
+
+**Parameters**:
+- `oldSolutionPath` (string): Path to old version solution file (.sln)
+- `newSolutionPath` (string): Path to new version solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `oldVersionLabel` (string, optional): Label for old version (e.g., 'v1.0.0', 'main'). Default: 'Old'
+- `newVersionLabel` (string, optional): Label for new version (e.g., 'v2.0.0', 'develop'). Default: 'New'
+- `includeInternal` (bool, optional): Include internal API changes (default: false)
+
+**Example Usage**:
+```
+Use AnalyzeAPIChanges tool with:
+- oldSolutionPath: "D:\MyProject\v1.0.0\MyProject.sln"
+- newSolutionPath: "D:\MyProject\v2.0.0\MyProject.sln"
+- format: "normal"
+- oldVersionLabel: "v1.0.0"
+- newVersionLabel: "v2.0.0"
+- includeInternal: false
+```
+
+**Features**:
+- Detects added symbols (new APIs)
+- Identifies removed symbols (breaking changes)
+- Tracks method signature changes (parameters, return types)
+- Monitors accessibility changes (public/internal/protected/private)
+- Detects type modifier changes (abstract, sealed)
+- Tracks base type changes in inheritance hierarchies
+- Monitors property type changes
+- Classifies changes by impact level (Breaking/NonBreaking/Internal)
+- Assigns severity levels (Critical/High/Medium/Low)
+- Provides migration guidance for each change
+- Calculates semantic versioning recommendations (Major/Minor/Patch)
+- Groups changes by type, symbol kind, and namespace
+- Identifies affected areas for each change
+- Compares public API surface between versions
+- Optional internal API comparison
+
+**Change Types Detected**:
+- **Added**: New symbols introduced in the new version
+- **Removed**: Symbols deleted from the old version (breaking)
+- **Modified**: General modifications to existing symbols
+- **AccessibilityChanged**: Changes in public/internal/private access
+- **SignatureChanged**: Method parameter or return type changes (breaking)
+
+**Impact Levels**:
+- **Breaking**: Requires major version bump - removes APIs, changes signatures, reduces accessibility
+- **NonBreaking**: Requires minor version bump - adds new APIs without breaking existing ones
+- **Internal**: Requires patch version bump - internal changes only
+
+**Semantic Versioning Guidance**:
+- **Major (X.0.0)**: Breaking changes detected - removed symbols, signature changes, accessibility reductions
+- **Minor (x.X.0)**: New symbols added without breaking changes
+- **Patch (x.x.X)**: Only internal changes, no public API modifications
+- **None**: No API changes detected
+
+**Output Formats**:
+- **summary**: Key metrics, breaking/non-breaking counts, semantic versioning recommendation
+- **normal**: Statistics, changes by type/symbol kind, top 10 breaking changes and additions with migration guidance
+- **detailed**: Complete analysis with all changes grouped by impact level, full migration summary, comprehensive change details
 
 ---
 
