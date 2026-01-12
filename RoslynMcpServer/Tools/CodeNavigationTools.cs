@@ -875,6 +875,42 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Get comprehensive statistics for a C# file (LOC, complexity, dependencies, documentation coverage)")]
+        public static async Task<string> GetFileStatistics(
+            [Description("Path to C# source file (.cs)")] string filePath,
+            [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+            string format = "normal",
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<FileStatisticsAnalyzer>>();
+
+            try
+            {
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<FileStatisticsAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: File statistics analyzer service not available.";
+                }
+
+                // Perform analysis
+                var results = await analyzer.AnalyzeFileStatisticsAsync(filePath);
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatFileStatisticsSummary(results),
+                    "detailed" => FormatFileStatisticsDetailed(results),
+                    _ => FormatFileStatisticsNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error getting file statistics");
+                return $"Error: An unexpected error occurred while getting file statistics: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -5100,5 +5136,570 @@ namespace RoslynMcpServer.Tools
 
             output.AppendLine();
         }
+
+        #region GetFileStatistics Formatting
+
+        /// <summary>
+        /// Format file statistics in summary mode (key metrics only)
+        /// </summary>
+        private static string FormatFileStatisticsSummary(FileStatisticsResults results)
+        {
+            var output = new StringBuilder();
+
+            if (results.Statistics == null)
+            {
+                output.AppendLine("❌ **No statistics available**");
+                if (results.Warnings.Any())
+                {
+                    output.AppendLine();
+                    output.AppendLine("**Warnings:**");
+                    foreach (var warning in results.Warnings)
+                    {
+                        output.AppendLine($"  • {warning.Context}: {warning.Message}");
+                    }
+                }
+                return output.ToString();
+            }
+
+            var stats = results.Statistics;
+
+            output.AppendLine($"# File Statistics Summary: {stats.FileName}");
+            output.AppendLine();
+
+            // Key metrics
+            output.AppendLine("## 📊 Key Metrics");
+            output.AppendLine($"**Total Lines:** {stats.TotalLines:N0} ({FormatFileSize(stats.SizeInBytes)})");
+            output.AppendLine($"  • Code: {stats.CodeLines:N0} ({GetPercentage(stats.CodeLines, stats.TotalLines)})");
+            output.AppendLine($"  • Comments: {stats.CommentLines:N0} ({GetPercentage(stats.CommentLines, stats.TotalLines)})");
+            output.AppendLine($"  • Blank: {stats.BlankLines:N0} ({GetPercentage(stats.BlankLines, stats.TotalLines)})");
+            output.AppendLine();
+
+            output.AppendLine("## 🧩 Code Elements");
+            var totalTypes = stats.ClassCount + stats.InterfaceCount + stats.StructCount + stats.EnumCount;
+            output.AppendLine($"**Types:** {totalTypes} (Classes: {stats.ClassCount}, Interfaces: {stats.InterfaceCount}, Structs: {stats.StructCount}, Enums: {stats.EnumCount})");
+            output.AppendLine($"**Members:** Methods: {stats.MethodCount}, Properties: {stats.PropertyCount}, Fields: {stats.FieldCount}");
+            output.AppendLine();
+
+            output.AppendLine("## 🔀 Complexity");
+            output.AppendLine($"**Total Cyclomatic Complexity:** {stats.CyclomaticComplexity}");
+            if (stats.MethodCount > 0)
+            {
+                var avgComplexity = stats.CyclomaticComplexity / (double)stats.MethodCount;
+                output.AppendLine($"**Average per Method:** {avgComplexity:F1}");
+            }
+            if (!string.IsNullOrEmpty(stats.MostComplexMethod))
+            {
+                output.AppendLine($"**Most Complex Method:** `{stats.MostComplexMethod}` (complexity: {stats.MaxMethodComplexity})");
+            }
+            output.AppendLine();
+
+            output.AppendLine("## 📚 Documentation");
+            var totalMembers = stats.DocumentedMembers + stats.UndocumentedMembers;
+            if (totalMembers > 0)
+            {
+                output.AppendLine($"**Coverage:** {stats.DocumentationCoverage:F1}% ({stats.DocumentedMembers}/{totalMembers} public members documented)");
+            }
+            else
+            {
+                output.AppendLine("**Coverage:** No public members to document");
+            }
+
+            return output.ToString();
+        }
+
+        /// <summary>
+        /// Format file statistics in normal mode (balanced view)
+        /// </summary>
+        private static string FormatFileStatisticsNormal(FileStatisticsResults results)
+        {
+            var output = new StringBuilder();
+
+            if (results.Statistics == null)
+            {
+                output.AppendLine("❌ **No statistics available**");
+                if (results.Warnings.Any())
+                {
+                    output.AppendLine();
+                    output.AppendLine("**Warnings:**");
+                    foreach (var warning in results.Warnings)
+                    {
+                        output.AppendLine($"  • {warning.Context}: {warning.Message}");
+                    }
+                }
+                return output.ToString();
+            }
+
+            var stats = results.Statistics;
+
+            output.AppendLine($"# File Statistics: {stats.FileName}");
+            output.AppendLine($"**Path:** {stats.FilePath}");
+            if (!string.IsNullOrEmpty(stats.ProjectName) && stats.ProjectName != "(standalone)")
+            {
+                output.AppendLine($"**Project:** {stats.ProjectName}");
+            }
+            output.AppendLine();
+
+            // Line counts
+            output.AppendLine("## 📏 Line Counts");
+            output.AppendLine($"**Total Lines:** {stats.TotalLines:N0}");
+            output.AppendLine($"**Code Lines:** {stats.CodeLines:N0} ({GetPercentage(stats.CodeLines, stats.TotalLines)})");
+            output.AppendLine($"**Comment Lines:** {stats.CommentLines:N0} ({GetPercentage(stats.CommentLines, stats.TotalLines)})");
+            output.AppendLine($"**Blank Lines:** {stats.BlankLines:N0} ({GetPercentage(stats.BlankLines, stats.TotalLines)})");
+            output.AppendLine($"**File Size:** {FormatFileSize(stats.SizeInBytes)}");
+            output.AppendLine();
+
+            // Code elements breakdown
+            output.AppendLine("## 🧩 Code Elements");
+            var totalTypes = stats.ClassCount + stats.InterfaceCount + stats.StructCount + stats.EnumCount;
+            output.AppendLine($"**Total Types:** {totalTypes}");
+            if (stats.ClassCount > 0) output.AppendLine($"  • Classes: {stats.ClassCount}");
+            if (stats.InterfaceCount > 0) output.AppendLine($"  • Interfaces: {stats.InterfaceCount}");
+            if (stats.StructCount > 0) output.AppendLine($"  • Structs: {stats.StructCount}");
+            if (stats.EnumCount > 0) output.AppendLine($"  • Enums: {stats.EnumCount}");
+            output.AppendLine();
+
+            output.AppendLine($"**Total Members:** {stats.MethodCount + stats.PropertyCount + stats.FieldCount}");
+            if (stats.MethodCount > 0) output.AppendLine($"  • Methods: {stats.MethodCount}");
+            if (stats.PropertyCount > 0) output.AppendLine($"  • Properties: {stats.PropertyCount}");
+            if (stats.FieldCount > 0) output.AppendLine($"  • Fields: {stats.FieldCount}");
+            output.AppendLine();
+
+            // Complexity details
+            output.AppendLine("## 🔀 Complexity Metrics");
+            output.AppendLine($"**Total Cyclomatic Complexity:** {stats.CyclomaticComplexity}");
+            if (stats.MethodCount > 0)
+            {
+                var avgComplexity = stats.CyclomaticComplexity / (double)stats.MethodCount;
+                output.AppendLine($"**Average per Method:** {avgComplexity:F1}");
+                output.AppendLine($"**Max Method Complexity:** {stats.MaxMethodComplexity}");
+            }
+            if (!string.IsNullOrEmpty(stats.MostComplexMethod))
+            {
+                output.AppendLine($"**Most Complex Method:** `{stats.MostComplexMethod}` (complexity: {stats.MaxMethodComplexity})");
+
+                var complexityRating = GetComplexityRating(stats.MaxMethodComplexity);
+                output.AppendLine($"**Complexity Rating:** {complexityRating}");
+            }
+            output.AppendLine();
+
+            // Dependencies
+            output.AppendLine("## 📦 Dependencies");
+            output.AppendLine($"**Using Directives:** {stats.UsingDirectivesCount}");
+            if (stats.Namespaces.Any())
+            {
+                var topNamespaces = stats.Namespaces.Take(10).ToList();
+                output.AppendLine($"**Top Namespaces (showing {topNamespaces.Count}):**");
+                foreach (var ns in topNamespaces)
+                {
+                    output.AppendLine($"  • {ns}");
+                }
+                if (stats.Namespaces.Count > 10)
+                {
+                    output.AppendLine($"  ... and {stats.Namespaces.Count - 10} more");
+                }
+            }
+            output.AppendLine();
+
+            // Documentation coverage
+            output.AppendLine("## 📚 Documentation Coverage");
+            var totalMembers = stats.DocumentedMembers + stats.UndocumentedMembers;
+            if (totalMembers > 0)
+            {
+                output.AppendLine($"**Coverage:** {stats.DocumentationCoverage:F1}%");
+                output.AppendLine($"**Documented:** {stats.DocumentedMembers} public members");
+                output.AppendLine($"**Undocumented:** {stats.UndocumentedMembers} public members");
+
+                var docRating = GetDocumentationRating(stats.DocumentationCoverage);
+                output.AppendLine($"**Rating:** {docRating}");
+            }
+            else
+            {
+                output.AppendLine("**Coverage:** No public members found");
+            }
+
+            return output.ToString();
+        }
+
+        /// <summary>
+        /// Format file statistics in detailed mode (comprehensive view with recommendations)
+        /// </summary>
+        private static string FormatFileStatisticsDetailed(FileStatisticsResults results)
+        {
+            var output = new StringBuilder();
+
+            if (results.Statistics == null)
+            {
+                output.AppendLine("❌ **No statistics available**");
+                if (results.Warnings.Any())
+                {
+                    output.AppendLine();
+                    output.AppendLine("**Warnings:**");
+                    foreach (var warning in results.Warnings)
+                    {
+                        output.AppendLine($"  • {warning.Context}: {warning.Message}");
+                    }
+                }
+                return output.ToString();
+            }
+
+            var stats = results.Statistics;
+
+            output.AppendLine($"# Detailed File Statistics: {stats.FileName}");
+            output.AppendLine($"**Full Path:** `{stats.FilePath}`");
+            if (!string.IsNullOrEmpty(stats.ProjectName) && stats.ProjectName != "(standalone)")
+            {
+                output.AppendLine($"**Project:** {stats.ProjectName}");
+            }
+            output.AppendLine();
+
+            // Overall quality score
+            var qualityScore = CalculateQualityScore(stats);
+            output.AppendLine("## ⭐ Overall Quality Score");
+            output.AppendLine($"**Score:** {qualityScore.Score}/100 - {qualityScore.Rating}");
+            output.AppendLine($"**Details:** {qualityScore.Details}");
+            output.AppendLine();
+
+            // Line counts with detailed breakdown
+            output.AppendLine("## 📏 Line Analysis");
+            output.AppendLine($"**Total Lines:** {stats.TotalLines:N0}");
+            output.AppendLine($"**Code Lines:** {stats.CodeLines:N0} ({GetPercentage(stats.CodeLines, stats.TotalLines)})");
+            output.AppendLine($"**Comment Lines:** {stats.CommentLines:N0} ({GetPercentage(stats.CommentLines, stats.TotalLines)})");
+            output.AppendLine($"**Blank Lines:** {stats.BlankLines:N0} ({GetPercentage(stats.BlankLines, stats.TotalLines)})");
+            output.AppendLine($"**File Size:** {FormatFileSize(stats.SizeInBytes)}");
+
+            var commentRatio = stats.TotalLines > 0 ? (stats.CommentLines * 100.0 / stats.CodeLines) : 0;
+            output.AppendLine($"**Comment/Code Ratio:** {commentRatio:F1}%");
+            output.AppendLine();
+
+            // Code elements detailed breakdown
+            output.AppendLine("## 🧩 Code Elements Breakdown");
+            var totalTypes = stats.ClassCount + stats.InterfaceCount + stats.StructCount + stats.EnumCount;
+            output.AppendLine($"**Total Types:** {totalTypes}");
+            output.AppendLine($"  • Classes: {stats.ClassCount}");
+            output.AppendLine($"  • Interfaces: {stats.InterfaceCount}");
+            output.AppendLine($"  • Structs: {stats.StructCount}");
+            output.AppendLine($"  • Enums: {stats.EnumCount}");
+            output.AppendLine();
+
+            var totalMembers = stats.MethodCount + stats.PropertyCount + stats.FieldCount;
+            output.AppendLine($"**Total Members:** {totalMembers}");
+            output.AppendLine($"  • Methods: {stats.MethodCount}");
+            output.AppendLine($"  • Properties: {stats.PropertyCount}");
+            output.AppendLine($"  • Fields: {stats.FieldCount}");
+
+            if (totalTypes > 0)
+            {
+                var avgMembersPerType = totalMembers / (double)totalTypes;
+                output.AppendLine($"**Average Members per Type:** {avgMembersPerType:F1}");
+            }
+            output.AppendLine();
+
+            // Complexity detailed analysis
+            output.AppendLine("## 🔀 Complexity Analysis");
+            output.AppendLine($"**Total Cyclomatic Complexity:** {stats.CyclomaticComplexity}");
+            if (stats.MethodCount > 0)
+            {
+                var avgComplexity = stats.CyclomaticComplexity / (double)stats.MethodCount;
+                output.AppendLine($"**Average per Method:** {avgComplexity:F1}");
+                output.AppendLine($"**Max Method Complexity:** {stats.MaxMethodComplexity}");
+
+                if (!string.IsNullOrEmpty(stats.MostComplexMethod))
+                {
+                    output.AppendLine($"**Most Complex Method:** `{stats.MostComplexMethod}` (complexity: {stats.MaxMethodComplexity})");
+                }
+
+                var complexityRating = GetComplexityRating(stats.MaxMethodComplexity);
+                output.AppendLine($"**Complexity Rating:** {complexityRating}");
+
+                // Recommendations based on complexity
+                if (stats.MaxMethodComplexity > 10)
+                {
+                    output.AppendLine();
+                    output.AppendLine("⚠️ **Complexity Warning:**");
+                    output.AppendLine($"  The method `{stats.MostComplexMethod}` has high complexity ({stats.MaxMethodComplexity}).");
+                    output.AppendLine("  Consider refactoring into smaller, more maintainable methods.");
+                }
+            }
+            output.AppendLine();
+
+            // Dependencies - complete list
+            output.AppendLine("## 📦 Dependencies");
+            output.AppendLine($"**Using Directives Count:** {stats.UsingDirectivesCount}");
+            if (stats.Namespaces.Any())
+            {
+                output.AppendLine($"**All Namespaces ({stats.Namespaces.Count}):**");
+
+                // Group namespaces by category
+                var systemNs = stats.Namespaces.Where(ns => ns.StartsWith("System")).ToList();
+                var microsoftNs = stats.Namespaces.Where(ns => ns.StartsWith("Microsoft") && !ns.StartsWith("System")).ToList();
+                var otherNs = stats.Namespaces.Where(ns => !ns.StartsWith("System") && !ns.StartsWith("Microsoft")).ToList();
+
+                if (systemNs.Any())
+                {
+                    output.AppendLine($"  **System ({systemNs.Count}):**");
+                    foreach (var ns in systemNs)
+                    {
+                        output.AppendLine($"    • {ns}");
+                    }
+                }
+
+                if (microsoftNs.Any())
+                {
+                    output.AppendLine($"  **Microsoft ({microsoftNs.Count}):**");
+                    foreach (var ns in microsoftNs)
+                    {
+                        output.AppendLine($"    • {ns}");
+                    }
+                }
+
+                if (otherNs.Any())
+                {
+                    output.AppendLine($"  **Other ({otherNs.Count}):**");
+                    foreach (var ns in otherNs)
+                    {
+                        output.AppendLine($"    • {ns}");
+                    }
+                }
+            }
+            output.AppendLine();
+
+            // Documentation coverage detailed
+            output.AppendLine("## 📚 Documentation Coverage");
+            var totalDocMembers = stats.DocumentedMembers + stats.UndocumentedMembers;
+            if (totalDocMembers > 0)
+            {
+                output.AppendLine($"**Coverage:** {stats.DocumentationCoverage:F1}%");
+                output.AppendLine($"**Documented Members:** {stats.DocumentedMembers}");
+                output.AppendLine($"**Undocumented Members:** {stats.UndocumentedMembers}");
+                output.AppendLine($"**Total Public Members:** {totalDocMembers}");
+
+                var docRating = GetDocumentationRating(stats.DocumentationCoverage);
+                output.AppendLine($"**Rating:** {docRating}");
+
+                if (stats.DocumentationCoverage < 80)
+                {
+                    output.AppendLine();
+                    output.AppendLine("💡 **Documentation Recommendation:**");
+                    output.AppendLine($"  Add XML documentation comments for {stats.UndocumentedMembers} undocumented public members.");
+                    output.AppendLine("  Good documentation improves code maintainability and IDE experience.");
+                }
+            }
+            else
+            {
+                output.AppendLine("**Coverage:** No public members found");
+            }
+            output.AppendLine();
+
+            // File quality recommendations
+            output.AppendLine("## 💡 Recommendations");
+            var recommendations = GenerateRecommendations(stats);
+            if (recommendations.Any())
+            {
+                foreach (var recommendation in recommendations)
+                {
+                    output.AppendLine($"  {recommendation}");
+                }
+            }
+            else
+            {
+                output.AppendLine("  ✅ No specific recommendations - file quality looks good!");
+            }
+
+            return output.ToString();
+        }
+
+        // Helper: Get percentage string
+        private static string GetPercentage(int part, int total)
+        {
+            if (total == 0) return "0%";
+            return $"{part * 100.0 / total:F1}%";
+        }
+
+        // Helper: Get complexity rating
+        private static string GetComplexityRating(int complexity)
+        {
+            if (complexity <= 5)
+                return "✅ Low - Easy to maintain";
+            if (complexity <= 10)
+                return "⚠️ Moderate - Acceptable complexity";
+            if (complexity <= 20)
+                return "🔶 High - Consider refactoring";
+            return "🔴 Very High - Refactoring recommended";
+        }
+
+        // Helper: Get documentation rating
+        private static string GetDocumentationRating(double coverage)
+        {
+            if (coverage >= 90)
+                return "✅ Excellent";
+            if (coverage >= 70)
+                return "✅ Good";
+            if (coverage >= 50)
+                return "⚠️ Fair";
+            if (coverage >= 30)
+                return "🔶 Poor";
+            return "🔴 Very Poor";
+        }
+
+        // Helper: Calculate overall quality score
+        private static (int Score, string Rating, string Details) CalculateQualityScore(FileStatistics stats)
+        {
+            int score = 100;
+            var issues = new List<string>();
+
+            // Deduct for size issues
+            if (stats.TotalLines > 1000)
+            {
+                score -= 10;
+                issues.Add("Large file (>1000 lines)");
+            }
+            else if (stats.TotalLines > 500)
+            {
+                score -= 5;
+                issues.Add("Moderately large file");
+            }
+
+            // Deduct for complexity
+            if (stats.MethodCount > 0)
+            {
+                var avgComplexity = stats.CyclomaticComplexity / (double)stats.MethodCount;
+                if (avgComplexity > 10)
+                {
+                    score -= 20;
+                    issues.Add("High average complexity");
+                }
+                else if (avgComplexity > 5)
+                {
+                    score -= 10;
+                    issues.Add("Moderate complexity");
+                }
+            }
+
+            if (stats.MaxMethodComplexity > 20)
+            {
+                score -= 15;
+                issues.Add($"Very complex method ({stats.MaxMethodComplexity})");
+            }
+            else if (stats.MaxMethodComplexity > 10)
+            {
+                score -= 10;
+                issues.Add("High method complexity");
+            }
+
+            // Deduct for poor documentation
+            var totalMembers = stats.DocumentedMembers + stats.UndocumentedMembers;
+            if (totalMembers > 0)
+            {
+                if (stats.DocumentationCoverage < 30)
+                {
+                    score -= 20;
+                    issues.Add("Very poor documentation");
+                }
+                else if (stats.DocumentationCoverage < 50)
+                {
+                    score -= 15;
+                    issues.Add("Poor documentation");
+                }
+                else if (stats.DocumentationCoverage < 70)
+                {
+                    score -= 10;
+                    issues.Add("Fair documentation");
+                }
+            }
+
+            // Bonus for good comment ratio
+            if (stats.CodeLines > 0)
+            {
+                var commentRatio = stats.CommentLines * 100.0 / stats.CodeLines;
+                if (commentRatio > 20 && commentRatio < 50)
+                {
+                    score = Math.Min(100, score + 5);
+                }
+            }
+
+            score = Math.Max(0, score);
+
+            string rating;
+            if (score >= 90)
+                rating = "Excellent ⭐⭐⭐⭐⭐";
+            else if (score >= 75)
+                rating = "Good ⭐⭐⭐⭐";
+            else if (score >= 60)
+                rating = "Fair ⭐⭐⭐";
+            else if (score >= 40)
+                rating = "Poor ⭐⭐";
+            else
+                rating = "Needs Improvement ⭐";
+
+            var details = issues.Any() ? string.Join(", ", issues) : "No major issues";
+
+            return (score, rating, details);
+        }
+
+        // Helper: Generate recommendations
+        private static List<string> GenerateRecommendations(FileStatistics stats)
+        {
+            var recommendations = new List<string>();
+
+            // File size recommendations
+            if (stats.TotalLines > 1000)
+            {
+                recommendations.Add("🔶 **Large File:** Consider splitting this file into multiple smaller files for better maintainability.");
+            }
+
+            // Complexity recommendations
+            if (stats.MethodCount > 0)
+            {
+                var avgComplexity = stats.CyclomaticComplexity / (double)stats.MethodCount;
+                if (avgComplexity > 10)
+                {
+                    recommendations.Add("🔶 **High Complexity:** Average method complexity is high. Refactor complex methods into smaller units.");
+                }
+            }
+
+            if (stats.MaxMethodComplexity > 15)
+            {
+                recommendations.Add($"🔴 **Complex Method:** `{stats.MostComplexMethod}` has complexity {stats.MaxMethodComplexity}. Break it down into smaller methods.");
+            }
+
+            // Documentation recommendations
+            var totalMembers = stats.DocumentedMembers + stats.UndocumentedMembers;
+            if (totalMembers > 0 && stats.DocumentationCoverage < 70)
+            {
+                recommendations.Add($"📚 **Documentation:** Add XML comments for {stats.UndocumentedMembers} undocumented public members.");
+            }
+
+            // Code density recommendations
+            if (stats.CodeLines > 0)
+            {
+                var commentRatio = stats.CommentLines * 100.0 / stats.CodeLines;
+                if (commentRatio < 5)
+                {
+                    recommendations.Add("💬 **Comments:** Consider adding more inline comments to explain complex logic.");
+                }
+            }
+
+            // Type count recommendations
+            var totalTypes = stats.ClassCount + stats.InterfaceCount + stats.StructCount + stats.EnumCount;
+            if (totalTypes > 5)
+            {
+                recommendations.Add($"🧩 **Multiple Types:** File contains {totalTypes} types. Consider one type per file for better organization.");
+            }
+
+            // Member count recommendations
+            var totalTypeMembers = stats.MethodCount + stats.PropertyCount + stats.FieldCount;
+            if (totalTypes > 0)
+            {
+                var avgMembersPerType = totalTypeMembers / (double)totalTypes;
+                if (avgMembersPerType > 30)
+                {
+                    recommendations.Add("🔧 **Large Types:** Some types have many members. Consider extracting related functionality.");
+                }
+            }
+
+            return recommendations;
+        }
+
+        #endregion
     }
 }

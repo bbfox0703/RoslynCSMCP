@@ -106,6 +106,7 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<TODOCommentAnalyzer>();
                 builder.Services.AddSingleton<LargeFileAnalyzer>();
                 builder.Services.AddSingleton<DeprecatedAPIAnalyzer>();
+                builder.Services.AddSingleton<FileStatisticsAnalyzer>();
                 builder.Services.AddSingleton<SecurityValidator>();
                 builder.Services.AddSingleton<DiagnosticLogger>();
                 builder.Services.AddSingleton<IncrementalAnalyzer>();

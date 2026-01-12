@@ -628,4 +628,57 @@ namespace RoslynMcpServer.Models
         public int ErrorAPIs => DeprecatedAPIs.Count(api => api.IsError);
         public int WarningAPIs => DeprecatedAPIs.Count(api => !api.IsError);
     }
+
+    /// <summary>
+    /// Statistics for a single file
+    /// </summary>
+    public class FileStatistics
+    {
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+
+        // Line counts
+        public int TotalLines { get; set; }
+        public int CodeLines { get; set; }
+        public int CommentLines { get; set; }
+        public int BlankLines { get; set; }
+
+        // File info
+        public long SizeInBytes { get; set; }
+
+        // Code elements
+        public int ClassCount { get; set; }
+        public int InterfaceCount { get; set; }
+        public int StructCount { get; set; }
+        public int EnumCount { get; set; }
+        public int MethodCount { get; set; }
+        public int PropertyCount { get; set; }
+        public int FieldCount { get; set; }
+
+        // Complexity
+        public int CyclomaticComplexity { get; set; }
+        public int MaxMethodComplexity { get; set; }
+        public string MostComplexMethod { get; set; } = string.Empty;
+
+        // Dependencies
+        public int UsingDirectivesCount { get; set; }
+        public List<string> Namespaces { get; set; } = new();
+
+        // Documentation
+        public int DocumentedMembers { get; set; }
+        public int UndocumentedMembers { get; set; }
+        public double DocumentationCoverage => (DocumentedMembers + UndocumentedMembers) > 0
+            ? (DocumentedMembers * 100.0 / (DocumentedMembers + UndocumentedMembers))
+            : 0;
+    }
+
+    /// <summary>
+    /// Results from file statistics analysis
+    /// </summary>
+    public class FileStatisticsResults
+    {
+        public FileStatistics? Statistics { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+    }
 }
