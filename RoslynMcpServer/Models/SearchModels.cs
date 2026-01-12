@@ -582,4 +582,50 @@ namespace RoslynMcpServer.Models
         public int MaxLineCount => LargeFiles.Any() ? LargeFiles.Max(f => f.LineCount) : 0;
         public long TotalSizeInBytes => LargeFiles.Sum(f => f.SizeInBytes);
     }
+
+    /// <summary>
+    /// Represents a usage of a deprecated/obsolete API
+    /// </summary>
+    public class DeprecatedAPIUsage
+    {
+        public string APIName { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public string ObsoleteMessage { get; set; } = string.Empty;
+        public bool IsError { get; set; }  // ObsoleteAttribute with IsError=true
+        public string CodeContext { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Represents a deprecated API with all its usages
+    /// </summary>
+    public class DeprecatedAPI
+    {
+        public string APIName { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string ObsoleteMessage { get; set; } = string.Empty;
+        public bool IsError { get; set; }
+        public List<DeprecatedAPIUsage> Usages { get; set; } = new();
+        public string Suggestion { get; set; } = string.Empty;  // Migration suggestion
+    }
+
+    /// <summary>
+    /// Results from deprecated API analysis
+    /// </summary>
+    public class DeprecatedAPIResults
+    {
+        public List<DeprecatedAPI> DeprecatedAPIs { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalDeprecatedAPIs => DeprecatedAPIs.Count;
+        public int TotalUsages => DeprecatedAPIs.Sum(api => api.Usages.Count);
+        public int ErrorAPIs => DeprecatedAPIs.Count(api => api.IsError);
+        public int WarningAPIs => DeprecatedAPIs.Count(api => !api.IsError);
+    }
 }

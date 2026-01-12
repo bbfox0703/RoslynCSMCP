@@ -830,6 +830,51 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find usages of deprecated/obsolete APIs in the solution")]
+        public static async Task<string> FindDeprecatedAPIs(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts and top APIs), normal (grouped by API), detailed (with code context). Default: normal")]
+            string format = "normal",
+            [Description("Include .NET Framework obsolete APIs (default: true)")] bool includeFrameworkAPIs = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<DeprecatedAPIAnalyzer>>();
+            var securityValidator = serviceProvider?.GetService<SecurityValidator>();
+
+            try
+            {
+                // Validate solution path
+                if (securityValidator != null && !securityValidator.ValidateSolutionPath(solutionPath))
+                {
+                    logger?.LogWarning("Invalid solution path: {SolutionPath}", solutionPath);
+                    return $"Error: Invalid solution path: {solutionPath}";
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<DeprecatedAPIAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Deprecated API analyzer service not available.";
+                }
+
+                // Perform analysis
+                var results = await analyzer.AnalyzeDeprecatedAPIsAsync(solutionPath, includeFrameworkAPIs);
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatDeprecatedAPIsSummary(results),
+                    "detailed" => FormatDeprecatedAPIsDetailed(results),
+                    _ => FormatDeprecatedAPIsNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error finding deprecated APIs");
+                return $"Error: An unexpected error occurred while finding deprecated APIs: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -4785,6 +4830,275 @@ namespace RoslynMcpServer.Tools
                 len = len / 1024;
             }
             return $"{len:0.##} {sizes[order]}";
+        }
+
+        // ==================== Deprecated APIs Formatting ====================
+
+        // Summary mode: Counts and top deprecated APIs
+        private static string FormatDeprecatedAPIsSummary(DeprecatedAPIResults results)
+        {
+            if (results.TotalDeprecatedAPIs == 0)
+                return "✅ No deprecated APIs found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"⚠️ **Deprecated APIs Found: {results.TotalDeprecatedAPIs}** ({results.TotalUsages} usages)\n");
+            output.AppendLine($"**Summary:**");
+            if (results.ErrorAPIs > 0)
+                output.AppendLine($"  🔴 Errors (IsError=true): {results.ErrorAPIs}");
+            if (results.WarningAPIs > 0)
+                output.AppendLine($"  ⚠️ Warnings: {results.WarningAPIs}");
+            output.AppendLine($"  📁 Files Analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  📦 Projects: {results.AnalyzedProjects}");
+            output.AppendLine();
+
+            // Show top 5 most used deprecated APIs
+            output.AppendLine("**Most Used Deprecated APIs (Top 5):**");
+            foreach (var api in results.DeprecatedAPIs.Take(5))
+            {
+                var icon = api.IsError ? "🔴" : "⚠️";
+                output.AppendLine($"  {icon} **{api.APIName}** - {api.Usages.Count} usage{(api.Usages.Count > 1 ? "s" : "")}");
+                if (!string.IsNullOrWhiteSpace(api.ObsoleteMessage))
+                    output.AppendLine($"     Message: {TruncateMessage(api.ObsoleteMessage, 60)}");
+                if (!string.IsNullOrWhiteSpace(api.Suggestion))
+                    output.AppendLine($"     💡 {api.Suggestion}");
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("\n⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(3))
+                {
+                    output.AppendLine($"   - {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Grouped by API with usage locations
+        private static string FormatDeprecatedAPIsNormal(DeprecatedAPIResults results)
+        {
+            if (results.TotalDeprecatedAPIs == 0)
+                return "✅ No deprecated APIs found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Deprecated API Analysis**\n");
+            output.AppendLine($"📊 **Summary:** {results.TotalDeprecatedAPIs} deprecated APIs, {results.TotalUsages} total usages");
+            output.AppendLine();
+
+            output.AppendLine("**Breakdown:**");
+            if (results.ErrorAPIs > 0)
+                output.AppendLine($"  🔴 Error-level (IsError=true): {results.ErrorAPIs}");
+            if (results.WarningAPIs > 0)
+                output.AppendLine($"  ⚠️ Warning-level: {results.WarningAPIs}");
+            output.AppendLine($"  📁 Files: {results.AnalyzedFiles} | 📦 Projects: {results.AnalyzedProjects}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  ❌ Failed Projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Group by error/warning
+            var errorAPIs = results.DeprecatedAPIs.Where(api => api.IsError).ToList();
+            var warningAPIs = results.DeprecatedAPIs.Where(api => !api.IsError).ToList();
+
+            if (errorAPIs.Any())
+            {
+                output.AppendLine($"## 🔴 Error-Level Deprecated APIs ({errorAPIs.Count})");
+                output.AppendLine("**These must be fixed immediately!**");
+                output.AppendLine();
+
+                foreach (var api in errorAPIs)
+                {
+                    OutputAPIDetails(output, api, showTop: 5);
+                }
+            }
+
+            if (warningAPIs.Any())
+            {
+                output.AppendLine($"## ⚠️ Warning-Level Deprecated APIs ({warningAPIs.Count})");
+                output.AppendLine("**Consider migrating these soon.**");
+                output.AppendLine();
+
+                foreach (var api in warningAPIs.Take(10))
+                {
+                    OutputAPIDetails(output, api, showTop: 5);
+                }
+
+                if (warningAPIs.Count > 10)
+                {
+                    output.AppendLine($"... and {warningAPIs.Count - 10} more deprecated APIs");
+                    output.AppendLine();
+                }
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Full information with code context
+        private static string FormatDeprecatedAPIsDetailed(DeprecatedAPIResults results)
+        {
+            if (results.TotalDeprecatedAPIs == 0)
+                return "✅ No deprecated APIs found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Deprecated API Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Total:** {results.TotalDeprecatedAPIs} deprecated APIs, {results.TotalUsages} usages");
+            output.AppendLine();
+
+            output.AppendLine("**Complete Statistics:**");
+            output.AppendLine($"  🔴 Error-level APIs: {results.ErrorAPIs}");
+            output.AppendLine($"  ⚠️ Warning-level APIs: {results.WarningAPIs}");
+            output.AppendLine($"  📁 Files Analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  📦 Projects: {results.AnalyzedProjects}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  ❌ Failed Projects: {results.FailedProjects}");
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine();
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            output.AppendLine();
+
+            // Group by error/warning
+            var errorAPIs = results.DeprecatedAPIs.Where(api => api.IsError).ToList();
+            var warningAPIs = results.DeprecatedAPIs.Where(api => !api.IsError).ToList();
+
+            if (errorAPIs.Any())
+            {
+                output.AppendLine($"## 🔴 Error-Level Deprecated APIs ({errorAPIs.Count})");
+                output.AppendLine("**Must be fixed - will become compilation errors!**");
+                output.AppendLine();
+
+                foreach (var api in errorAPIs)
+                {
+                    OutputAPIDetailsVerbose(output, api);
+                }
+            }
+
+            if (warningAPIs.Any())
+            {
+                output.AppendLine($"## ⚠️ Warning-Level Deprecated APIs ({warningAPIs.Count})");
+                output.AppendLine("**Should be migrated to avoid future issues.**");
+                output.AppendLine();
+
+                foreach (var api in warningAPIs)
+                {
+                    OutputAPIDetailsVerbose(output, api);
+                }
+            }
+
+            // Migration recommendations
+            output.AppendLine("---");
+            output.AppendLine("**Migration Recommendations:**");
+            if (errorAPIs.Any())
+                output.AppendLine($"  🔴 **Urgent**: Fix {errorAPIs.Sum(a => a.Usages.Count)} usage{(errorAPIs.Sum(a => a.Usages.Count) > 1 ? "s" : "")} of error-level deprecated APIs");
+            if (warningAPIs.Any())
+                output.AppendLine($"  ⚠️ **High Priority**: Migrate {warningAPIs.Sum(a => a.Usages.Count)} usage{(warningAPIs.Sum(a => a.Usages.Count) > 1 ? "s" : "")} of warning-level deprecated APIs");
+
+            output.AppendLine();
+            output.AppendLine("**Migration Steps:**");
+            output.AppendLine("  1. Review the suggested replacements above");
+            output.AppendLine("  2. Test the new APIs in a development environment");
+            output.AppendLine("  3. Update code and dependencies incrementally");
+            output.AppendLine("  4. Run tests to ensure functionality is preserved");
+            output.AppendLine("  5. Update documentation if needed");
+
+            return output.ToString();
+        }
+
+        // Helper: Output API details for normal mode
+        private static void OutputAPIDetails(StringBuilder output, DeprecatedAPI api, int showTop = 5)
+        {
+            var icon = api.IsError ? "🔴" : "⚠️";
+            output.AppendLine($"### {icon} {api.APIName}");
+            output.AppendLine($"**Full Name:** `{api.FullName}`");
+            output.AppendLine($"**Usages:** {api.Usages.Count}");
+
+            if (!string.IsNullOrWhiteSpace(api.ObsoleteMessage))
+                output.AppendLine($"**Message:** {api.ObsoleteMessage}");
+
+            if (!string.IsNullOrWhiteSpace(api.Suggestion))
+                output.AppendLine($"**💡 Suggestion:** {api.Suggestion}");
+
+            output.AppendLine();
+            output.AppendLine($"**Usage Locations (showing top {Math.Min(showTop, api.Usages.Count)}):**");
+
+            foreach (var usage in api.Usages.Take(showTop))
+            {
+                output.AppendLine($"  • {usage.ProjectName} / {usage.FileName}:{usage.LineNumber}");
+            }
+
+            if (api.Usages.Count > showTop)
+            {
+                output.AppendLine($"  ... and {api.Usages.Count - showTop} more usage{(api.Usages.Count - showTop > 1 ? "s" : "")}");
+            }
+
+            output.AppendLine();
+        }
+
+        // Helper: Output API details for detailed mode with code context
+        private static void OutputAPIDetailsVerbose(StringBuilder output, DeprecatedAPI api)
+        {
+            var icon = api.IsError ? "🔴" : "⚠️";
+            output.AppendLine($"### {icon} {api.APIName}");
+            output.AppendLine($"**Full Name:** `{api.FullName}`");
+            output.AppendLine($"**Total Usages:** {api.Usages.Count}");
+            output.AppendLine($"**Status:** {(api.IsError ? "Error (IsError=true)" : "Warning")}");
+
+            if (!string.IsNullOrWhiteSpace(api.ObsoleteMessage))
+                output.AppendLine($"**Obsolete Message:** {api.ObsoleteMessage}");
+
+            if (!string.IsNullOrWhiteSpace(api.Suggestion))
+            {
+                output.AppendLine();
+                output.AppendLine($"**💡 Migration Suggestion:**");
+                output.AppendLine($"  {api.Suggestion}");
+            }
+
+            output.AppendLine();
+            output.AppendLine("**All Usage Locations:**");
+            output.AppendLine();
+
+            // Group by project
+            var byProject = api.Usages.GroupBy(u => u.ProjectName).OrderBy(g => g.Key);
+
+            foreach (var projectGroup in byProject)
+            {
+                output.AppendLine($"**{projectGroup.Key}** ({projectGroup.Count()} usage{(projectGroup.Count() > 1 ? "s" : "")}):");
+
+                foreach (var usage in projectGroup)
+                {
+                    output.AppendLine($"  📍 {usage.FileName}:{usage.LineNumber}");
+
+                    if (!string.IsNullOrWhiteSpace(usage.CodeContext))
+                    {
+                        output.AppendLine("  ```csharp");
+                        foreach (var line in usage.CodeContext.Split('\n'))
+                        {
+                            output.AppendLine($"  {line}");
+                        }
+                        output.AppendLine("  ```");
+                    }
+
+                    output.AppendLine();
+                }
+            }
+
+            output.AppendLine();
         }
     }
 }
