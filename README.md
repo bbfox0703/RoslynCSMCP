@@ -2,7 +2,7 @@
 
 ![.NET 10.0](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet) ![MCP 0.5.0](https://img.shields.io/badge/MCP-0.5.0--preview.1-00A4EF) ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn compiler platform to provide **Claude Desktop** and **Claude CLI** with powerful code analysis and navigation capabilities for C# codebases.
+A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn compiler platform to provide Vibe-coding tools like **Claude Desktop** and **Claude CLI** with powerful code analysis and navigation capabilities for C# codebases.
 
 ## Features
 
@@ -13,8 +13,9 @@ A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn
 - **Code Complexity Analysis** - Identify high-complexity methods using cyclomatic complexity metrics
 - **Performance Optimized** - Multi-level caching (Memory, Redis, File system) and incremental analysis for large codebases
 - **Security Hardened** - Input validation, path sanitization, and safe file operations
+- ...and more!
 
-## 🎯 What is RoslynCSMCP?
+## What is RoslynCSMCP?
 
 RoslynCSMCP is a **specialized application** built on top of Microsoft's MCP SDK, not a replacement for it.
 
@@ -23,30 +24,16 @@ RoslynCSMCP is a **specialized application** built on top of Microsoft's MCP SDK
 | Component | Role | What It Provides |
 |-----------|------|------------------|
 | **Microsoft MCP C# SDK** | 🔧 Infrastructure | MCP protocol implementation, transport layer, serialization |
-| **RoslynCSMCP (This Project)** | 🎯 Application | 19 ready-to-use C# code analysis tools powered by Roslyn |
+| **RoslynCSMCP (This Project)** | Application | Ready-to-use C# code analysis tools powered by Roslyn |
 
 **Analogy**:
 - Microsoft MCP SDK = Kitchen equipment (stove, refrigerator, knives)
 - RoslynCSMCP = A restaurant with complete menu (using that equipment to serve specific dishes)
 
-### Why You Need RoslynCSMCP
-
-**Without RoslynCSMCP**:
-- You only have the MCP SDK framework
-- You need to develop all 19 code analysis tools yourself (weeks of work)
-- You need to implement token optimization strategies
-- You need to design output formats for Claude
-
-**With RoslynCSMCP**:
-- ✅ Install and configure in 5 minutes
-- ✅ Get 19 production-ready tools immediately
-- ✅ Benefit from 60-98% token savings optimizations
-- ✅ Use Claude-optimized output formats
-
-### What Makes RoslynCSMCP Unique
+### RoslynCSMCP major tools and benefits:
 
 1. **Roslyn Integration**: Deep integration with Microsoft's Roslyn compiler platform for semantic code analysis
-2. **19 Specialized Tools**: From symbol search to test discovery, compilation errors to class hierarchies
+2. **Specialized Tools**: From symbol search to test discovery, compilation errors to class hierarchies
 3. **Token Optimization**: Intelligent filtering and output formatting reduces token usage by 60-98%
 4. **Production Ready**: Security validation, multi-level caching, incremental analysis
 5. **Claude Native**: Designed specifically for Claude Desktop and Claude CLI workflows
@@ -68,9 +55,9 @@ RoslynCSMCP is a **specialized application** built on top of Microsoft's MCP SDK
 
 **For Claude CLI:**
 - Claude CLI (Claude Code) installed
-  - Install via: `npm install -g @anthropics/claude-cli`
-  - Verify: `claude --version` (should show version 0.2.0 or later)
-- Node.js 18+ (required for Claude CLI)
+  - Native Install via: (for example) `curl -fsSL https://claude.ai/install.sh | bash` (macOS, Linux, WSL) or PS `irm https://claude.ai/install.ps1 | iex` (Windows).
+    - Please refer to the [Claude CLI Installation Guide](https://code.claude.com/docs/en/overview) for detailed / updated instructions.
+  - Verify: `claude --version` (should show version 2.1.2 or later)
 
 ## Installation
 
@@ -211,13 +198,11 @@ Before configuring, ensure Claude CLI is installed:
 # Check Claude CLI installation
 claude --version
 
-# Should output: claude version 0.2.0 (or later)
+# Should output: claude version 2.1.2 (or later)
 ```
 
 If not installed:
-```bash
-npm install -g @anthropics/claude-cli
-```
+Please refer to the [Claude CLI Installation Guide](https://code.claude.com/docs/en/overview) for detail.
 
 ### Automated Setup (Recommended)
 
@@ -731,42 +716,6 @@ In Production mode (default), only warnings and errors are logged to:
 - **Linux/macOS**: `/tmp/RoslynCSMCP/logs/roslyn-mcp-YYYYMMDD.log`
 - Retained for 30 days (vs 7 days for debug logs)
 
-## Project Structure
-
-```
-RoslynCSMCP/
-├── RoslynMcpServer/              # Main MCP server project
-│   ├── Program.cs                # MCP server entry point with Serilog configuration
-│   ├── appsettings.json          # Production logging configuration
-│   ├── appsettings.Development.json # Development logging configuration
-│   ├── Tools/
-│   │   └── CodeNavigationTools.cs # 12 MCP tool implementations
-│   ├── Services/
-│   │   ├── SymbolSearchService.cs
-│   │   ├── CodeAnalysisService.cs
-│   │   ├── IncrementalAnalyzer.cs
-│   │   ├── MultiLevelCacheManager.cs
-│   │   └── SecurityValidator.cs
-│   └── Models/
-│       └── SearchModels.cs       # DTOs for tool results
-├── install/                      # Installation and setup scripts
-│   ├── setup-claude-desktop.ps1  # Windows automated setup for Claude Desktop
-│   ├── setup-claude-desktop.sh   # Linux/macOS setup for Claude Desktop
-│   ├── setup-claude-cli.ps1      # Windows automated setup for Claude CLI
-│   ├── setup-claude-cli.sh       # Linux/macOS setup for Claude CLI
-│   ├── claude-desktop-config.example.json # Example Claude Desktop config
-│   └── claude-cli-config.example.json     # Example Claude CLI config
-├── docs/                         # Documentation (9 active docs + archive)
-│   ├── README.md                     # 📚 Documentation index
-│   ├── TOKEN_OPTIMIZATION.md         # ⭐ Token optimization guide
-│   ├── TESTING_GUIDE.md              # Complete testing guide
-│   ├── LOGGING_CONFIGURATION.md      # Logging configuration
-│   └── archive/                      # 25 archived historical documents
-├── .mcp.json                     # Project-scope MCP config (Claude CLI)
-├── CLAUDE.md                     # Architecture documentation for Claude Code
-└── README.md                     # This file
-```
-
 ## Documentation
 
 **📚 Full Documentation Index**: See [docs/README.md](docs/README.md) for complete documentation catalog
@@ -791,14 +740,10 @@ RoslynCSMCP/
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Author
-
-**Christopher Arquiza**
-
 ## Acknowledgments
 
-- Fork from [RoslynMCP](https://github.com/carquiza/RoslynMCP), originally by [Chris Arquiza](https://github.com/carquiza). For personal playground.
-- Not all scripts (installation, test, PowerShell script) are tested.
+- Fork from [RoslynMCP](https://github.com/carquiza/RoslynMCP), originally by [Chris Arquiza](https://github.com/carquiza). Here is for personal playground.
+- Not all scripts (installation, test, PowerShell script) are tested!
 - Built with [Roslyn](https://github.com/dotnet/roslyn) - The .NET Compiler Platform
 - Uses [Model Context Protocol](https://modelcontextprotocol.io) for Claude integration
 - Powered by [.NET 10.0](https://dotnet.microsoft.com/download/dotnet/10.0)
