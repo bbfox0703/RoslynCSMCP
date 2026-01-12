@@ -785,6 +785,51 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find large source files that may need refactoring")]
+        public static async Task<string> FindLargeFiles(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (top files only), normal (balanced), detailed (with metrics). Default: normal")]
+            string format = "normal",
+            [Description("Minimum line count threshold (default: 500)")] int threshold = 500,
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<LargeFileAnalyzer>>();
+            var securityValidator = serviceProvider?.GetService<SecurityValidator>();
+
+            try
+            {
+                // Validate solution path
+                if (securityValidator != null && !securityValidator.ValidateSolutionPath(solutionPath))
+                {
+                    logger?.LogWarning("Invalid solution path: {SolutionPath}", solutionPath);
+                    return $"Error: Invalid solution path: {solutionPath}";
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<LargeFileAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Large file analyzer service not available.";
+                }
+
+                // Perform analysis
+                var results = await analyzer.AnalyzeLargeFilesAsync(solutionPath, threshold);
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatLargeFilesSummary(results, threshold),
+                    "detailed" => FormatLargeFilesDetailed(results, threshold),
+                    _ => FormatLargeFilesNormal(results, threshold)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error finding large files");
+                return $"Error: An unexpected error occurred while finding large files: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -4497,6 +4542,249 @@ namespace RoslynMcpServer.Tools
                 return message;
 
             return message.Substring(0, maxLength - 3) + "...";
+        }
+
+        // ==================== Large Files Formatting ====================
+
+        // Summary mode: Top large files only
+        private static string FormatLargeFilesSummary(LargeFileResults results, int threshold)
+        {
+            if (results.TotalLargeFiles == 0)
+                return $"✅ No files found above {threshold} lines.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"📄 **Large Files Found: {results.TotalLargeFiles}** (> {threshold} lines)\n");
+            output.AppendLine($"**Statistics:**");
+            output.AppendLine($"  • Average: {results.AverageLineCount} lines");
+            output.AppendLine($"  • Largest: {results.MaxLineCount} lines");
+            output.AppendLine($"  • Total Size: {FormatFileSize(results.TotalSizeInBytes)}");
+            output.AppendLine();
+
+            // Show top 10 largest files
+            output.AppendLine("**Top 10 Largest Files:**");
+            foreach (var file in results.LargeFiles.Take(10))
+            {
+                output.AppendLine($"  {file.LineCount,6} lines - {file.FileName} ({file.ProjectName})");
+            }
+
+            if (results.TotalLargeFiles > 10)
+            {
+                output.AppendLine($"  ... and {results.TotalLargeFiles - 10} more files");
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("\n⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(3))
+                {
+                    output.AppendLine($"   - {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Grouped by project with metrics
+        private static string FormatLargeFilesNormal(LargeFileResults results, int threshold)
+        {
+            if (results.TotalLargeFiles == 0)
+                return $"✅ No files found above {threshold} lines.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Large Files Analysis**\n");
+            output.AppendLine($"📊 **Summary:** {results.TotalLargeFiles} files > {threshold} lines");
+            output.AppendLine();
+
+            output.AppendLine("**Overall Statistics:**");
+            output.AppendLine($"  • Files Analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  • Large Files: {results.TotalLargeFiles}");
+            output.AppendLine($"  • Average Lines: {results.AverageLineCount}");
+            output.AppendLine($"  • Max Lines: {results.MaxLineCount}");
+            output.AppendLine($"  • Total Size: {FormatFileSize(results.TotalSizeInBytes)}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  • Failed Projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Group by project
+            var byProject = results.LargeFiles.GroupBy(f => f.ProjectName).OrderByDescending(g => g.Count());
+
+            foreach (var projectGroup in byProject)
+            {
+                output.AppendLine($"## 📁 {projectGroup.Key} ({projectGroup.Count()} files)");
+                output.AppendLine();
+
+                foreach (var file in projectGroup.Take(15))
+                {
+                    var sizeStr = FormatFileSize(file.SizeInBytes);
+                    output.AppendLine($"  **{file.FileName}**");
+                    output.AppendLine($"    📏 Lines: {file.LineCount} | 💾 Size: {sizeStr} | 📦 Types: {file.TypeCount} | 🔧 Methods: {file.MethodCount}");
+                }
+
+                if (projectGroup.Count() > 15)
+                {
+                    output.AppendLine($"  ... and {projectGroup.Count() - 15} more files");
+                }
+
+                output.AppendLine();
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Full information with refactoring suggestions
+        private static string FormatLargeFilesDetailed(LargeFileResults results, int threshold)
+        {
+            if (results.TotalLargeFiles == 0)
+                return $"✅ No files found above {threshold} lines.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**Large Files Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Threshold:** {threshold} lines");
+            output.AppendLine();
+
+            output.AppendLine("**Complete Statistics:**");
+            output.AppendLine($"  • Files Analyzed: {results.AnalyzedFiles}");
+            output.AppendLine($"  • Projects: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Large Files Found: {results.TotalLargeFiles}");
+            output.AppendLine($"  • Average Lines: {results.AverageLineCount}");
+            output.AppendLine($"  • Max Lines: {results.MaxLineCount}");
+            output.AppendLine($"  • Total Size: {FormatFileSize(results.TotalSizeInBytes)}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  • Failed Projects: {results.FailedProjects}");
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine();
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            output.AppendLine();
+
+            // Group by size category
+            var hugeFiles = results.LargeFiles.Where(f => f.LineCount >= 2000).ToList();
+            var veryLargeFiles = results.LargeFiles.Where(f => f.LineCount >= 1000 && f.LineCount < 2000).ToList();
+            var largeFiles = results.LargeFiles.Where(f => f.LineCount < 1000).ToList();
+
+            if (hugeFiles.Any())
+            {
+                output.AppendLine($"## 🔴 Huge Files (>= 2000 lines): {hugeFiles.Count}");
+                output.AppendLine("**These files urgently need refactoring!**");
+                output.AppendLine();
+
+                foreach (var file in hugeFiles)
+                {
+                    OutputFileDetails(output, file);
+                }
+            }
+
+            if (veryLargeFiles.Any())
+            {
+                output.AppendLine($"## 🟠 Very Large Files (1000-1999 lines): {veryLargeFiles.Count}");
+                output.AppendLine("**Consider refactoring these files.**");
+                output.AppendLine();
+
+                foreach (var file in veryLargeFiles)
+                {
+                    OutputFileDetails(output, file);
+                }
+            }
+
+            if (largeFiles.Any())
+            {
+                output.AppendLine($"## 🟡 Large Files ({threshold}-999 lines): {largeFiles.Count}");
+                output.AppendLine("**Monitor these files for growth.**");
+                output.AppendLine();
+
+                foreach (var file in largeFiles.Take(20))
+                {
+                    OutputFileDetails(output, file);
+                }
+
+                if (largeFiles.Count > 20)
+                {
+                    output.AppendLine($"... and {largeFiles.Count - 20} more files");
+                    output.AppendLine();
+                }
+            }
+
+            // Recommendations
+            output.AppendLine("---");
+            output.AppendLine("**Refactoring Recommendations:**");
+            if (hugeFiles.Any())
+                output.AppendLine($"  🔴 **Urgent**: Refactor {hugeFiles.Count} huge file{(hugeFiles.Count > 1 ? "s" : "")} (>= 2000 lines)");
+            if (veryLargeFiles.Any())
+                output.AppendLine($"  🟠 **High Priority**: Consider refactoring {veryLargeFiles.Count} very large file{(veryLargeFiles.Count > 1 ? "s" : "")} (1000-1999 lines)");
+            if (largeFiles.Any())
+                output.AppendLine($"  🟡 **Monitor**: Watch {largeFiles.Count} large file{(largeFiles.Count > 1 ? "s" : "")} ({threshold}-999 lines) for growth");
+
+            output.AppendLine();
+            output.AppendLine("**Refactoring Strategies:**");
+            output.AppendLine("  • Extract classes: Split into multiple files by responsibility");
+            output.AppendLine("  • Extract methods: Break down large methods into smaller ones");
+            output.AppendLine("  • Use partial classes: Divide functionality across files");
+            output.AppendLine("  • Move nested types: Extract nested classes to separate files");
+            output.AppendLine("  • Separate concerns: Apply Single Responsibility Principle");
+
+            return output.ToString();
+        }
+
+        // Helper: Output file details for detailed mode
+        private static void OutputFileDetails(StringBuilder output, LargeFile file)
+        {
+            output.AppendLine($"**{file.FileName}**");
+            output.AppendLine($"  📍 Project: {file.ProjectName}");
+            output.AppendLine($"  📏 Lines: {file.LineCount:N0}");
+            output.AppendLine($"  💾 Size: {FormatFileSize(file.SizeInBytes)}");
+            output.AppendLine($"  📦 Types: {file.TypeCount}");
+            output.AppendLine($"  🔧 Methods: {file.MethodCount}");
+
+            // Suggest refactoring if metrics are concerning
+            var suggestions = new List<string>();
+            if (file.LineCount >= 2000)
+                suggestions.Add("Very large file - urgent refactoring needed");
+            if (file.TypeCount > 5)
+                suggestions.Add($"Multiple types ({file.TypeCount}) - consider splitting");
+            if (file.MethodCount > 50)
+                suggestions.Add($"Many methods ({file.MethodCount}) - check cohesion");
+
+            if (suggestions.Any())
+            {
+                output.AppendLine($"  💡 Suggestions:");
+                foreach (var suggestion in suggestions)
+                {
+                    output.AppendLine($"     - {suggestion}");
+                }
+            }
+
+            output.AppendLine($"  📁 Path: {file.FilePath}");
+            output.AppendLine();
+        }
+
+        // Helper: Format file size
+        private static string FormatFileSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len = len / 1024;
+            }
+            return $"{len:0.##} {sizes[order]}";
         }
     }
 }

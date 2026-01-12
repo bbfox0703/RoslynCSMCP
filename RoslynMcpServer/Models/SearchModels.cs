@@ -551,4 +551,35 @@ namespace RoslynMcpServer.Models
 
         public int TotalComments => Comments.Count;
     }
+
+    /// <summary>
+    /// Represents a large source file
+    /// </summary>
+    public class LargeFile
+    {
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineCount { get; set; }
+        public long SizeInBytes { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public int TypeCount { get; set; }  // Number of classes/interfaces/structs
+        public int MethodCount { get; set; }  // Number of methods
+    }
+
+    /// <summary>
+    /// Results from large file analysis
+    /// </summary>
+    public class LargeFileResults
+    {
+        public List<LargeFile> LargeFiles { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalLargeFiles => LargeFiles.Count;
+        public int AverageLineCount => LargeFiles.Any() ? (int)LargeFiles.Average(f => f.LineCount) : 0;
+        public int MaxLineCount => LargeFiles.Any() ? LargeFiles.Max(f => f.LineCount) : 0;
+        public long TotalSizeInBytes => LargeFiles.Sum(f => f.SizeInBytes);
+    }
 }
