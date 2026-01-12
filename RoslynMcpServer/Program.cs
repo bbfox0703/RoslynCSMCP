@@ -83,6 +83,22 @@ namespace RoslynMcpServer
 
                     Log.Information("Configured logging for environment: {Environment}, MinLevel: {MinLevel}, LogFile: {LogFile}",
                         environment, minLevel, Path.Combine(logDirectory, logFileName));
+
+                    // Show PowerShell tail command for debug logs in Development mode
+                    if (environment == "Development")
+                    {
+                        var debugLogPath = Path.Combine(logDirectory, "debug-$(Get-Date -Format yyyyMMdd).log");
+                        if (OperatingSystem.IsWindows())
+                        {
+                            Log.Information("To tail debug log (PowerShell): Get-Content \"{LogPath}\" -Wait -Tail 20",
+                                $"$env:TEMP\\RoslynCSMCP\\logs\\debug-$(Get-Date -Format yyyyMMdd).log");
+                        }
+                        else
+                        {
+                            Log.Information("To tail debug log (PowerShell): Get-Content \"{LogPath}\" -Wait -Tail 20",
+                                "/tmp/RoslynCSMCP/logs/debug-$(date +%Y%m%d).log");
+                        }
+                    }
                 });
 
                 // Register services

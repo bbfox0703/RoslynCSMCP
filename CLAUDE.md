@@ -229,10 +229,20 @@ When debugging or developing RoslynCSMCP:
    - Errors with full stack traces
 
 4. **Viewing Logs in Real-time**:
+
+   When the server starts in Development mode, it logs the PowerShell command to tail debug logs:
+   ```
+   [HH:mm:ss INF] To tail debug log (PowerShell): Get-Content "$env:TEMP\RoslynCSMCP\logs\debug-$(Get-Date -Format yyyyMMdd).log" -Wait -Tail 20
+   ```
+
+   Manual commands:
    ```bash
    # Windows PowerShell
    Get-Content "$env:TEMP\RoslynCSMCP\logs\debug-$(Get-Date -Format yyyyMMdd).log" -Wait -Tail 50
 
-   # Linux/macOS
+   # Linux/macOS (PowerShell)
+   Get-Content "/tmp/RoslynCSMCP/logs/debug-$(date +%Y%m%d).log" -Wait -Tail 50
+
+   # Linux/macOS (bash)
    tail -f /tmp/RoslynCSMCP/logs/debug-$(date +%Y%m%d).log
    ```
