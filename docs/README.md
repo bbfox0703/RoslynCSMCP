@@ -1,6 +1,6 @@
 # RoslynCSMCP Documentation Index
 
-**Last Updated**: 2026-01-11
+**Last Updated**: 2026-01-12
 
 ---
 
@@ -25,8 +25,9 @@
 
 | Document | Description |
 |----------|-------------|
-| [TOKEN_OPTIMIZATION.md](TOKEN_OPTIMIZATION.md) | ⭐ **Token optimization guide** - 40-80% savings across 6 tools |
-| [PHASE4_USAGE_EXAMPLES.md](PHASE4_USAGE_EXAMPLES.md) | Phase 4 token optimization usage examples |
+| [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) | ⭐ **Comprehensive usage guide** - 100+ examples for all 34 tools |
+| [TOOLS_REFERENCE.md](TOOLS_REFERENCE.md) | ⭐ **Complete API reference** - All 34 tools with detailed specifications |
+| [TOKEN_OPTIMIZATION.md](TOKEN_OPTIMIZATION.md) | Token optimization strategies - 40-98% savings |
 | [MCP_TOOL_SELECTION.md](MCP_TOOL_SELECTION.md) | How Claude selects and uses RoslynCSMCP tools |
 
 ---
@@ -44,10 +45,11 @@ Historical documents and progress tracking files have been moved to the [archive
 - `PHASE4B_STATUS_ANALYSIS.md` - Phase 4B tool analysis
 
 ### Usage Examples (Archive)
-- `PHASE1_USAGE_EXAMPLES.md` - Phase 1 examples
-- `PHASE2_USAGE_EXAMPLES.md` - Phase 2 examples
-- `PHASE3_USAGE_EXAMPLES.md` - Phase 3 examples
-- `PHASE4_WEEK2_USAGE_EXAMPLES.md` - Week 2 examples
+- `PHASE1_USAGE_EXAMPLES.md` - Phase 1 examples (superseded by USAGE_EXAMPLES.md)
+- `PHASE2_USAGE_EXAMPLES.md` - Phase 2 examples (superseded by USAGE_EXAMPLES.md)
+- `PHASE3_USAGE_EXAMPLES.md` - Phase 3 examples (superseded by USAGE_EXAMPLES.md)
+- `PHASE4_USAGE_EXAMPLES.md` - Phase 4 examples (superseded by USAGE_EXAMPLES.md)
+- `PHASE4_WEEK2_USAGE_EXAMPLES.md` - Week 2 examples (superseded by USAGE_EXAMPLES.md)
 
 ### Implementation Progress (Archive)
 - `PRIORITY1_FIXES_PROGRESS.md` - Priority 1 fixes tracking
@@ -92,7 +94,10 @@ Historical documents and progress tracking files have been moved to the [archive
 → Read [MCP_TOOL_SELECTION.md](MCP_TOOL_SELECTION.md)
 
 **See usage examples**
-→ Browse [PHASE4_USAGE_EXAMPLES.md](PHASE4_USAGE_EXAMPLES.md)
+→ Browse [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) (100+ examples for all 34 tools)
+
+**Check tool API reference**
+→ Read [TOOLS_REFERENCE.md](TOOLS_REFERENCE.md)
 
 **Review implementation history**
 → Check the [archive/](archive/) directory
@@ -101,17 +106,18 @@ Historical documents and progress tracking files have been moved to the [archive
 
 ## 📊 Documentation Summary
 
-### Active Documents: 7
+### Active Documents: 9
 
 | Category | Count | Files |
 |----------|-------|-------|
 | **Setup & Testing** | 2 | TESTING_GUIDE.md, CLAUDE_CLI_INTEGRATION.md |
 | **Configuration** | 2 | LOGGING_CONFIGURATION.md, DOCKER_DEPLOYMENT.md |
-| **Features & Usage** | 3 | TOKEN_OPTIMIZATION.md, PHASE4_USAGE_EXAMPLES.md, MCP_TOOL_SELECTION.md |
+| **Structure** | 1 | SOLUTION_STRUCTURE.md |
+| **Features & Usage** | 4 | USAGE_EXAMPLES.md, TOOLS_REFERENCE.md, TOKEN_OPTIMIZATION.md, MCP_TOOL_SELECTION.md |
 
-### Archived Documents: 25
+### Archived Documents: 26
 
-All historical progress tracking, evaluation reports, and implementation summaries.
+All historical progress tracking, evaluation reports, and implementation summaries (including phase-specific usage examples).
 
 ---
 
@@ -120,9 +126,10 @@ All historical progress tracking, evaluation reports, and implementation summari
 ### When to Update
 
 - **TESTING_GUIDE.md**: When adding new test scripts or changing test procedures
+- **USAGE_EXAMPLES.md**: When adding new tools or usage patterns
+- **TOOLS_REFERENCE.md**: When adding new tools or modifying tool parameters
 - **TOKEN_OPTIMIZATION.md**: When implementing new token optimization features
 - **LOGGING_CONFIGURATION.md**: When changing Serilog configuration
-- **PHASE4_USAGE_EXAMPLES.md**: When adding new tool features or examples
 
 ### Archive Policy
 
@@ -168,13 +175,15 @@ When adding new documentation:
 
 | Document | Status | Last Updated |
 |----------|--------|--------------|
+| USAGE_EXAMPLES.md | ✅ Current | 2026-01-12 |
+| TOOLS_REFERENCE.md | ✅ Current | 2026-01-12 |
 | TESTING_GUIDE.md | ✅ Current | 2026-01-10 |
 | TOKEN_OPTIMIZATION.md | ✅ Current | 2026-01-11 |
-| PHASE4_USAGE_EXAMPLES.md | ✅ Current | 2026-01-11 |
 | LOGGING_CONFIGURATION.md | ✅ Current | 2026-01-11 |
 | MCP_TOOL_SELECTION.md | ✅ Current | 2026-01-10 |
 | CLAUDE_CLI_INTEGRATION.md | ✅ Current | 2026-01-09 |
 | DOCKER_DEPLOYMENT.md | ✅ Current | 2026-01-09 |
 | SOLUTION_STRUCTURE.md | ✅ Current | 2026-01-10 |
+| NEW_TOOLS_PROPOSAL.md | ✅ Current | 2026-01-12 |
 
 All archived documents are marked as completed and historical.

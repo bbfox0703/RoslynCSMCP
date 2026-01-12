@@ -363,7 +363,7 @@ Identify complex methods in src/Services/*.cs with threshold 10
 
 ## Available MCP Tools
 
-The server exposes 19 MCP tools organized in four phases:
+The server exposes **34 MCP tools** for comprehensive C# code analysis:
 
 ### Core Analysis Tools
 
@@ -407,9 +407,7 @@ The server exposes 19 MCP tools organized in four phases:
    - Configurable threshold (default: 5)
    - Helps identify refactoring candidates
 
-📚 **[Phase 1 Usage Examples](docs/PHASE1_USAGE_EXAMPLES.md)** - Detailed examples and token savings guide
-
-### Phase 2: Advanced Analysis Tools ⚡ **NEW**
+### Advanced Analysis Tools
 
 8. **GetCodeMetrics** - Comprehensive code statistics and quality metrics
    - Lines of code (total, code, comments, blank)
@@ -441,9 +439,7 @@ The server exposes 19 MCP tools organized in four phases:
     - Saves ~50-100 tokens per additional query vs separate requests
     - Reduces MCP protocol overhead
 
-📚 **[Phase 2 Usage Examples](docs/PHASE2_USAGE_EXAMPLES.md)** - Advanced analysis features with examples
-
-### Phase 3: Advanced Filtering ⚡ **NEW**
+### Advanced Filtering
 
 12. **FindReferencesFiltered** - Find references with intelligent filtering
     - **excludeTests**: Exclude test projects (Test, Tests, Testing, Spec) ⭐ Most useful
@@ -455,9 +451,7 @@ The server exposes 19 MCP tools organized in four phases:
     - **Token savings: 60-90%** by filtering out irrelevant references
     - Use case: "Find who uses DeleteUser in production code (exclude tests)" → 88% token savings
 
-📚 **[Phase 3 Usage Examples](docs/PHASE3_USAGE_EXAMPLES.md)** - Advanced filtering with real-world examples
-
-### Phase 4: Diagnostics & File Analysis ⚡ **NEW**
+### Diagnostics & File Analysis
 
 13. **GetCompilationErrors** - Get compilation errors and warnings without running full build
     - **severity**: Filter by Error, Warning, Info, or All
@@ -478,7 +472,7 @@ The server exposes 19 MCP tools organized in four phases:
     - **Token savings: 95%** vs reading full file implementation
     - Use case: "Get outline of UserService.cs" → Understand file structure in 400 tokens instead of 8,000
 
-📚 **[Phase 4 Usage Examples](docs/PHASE4_USAGE_EXAMPLES.md)** - Diagnostics and file analysis with examples
+### Navigation & Testing
 
 15. **FindImplementations** - Find all implementations of interfaces or abstract classes
     - Discovers all concrete classes implementing an interface
@@ -499,7 +493,7 @@ The server exposes 19 MCP tools organized in four phases:
     - **Token savings: 90%+** vs reading test files manually
     - Use case: "Find tests for UserService" → See complete test coverage with 28 tests in 800 tokens
 
-📚 **[Phase 4 Week 2 Usage Examples](docs/PHASE4_WEEK2_USAGE_EXAMPLES.md)** - Navigation and testing features
+### Hierarchy & Attribute Analysis
 
 17. **GetClassHierarchy** - Get complete class hierarchy showing ancestors and descendants
     - Shows inheritance chain (base classes and interfaces)
@@ -519,7 +513,41 @@ The server exposes 19 MCP tools organized in four phases:
     - **Token savings: 80-90%** vs searching and reading files manually
     - Use case: "Find all [Obsolete] attributes" → Identify all deprecated code quickly
 
-📚 **[Phase 4 Week 3 Usage Examples](docs/PHASE4_WEEK3_USAGE_EXAMPLES.md)** - Hierarchy and attribute analysis
+### Code Quality & Detection
+
+19. **FindUnusedCode** - Detect unused code in your solution
+20. **FindDuplicateCode** - Find duplicate or similar code blocks
+21. **AnalyzeDocumentationCoverage** - Check XML documentation coverage
+22. **FindSecurityIssues** - Detect potential security vulnerabilities
+23. **FindUnusedDependencies** - Find unused NuGet packages
+
+### Package Analysis
+
+24. **AnalyzePackages** - Analyze NuGet package usage and versions
+
+### Testing & Quality
+
+25. **GetTestCoverage** - Analyze test coverage metrics
+26. **GetChangeImpact** - Analyze impact of code changes
+
+### Code Maintenance
+
+27. **FindTODOComments** - Find TODO, FIXME, HACK comments
+28. **FindLargeFiles** - Find files exceeding size thresholds
+29. **FindDeprecatedAPIs** - Find usage of deprecated APIs
+30. **GetFileStatistics** - Get detailed statistics for files
+
+### Batch Operations
+
+31. **BatchQuery** - Execute multiple queries in a single request
+
+### Performance, Security & Standards
+
+32. **FindPerformanceIssues** - Detect C# performance anti-patterns
+33. **AnalyzeNamingConventions** - Check naming convention compliance
+34. **AnalyzeAPIChanges** - Track API changes between versions
+
+📚 **[Complete Usage Examples](docs/USAGE_EXAMPLES.md)** - Comprehensive guide with 100+ examples organized by feature category
 
 ## Development and Testing
 
@@ -729,7 +757,8 @@ In Production mode (default), only warnings and errors are logged to:
 ### Configuration & Features
 - **[LOGGING_CONFIGURATION.md](docs/LOGGING_CONFIGURATION.md)** - Serilog logging configuration (Production vs Development)
 - **[TOKEN_OPTIMIZATION.md](docs/TOKEN_OPTIMIZATION.md)** - ⭐ Token optimization guide (40-80% savings across 6 tools)
-- **[PHASE4_USAGE_EXAMPLES.md](docs/PHASE4_USAGE_EXAMPLES.md)** - Phase 4 token optimization usage examples
+- **[USAGE_EXAMPLES.md](docs/USAGE_EXAMPLES.md)** - ⭐ Comprehensive usage guide with 100+ examples for all 34 tools
+- **[TOOLS_REFERENCE.md](docs/TOOLS_REFERENCE.md)** - Complete API reference for all 34 tools
 - **[MCP_TOOL_SELECTION.md](docs/MCP_TOOL_SELECTION.md)** - How Claude selects and uses RoslynCSMCP tools
 - **[DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)** - Docker deployment guide
 
