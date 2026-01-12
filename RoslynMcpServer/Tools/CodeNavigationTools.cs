@@ -732,6 +732,59 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Find TODO, FIXME, HACK, and other special comments in code")]
+        public static async Task<string> FindTODOComments(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (with code context). Default: normal")]
+            string format = "normal",
+            [Description("Comment types to find (comma-separated): TODO, FIXME, HACK, NOTE, BUG, XXX, OPTIMIZE, REFACTOR. Default: all")]
+            string types = "all",
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<TODOCommentAnalyzer>>();
+            var securityValidator = serviceProvider?.GetService<SecurityValidator>();
+
+            try
+            {
+                // Validate solution path
+                if (securityValidator != null && !securityValidator.ValidateSolutionPath(solutionPath))
+                {
+                    logger?.LogWarning("Invalid solution path: {SolutionPath}", solutionPath);
+                    return $"Error: Invalid solution path: {solutionPath}";
+                }
+
+                // Parse comment types
+                string[]? commentTypes = null;
+                if (!string.IsNullOrWhiteSpace(types) && types.ToLowerInvariant() != "all")
+                {
+                    commentTypes = types.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<TODOCommentAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: TODO comment analyzer service not available.";
+                }
+
+                // Perform analysis
+                var results = await analyzer.AnalyzeTODOCommentsAsync(solutionPath, commentTypes!);
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatTODOCommentsSummary(results),
+                    "detailed" => FormatTODOCommentsDetailed(results),
+                    _ => FormatTODOCommentsNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error finding TODO comments");
+                return $"Error: An unexpected error occurred while finding TODO comments: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Execute multiple queries in a single batch request")]
         public static async Task<string> BatchQuery(
             [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
@@ -4165,6 +4218,285 @@ namespace RoslynMcpServer.Tools
             output.AppendLine("  • Customize documentation to describe actual behavior and intent");
 
             return output.ToString();
+        }
+
+        // ==================== TODO Comments Formatting ====================
+
+        // Summary mode: Quick overview with counts by type
+        private static string FormatTODOCommentsSummary(TODOCommentResults results)
+        {
+            if (results.TotalComments == 0)
+                return "✅ No TODO/FIXME/HACK comments found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"📝 **TODO Comments Found: {results.TotalComments}**\n");
+            output.AppendLine($"**By Type:**");
+            if (results.TODOCount > 0)
+                output.AppendLine($"  📌 TODO: {results.TODOCount}");
+            if (results.FIXMECount > 0)
+                output.AppendLine($"  🔧 FIXME: {results.FIXMECount}");
+            if (results.HACKCount > 0)
+                output.AppendLine($"  ⚠️ HACK: {results.HACKCount}");
+            if (results.BUGCount > 0)
+                output.AppendLine($"  🐛 BUG: {results.BUGCount}");
+            if (results.NOTECount > 0)
+                output.AppendLine($"  📋 NOTE: {results.NOTECount}");
+            if (results.OtherCount > 0)
+                output.AppendLine($"  ➕ Other: {results.OtherCount}");
+
+            output.AppendLine();
+            output.AppendLine($"**Files Analyzed:** {results.AnalyzedFiles}");
+            output.AppendLine($"**Projects:** {results.AnalyzedProjects}");
+
+            // Show top 5 most urgent (FIXME, BUG, HACK)
+            var urgentComments = results.Comments
+                .Where(c => c.Type == "FIXME" || c.Type == "BUG" || c.Type == "HACK")
+                .Take(5)
+                .ToList();
+
+            if (urgentComments.Any())
+            {
+                output.AppendLine();
+                output.AppendLine("**Most Urgent (first 5):**");
+                foreach (var comment in urgentComments)
+                {
+                    var icon = comment.Type switch
+                    {
+                        "FIXME" => "🔧",
+                        "BUG" => "🐛",
+                        "HACK" => "⚠️",
+                        _ => "📌"
+                    };
+                    output.AppendLine($"  {icon} {comment.Type}: {TruncateMessage(comment.Message, 60)} ({comment.FileName}:{comment.LineNumber})");
+                }
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("\n⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings.Take(3))
+                {
+                    output.AppendLine($"   - {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Normal mode: Grouped by type with file locations
+        private static string FormatTODOCommentsNormal(TODOCommentResults results)
+        {
+            if (results.TotalComments == 0)
+                return "✅ No TODO/FIXME/HACK comments found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**TODO Comments Analysis**\n");
+            output.AppendLine($"📊 **Summary:** {results.TotalComments} comments found");
+            output.AppendLine();
+
+            output.AppendLine("**Breakdown by Type:**");
+            if (results.TODOCount > 0)
+                output.AppendLine($"  📌 TODO: {results.TODOCount}");
+            if (results.FIXMECount > 0)
+                output.AppendLine($"  🔧 FIXME: {results.FIXMECount}");
+            if (results.HACKCount > 0)
+                output.AppendLine($"  ⚠️ HACK: {results.HACKCount}");
+            if (results.BUGCount > 0)
+                output.AppendLine($"  🐛 BUG: {results.BUGCount}");
+            if (results.NOTECount > 0)
+                output.AppendLine($"  📋 NOTE: {results.NOTECount}");
+            if (results.OtherCount > 0)
+                output.AppendLine($"  ➕ Other: {results.OtherCount}");
+
+            output.AppendLine();
+            output.AppendLine($"📁 **Files:** {results.AnalyzedFiles} | **Projects:** {results.AnalyzedProjects}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"⚠️ **Failed Projects:** {results.FailedProjects}");
+
+            // Group by type
+            var commentsByType = results.Comments.GroupBy(c => c.Type).OrderByDescending(g => GetTypePriority(g.Key));
+
+            foreach (var typeGroup in commentsByType)
+            {
+                var icon = typeGroup.Key switch
+                {
+                    "TODO" => "📌",
+                    "FIXME" => "🔧",
+                    "HACK" => "⚠️",
+                    "BUG" => "🐛",
+                    "NOTE" => "📋",
+                    _ => "➕"
+                };
+
+                output.AppendLine();
+                output.AppendLine($"## {icon} {typeGroup.Key} Comments ({typeGroup.Count()})");
+                output.AppendLine();
+
+                // Group by project
+                var byProject = typeGroup.GroupBy(c => c.ProjectName).OrderBy(g => g.Key);
+                foreach (var projectGroup in byProject)
+                {
+                    output.AppendLine($"**{projectGroup.Key}** ({projectGroup.Count()}):");
+
+                    // Show up to 10 comments per project for this type
+                    foreach (var comment in projectGroup.Take(10))
+                    {
+                        var authorInfo = !string.IsNullOrWhiteSpace(comment.Author) ? $" [{comment.Author}]" : "";
+                        output.AppendLine($"  • {comment.FileName}:{comment.LineNumber}{authorInfo}");
+                        output.AppendLine($"    {TruncateMessage(comment.Message, 80)}");
+                    }
+
+                    if (projectGroup.Count() > 10)
+                    {
+                        output.AppendLine($"  ... and {projectGroup.Count() - 10} more");
+                    }
+
+                    output.AppendLine();
+                }
+            }
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ **Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Detailed mode: Full information with code context
+        private static string FormatTODOCommentsDetailed(TODOCommentResults results)
+        {
+            if (results.TotalComments == 0)
+                return "✅ No TODO/FIXME/HACK comments found.";
+
+            var output = new StringBuilder();
+            output.AppendLine($"**TODO Comments Analysis (Detailed)**\n");
+            output.AppendLine($"📊 **Total Comments:** {results.TotalComments}");
+            output.AppendLine();
+
+            output.AppendLine("**Statistics:**");
+            output.AppendLine($"  📌 TODO: {results.TODOCount}");
+            output.AppendLine($"  🔧 FIXME: {results.FIXMECount}");
+            output.AppendLine($"  ⚠️ HACK: {results.HACKCount}");
+            output.AppendLine($"  🐛 BUG: {results.BUGCount}");
+            output.AppendLine($"  📋 NOTE: {results.NOTECount}");
+            if (results.OtherCount > 0)
+                output.AppendLine($"  ➕ Other: {results.OtherCount}");
+            output.AppendLine();
+
+            output.AppendLine($"📁 **Files Analyzed:** {results.AnalyzedFiles}");
+            output.AppendLine($"📦 **Projects:** {results.AnalyzedProjects}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"⚠️ **Failed Projects:** {results.FailedProjects}");
+
+            if (results.Warnings.Any())
+            {
+                output.AppendLine();
+                output.AppendLine("⚠️ **Analysis Warnings:**");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"   - {warning.Context}: {warning.Message}");
+                }
+            }
+
+            output.AppendLine();
+
+            // Group by project, then by type
+            var groupedByProject = results.Comments.GroupBy(c => c.ProjectName).OrderBy(g => g.Key);
+
+            foreach (var projectGroup in groupedByProject)
+            {
+                output.AppendLine($"## 📁 Project: {projectGroup.Key}");
+                output.AppendLine($"Comments: {projectGroup.Count()}");
+                output.AppendLine();
+
+                var groupedByType = projectGroup.GroupBy(c => c.Type).OrderByDescending(g => GetTypePriority(g.Key));
+
+                foreach (var typeGroup in groupedByType)
+                {
+                    var icon = typeGroup.Key switch
+                    {
+                        "TODO" => "📌",
+                        "FIXME" => "🔧",
+                        "HACK" => "⚠️",
+                        "BUG" => "🐛",
+                        "NOTE" => "📋",
+                        _ => "➕"
+                    };
+
+                    output.AppendLine($"### {icon} {typeGroup.Key} ({typeGroup.Count()})");
+                    output.AppendLine();
+
+                    foreach (var comment in typeGroup)
+                    {
+                        output.AppendLine($"**{comment.FileName}:{comment.LineNumber}**");
+                        if (!string.IsNullOrWhiteSpace(comment.Author))
+                            output.AppendLine($"  👤 Author: {comment.Author}");
+                        output.AppendLine($"  💬 Message: {comment.Message}");
+
+                        if (!string.IsNullOrWhiteSpace(comment.CodeContext))
+                        {
+                            output.AppendLine();
+                            output.AppendLine("  **Code Context:**");
+                            output.AppendLine("  ```csharp");
+                            foreach (var line in comment.CodeContext.Split('\n'))
+                            {
+                                output.AppendLine($"  {line}");
+                            }
+                            output.AppendLine("  ```");
+                        }
+
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Recommendations
+            output.AppendLine("---");
+            output.AppendLine("**Recommendations:**");
+            if (results.BUGCount > 0)
+                output.AppendLine($"  🐛 Address {results.BUGCount} BUG comment{(results.BUGCount > 1 ? "s" : "")} immediately");
+            if (results.FIXMECount > 0)
+                output.AppendLine($"  🔧 Fix {results.FIXMECount} FIXME item{(results.FIXMECount > 1 ? "s" : "")} in upcoming sprints");
+            if (results.HACKCount > 0)
+                output.AppendLine($"  ⚠️ Refactor {results.HACKCount} HACK{(results.HACKCount > 1 ? "s" : "")} to proper solutions");
+            if (results.TODOCount > 0)
+                output.AppendLine($"  📌 Plan work for {results.TODOCount} TODO item{(results.TODOCount > 1 ? "s" : "")}");
+
+            output.AppendLine("  • Consider creating issues/tickets for high-priority items");
+            output.AppendLine("  • Review and remove outdated comments");
+
+            return output.ToString();
+        }
+
+        // Helper: Get priority for comment type sorting
+        private static int GetTypePriority(string type)
+        {
+            return type switch
+            {
+                "BUG" => 5,
+                "FIXME" => 4,
+                "HACK" => 3,
+                "TODO" => 2,
+                "NOTE" => 1,
+                _ => 0
+            };
+        }
+
+        // Helper: Truncate message for summary views
+        private static string TruncateMessage(string message, int maxLength)
+        {
+            if (string.IsNullOrEmpty(message))
+                return string.Empty;
+
+            if (message.Length <= maxLength)
+                return message;
+
+            return message.Substring(0, maxLength - 3) + "...";
         }
     }
 }

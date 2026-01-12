@@ -514,4 +514,41 @@ namespace RoslynMcpServer.Models
         // Coverage percentage
         public double CoveragePercentage => TotalSymbols > 0 ? (DocumentedSymbols * 100.0 / TotalSymbols) : 0;
     }
+
+    /// <summary>
+    /// Represents a TODO/FIXME/HACK comment found in code
+    /// </summary>
+    public class TODOComment
+    {
+        public string Type { get; set; } = string.Empty;  // TODO, FIXME, HACK, NOTE, BUG
+        public string Message { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+        public string Author { get; set; } = string.Empty;  // If present in comment
+        public string CodeContext { get; set; } = string.Empty;  // Surrounding code
+    }
+
+    /// <summary>
+    /// Results from TODO comment analysis
+    /// </summary>
+    public class TODOCommentResults
+    {
+        public List<TODOComment> Comments { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by type
+        public int TODOCount { get; set; }
+        public int FIXMECount { get; set; }
+        public int HACKCount { get; set; }
+        public int NOTECount { get; set; }
+        public int BUGCount { get; set; }
+        public int OtherCount { get; set; }
+
+        public int TotalComments => Comments.Count;
+    }
 }
