@@ -3,9 +3,9 @@
 This document lists all available MCP tools provided by RoslynCSMCP server for C# code analysis.
 
 > **Last Updated**: 2026-01-12
-> **Total Tools**: 32
+> **Total Tools**: 34
 >
-> **Recent Additions**: FindTODOComments, FindLargeFiles, FindDeprecatedAPIs, GetFileStatistics, AnalyzePackages, GetTestCoverage, GetChangeImpact, FindPerformanceIssues
+> **Recent Additions**: FindTODOComments, FindLargeFiles, FindDeprecatedAPIs, GetFileStatistics, AnalyzePackages, GetTestCoverage, GetChangeImpact, FindPerformanceIssues, AnalyzeNamingConventions, AnalyzeAPIChanges
 
 ---
 
@@ -521,6 +521,116 @@ Use FindPerformanceIssues tool with:
 - **summary**: Key metrics, issue counts by severity, top issue types
 - **normal**: Statistics, issues by type/project, top 10 critical and high severity issues
 - **detailed**: Complete analysis with all issues grouped by severity and type, file statistics, recommendations
+
+### 33. AnalyzeNamingConventions
+**Description**: Analyze C# naming convention compliance and detect violations - checks interfaces, types, methods, properties, fields, parameters, and type parameters against C# naming standards
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `violationTypes` (string, optional): Comma-separated violation types to check: InterfaceNaming, TypeNaming, MethodNaming, PropertyNaming, FieldNaming, ParameterNaming, TypeParameterNaming. Default: all
+- `scope` (string, optional): Analysis scope: all, public, internal. Default: all
+
+**Example Usage**:
+```
+Use AnalyzeNamingConventions tool with:
+- solutionPath: "D:\MyProject\MyProject.sln"
+- format: "normal"
+- violationTypes: "InterfaceNaming,FieldNaming"
+- scope: "public"
+```
+
+**Features**:
+- Checks interface naming (should start with 'I' followed by PascalCase)
+- Validates type naming (PascalCase for classes, structs, enums, delegates)
+- Verifies method naming (PascalCase)
+- Checks property naming (PascalCase)
+- Validates field naming (private/protected: _camelCase, public: PascalCase, constants: PascalCase or UPPER_CASE)
+- Checks parameter naming (camelCase)
+- Validates type parameter naming (TPascalCase - starts with 'T')
+- Provides suggested names for violations
+- Severity classification (High, Medium, Low)
+- Calculates compliance score (percentage of symbols following conventions)
+- Groups violations by type, symbol kind, project, and file
+- Scope filtering (all/public/internal symbols)
+
+**Violation Types**:
+- **InterfaceNaming**: Interfaces not starting with 'I' (e.g., IUserService)
+- **TypeNaming**: Types not using PascalCase (e.g., UserService, OrderProcessor)
+- **MethodNaming**: Methods not using PascalCase (e.g., GetUser, ProcessOrder)
+- **PropertyNaming**: Properties not using PascalCase (e.g., UserName, OrderDate)
+- **PrivateFieldNaming**: Private/protected fields not using _camelCase (e.g., _userName, _orderDate)
+- **PublicFieldNaming**: Public fields not using PascalCase
+- **ConstantNaming**: Constants not using PascalCase or UPPER_CASE
+- **ParameterNaming**: Parameters not using camelCase (e.g., userName, orderDate)
+- **TypeParameterNaming**: Type parameters not using TPascalCase (e.g., TKey, TValue, TEntity)
+
+**Output Formats**:
+- **summary**: Key metrics, violation counts by severity, compliance score, top violation types
+- **normal**: Statistics, violations by type/symbol kind, top 10 high and medium severity violations with suggestions
+- **detailed**: Complete analysis with all violations grouped by severity and type, convention guidelines, file statistics
+
+### 34. AnalyzeAPIChanges
+**Description**: Analyze API changes between two versions of a solution - detect breaking changes, additions, removals, and get semantic versioning recommendations for proper version management
+
+**Parameters**:
+- `oldSolutionPath` (string): Path to old version solution file (.sln)
+- `newSolutionPath` (string): Path to new version solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `oldVersionLabel` (string, optional): Label for old version (e.g., 'v1.0.0', 'main'). Default: 'Old'
+- `newVersionLabel` (string, optional): Label for new version (e.g., 'v2.0.0', 'develop'). Default: 'New'
+- `includeInternal` (bool, optional): Include internal API changes (default: false)
+
+**Example Usage**:
+```
+Use AnalyzeAPIChanges tool with:
+- oldSolutionPath: "D:\MyProject\v1.0.0\MyProject.sln"
+- newSolutionPath: "D:\MyProject\v2.0.0\MyProject.sln"
+- format: "normal"
+- oldVersionLabel: "v1.0.0"
+- newVersionLabel: "v2.0.0"
+- includeInternal: false
+```
+
+**Features**:
+- Detects added symbols (new APIs)
+- Identifies removed symbols (breaking changes)
+- Tracks method signature changes (parameters, return types)
+- Monitors accessibility changes (public/internal/protected/private)
+- Detects type modifier changes (abstract, sealed)
+- Tracks base type changes in inheritance hierarchies
+- Monitors property type changes
+- Classifies changes by impact level (Breaking/NonBreaking/Internal)
+- Assigns severity levels (Critical/High/Medium/Low)
+- Provides migration guidance for each change
+- Calculates semantic versioning recommendations (Major/Minor/Patch)
+- Groups changes by type, symbol kind, and namespace
+- Identifies affected areas for each change
+- Compares public API surface between versions
+- Optional internal API comparison
+
+**Change Types Detected**:
+- **Added**: New symbols introduced in the new version
+- **Removed**: Symbols deleted from the old version (breaking)
+- **Modified**: General modifications to existing symbols
+- **AccessibilityChanged**: Changes in public/internal/private access
+- **SignatureChanged**: Method parameter or return type changes (breaking)
+
+**Impact Levels**:
+- **Breaking**: Requires major version bump - removes APIs, changes signatures, reduces accessibility
+- **NonBreaking**: Requires minor version bump - adds new APIs without breaking existing ones
+- **Internal**: Requires patch version bump - internal changes only
+
+**Semantic Versioning Guidance**:
+- **Major (X.0.0)**: Breaking changes detected - removed symbols, signature changes, accessibility reductions
+- **Minor (x.X.0)**: New symbols added without breaking changes
+- **Patch (x.x.X)**: Only internal changes, no public API modifications
+- **None**: No API changes detected
+
+**Output Formats**:
+- **summary**: Key metrics, breaking/non-breaking counts, semantic versioning recommendation
+- **normal**: Statistics, changes by type/symbol kind, top 10 breaking changes and additions with migration guidance
+- **detailed**: Complete analysis with all changes grouped by impact level, full migration summary, comprehensive change details
 
 ---
 

@@ -111,6 +111,8 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<TestCoverageAnalyzer>();
                 builder.Services.AddSingleton<ChangeImpactAnalyzer>();
                 builder.Services.AddSingleton<PerformanceIssueAnalyzer>();
+                builder.Services.AddSingleton<NamingConventionAnalyzer>();
+                builder.Services.AddSingleton<APIChangeAnalyzer>();
                 builder.Services.AddSingleton<SecurityValidator>();
                 builder.Services.AddSingleton<DiagnosticLogger>();
                 builder.Services.AddSingleton<IncrementalAnalyzer>();

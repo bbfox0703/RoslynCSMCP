@@ -1423,6 +1423,134 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Analyze C# naming convention compliance and detect violations")]
+        public static async Task<string> AnalyzeNamingConventions(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+            string format = "normal",
+            [Description("Comma-separated violation types to check: InterfaceNaming, TypeNaming, MethodNaming, PropertyNaming, FieldNaming, ParameterNaming, TypeParameterNaming. Default: all")]
+            string? violationTypes = null,
+            [Description("Analysis scope: all, public, internal. Default: all")]
+            string scope = "all",
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<NamingConventionAnalyzer>>();
+
+            try
+            {
+                // Validate solution path
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<NamingConventionAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Naming convention analyzer service not available.";
+                }
+
+                // Parse violation types filter
+                string[]? violationTypesArray = null;
+                if (!string.IsNullOrWhiteSpace(violationTypes))
+                {
+                    violationTypesArray = violationTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                }
+
+                // Perform analysis
+                var diagnosticLogger = serviceProvider?.GetService<DiagnosticLogger>();
+                Func<Task<NamingConventionResults>> operation = async () =>
+                    await analyzer.AnalyzeNamingConventionsAsync(solutionPath, violationTypesArray, scope);
+
+                var results = diagnosticLogger != null
+                    ? await diagnosticLogger.LoggedExecutionAsync(
+                        "AnalyzeNamingConventions",
+                        operation,
+                        new { solutionPath, format, violationTypes, scope })
+                    : await operation();
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatNamingConventionsSummary(results),
+                    "detailed" => FormatNamingConventionsDetailed(results),
+                    _ => FormatNamingConventionsNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error analyzing naming conventions");
+                return $"Error: An unexpected error occurred while analyzing naming conventions: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Analyze API changes between two versions of a solution - detect breaking changes, additions, removals, and get semantic versioning recommendations")]
+        public static async Task<string> AnalyzeAPIChanges(
+            [Description("Path to old version solution file (.sln)")] string oldSolutionPath,
+            [Description("Path to new version solution file (.sln)")] string newSolutionPath,
+            [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+            string format = "normal",
+            [Description("Label for old version (e.g., 'v1.0.0', 'main'). Default: 'Old'")] string oldVersionLabel = "Old",
+            [Description("Label for new version (e.g., 'v2.0.0', 'develop'). Default: 'New'")] string newVersionLabel = "New",
+            [Description("Include internal API changes (default: false)")] bool includeInternal = false,
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<APIChangeAnalyzer>>();
+
+            try
+            {
+                // Validate solution paths
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(oldSolutionPath) ?? false)
+                {
+                    return "Error: Invalid old solution path provided.";
+                }
+                if (!validator?.ValidateSolutionPath(newSolutionPath) ?? false)
+                {
+                    return "Error: Invalid new solution path provided.";
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<APIChangeAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: API change analyzer service not available.";
+                }
+
+                // Perform analysis
+                var diagnosticLogger = serviceProvider?.GetService<DiagnosticLogger>();
+                Func<Task<APIChangeResults>> operation = async () =>
+                    await analyzer.AnalyzeAPIChangesAsync(
+                        oldSolutionPath,
+                        newSolutionPath,
+                        oldVersionLabel,
+                        newVersionLabel,
+                        includeInternal);
+
+                var results = diagnosticLogger != null
+                    ? await diagnosticLogger.LoggedExecutionAsync(
+                        "AnalyzeAPIChanges",
+                        operation,
+                        new { oldSolutionPath, newSolutionPath, format, oldVersionLabel, newVersionLabel, includeInternal })
+                    : await operation();
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatAPIChangesSummary(results),
+                    "detailed" => FormatAPIChangesDetailed(results),
+                    _ => FormatAPIChangesNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error analyzing API changes");
+                return $"Error: An unexpected error occurred while analyzing API changes: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Get complete class hierarchy showing ancestors (base classes/interfaces) and descendants (derived classes)")]
         public static async Task<string> GetClassHierarchy(
             [Description("Type name to analyze hierarchy for")] string typeName,
@@ -7051,6 +7179,613 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine($"    General Fix: {rec.Example.Recommendation}");
                 output.AppendLine($"    Example: {rec.Example.FixExample}");
                 output.AppendLine();
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Naming Conventions - Summary
+        private static string FormatNamingConventionsSummary(NamingConventionResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"📏 Naming Conventions Summary");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Analysis Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                }
+                return output.ToString();
+            }
+
+            output.AppendLine($"📊 Key Metrics:");
+            output.AppendLine($"  Analyzed Symbols: {results.AnalyzedSymbols:N0}");
+            output.AppendLine($"  Violations: {results.TotalViolations:N0}");
+            output.AppendLine($"  Compliance Score: {results.ComplianceScore:F1}%");
+            output.AppendLine($"  High Severity: {results.HighSeverityViolations}");
+            output.AppendLine($"  Medium Severity: {results.MediumSeverityViolations}");
+            output.AppendLine($"  Low Severity: {results.LowSeverityViolations}");
+            output.AppendLine();
+
+            // Top 5 violation types
+            if (results.ViolationsByType.Any())
+            {
+                output.AppendLine("🔝 Top Violation Types:");
+                foreach (var kvp in results.ViolationsByType.OrderByDescending(k => k.Value).Take(5))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Naming Conventions - Normal
+        private static string FormatNamingConventionsNormal(NamingConventionResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"📏 Naming Convention Analysis");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Analysis Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                }
+                output.AppendLine();
+                return output.ToString();
+            }
+
+            // Statistics
+            output.AppendLine($"📊 Analysis Statistics:");
+            output.AppendLine($"  Analyzed Symbols: {results.AnalyzedSymbols:N0}");
+            output.AppendLine($"  Total Violations: {results.TotalViolations:N0}");
+            output.AppendLine($"  Compliance Score: {results.ComplianceScore:F1}%");
+            output.AppendLine($"  High Severity: {results.HighSeverityViolations}");
+            output.AppendLine($"  Medium Severity: {results.MediumSeverityViolations}");
+            output.AppendLine($"  Low Severity: {results.LowSeverityViolations}");
+            output.AppendLine($"  Analyzed Projects: {results.AnalyzedProjects}");
+            output.AppendLine($"  Analyzed Files: {results.AnalyzedFiles}");
+            output.AppendLine();
+
+            // Violations by type
+            if (results.ViolationsByType.Any())
+            {
+                output.AppendLine($"📋 Violations by Type:");
+                foreach (var kvp in results.ViolationsByType.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Violations by symbol kind
+            if (results.ViolationsBySymbolKind.Any())
+            {
+                output.AppendLine($"🔤 Violations by Symbol Kind:");
+                foreach (var kvp in results.ViolationsBySymbolKind.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Top 10 high severity violations
+            var highViolations = results.Violations.Where(v => v.Severity == "High").Take(10).ToList();
+            if (highViolations.Any())
+            {
+                output.AppendLine($"🔴 High Severity Violations (showing {highViolations.Count}):");
+                foreach (var violation in highViolations)
+                {
+                    output.AppendLine($"  [{violation.ViolationType}] {violation.SymbolKind}: {violation.CurrentName}");
+                    output.AppendLine($"    Location: {violation.FileName}:{violation.LineNumber}");
+                    output.AppendLine($"    Expected: {violation.ExpectedConvention}");
+                    output.AppendLine($"    Suggested: {violation.SuggestedName}");
+                    output.AppendLine($"    Reason: {violation.Reason}");
+                    output.AppendLine();
+                }
+            }
+
+            // Top 10 medium severity violations
+            var mediumViolations = results.Violations.Where(v => v.Severity == "Medium").Take(10).ToList();
+            if (mediumViolations.Any())
+            {
+                output.AppendLine($"🟡 Medium Severity Violations (showing {mediumViolations.Count}):");
+                foreach (var violation in mediumViolations)
+                {
+                    output.AppendLine($"  [{violation.ViolationType}] {violation.SymbolKind}: {violation.CurrentName}");
+                    output.AppendLine($"    Location: {violation.FileName}:{violation.LineNumber}");
+                    output.AppendLine($"    Suggested: {violation.SuggestedName}");
+                    output.AppendLine();
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Naming Conventions - Detailed
+        private static string FormatNamingConventionsDetailed(NamingConventionResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"📏 Comprehensive Naming Convention Analysis");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Analysis Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                    if (!string.IsNullOrWhiteSpace(warning.Details))
+                    {
+                        output.AppendLine($"    Details: {warning.Details}");
+                    }
+                }
+                output.AppendLine();
+                return output.ToString();
+            }
+
+            // Complete statistics
+            output.AppendLine($"📊 Complete Analysis Statistics:");
+            output.AppendLine($"  Analyzed Symbols: {results.AnalyzedSymbols:N0}");
+            output.AppendLine($"  Total Violations: {results.TotalViolations:N0}");
+            output.AppendLine($"  Compliance Score: {results.ComplianceScore:F1}%");
+            output.AppendLine($"  High Severity: {results.HighSeverityViolations}");
+            output.AppendLine($"  Medium Severity: {results.MediumSeverityViolations}");
+            output.AppendLine($"  Low Severity: {results.LowSeverityViolations}");
+            output.AppendLine($"  Analyzed Projects: {results.AnalyzedProjects}");
+            output.AppendLine($"  Failed Projects: {results.FailedProjects}");
+            output.AppendLine($"  Analyzed Files: {results.AnalyzedFiles}");
+            output.AppendLine();
+
+            // Complete violations by type
+            if (results.ViolationsByType.Any())
+            {
+                output.AppendLine($"📋 All Violations by Type:");
+                foreach (var kvp in results.ViolationsByType.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Complete violations by symbol kind
+            if (results.ViolationsBySymbolKind.Any())
+            {
+                output.AppendLine($"🔤 All Violations by Symbol Kind:");
+                foreach (var kvp in results.ViolationsBySymbolKind.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Complete violations by project
+            if (results.ViolationsByProject.Any())
+            {
+                output.AppendLine($"📦 All Violations by Project:");
+                foreach (var kvp in results.ViolationsByProject.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Group violations by severity and type
+            var violationsBySeverity = results.Violations.GroupBy(v => v.Severity).OrderByDescending(g =>
+                g.Key == "High" ? 3 : g.Key == "Medium" ? 2 : 1);
+
+            foreach (var severityGroup in violationsBySeverity)
+            {
+                var icon = severityGroup.Key switch
+                {
+                    "High" => "🔴",
+                    "Medium" => "🟡",
+                    _ => "⚪"
+                };
+
+                output.AppendLine($"{icon} {severityGroup.Key} Severity Violations ({severityGroup.Count()}):");
+                output.AppendLine();
+
+                // Group by violation type within severity
+                var byType = severityGroup.GroupBy(v => v.ViolationType);
+                foreach (var typeGroup in byType)
+                {
+                    output.AppendLine($"  [{typeGroup.Key}] ({typeGroup.Count()} violations):");
+                    foreach (var violation in typeGroup)
+                    {
+                        output.AppendLine($"    • {violation.SymbolKind}: {violation.CurrentName}");
+                        output.AppendLine($"      Location: {violation.FilePath}:{violation.LineNumber}");
+                        output.AppendLine($"      Project: {violation.ProjectName}");
+                        output.AppendLine($"      Accessibility: {violation.Accessibility}");
+                        if (!string.IsNullOrWhiteSpace(violation.DeclaringType))
+                        {
+                            output.AppendLine($"      Declaring Type: {violation.DeclaringType}");
+                        }
+                        if (!string.IsNullOrWhiteSpace(violation.Namespace))
+                        {
+                            output.AppendLine($"      Namespace: {violation.Namespace}");
+                        }
+                        output.AppendLine($"      Expected Convention: {violation.ExpectedConvention}");
+                        output.AppendLine($"      Suggested Name: {violation.SuggestedName}");
+                        output.AppendLine($"      Reason: {violation.Reason}");
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Top files by violation count
+            if (results.ViolationsByFile.Any())
+            {
+                output.AppendLine($"📄 Files with Most Violations (top 20):");
+                foreach (var kvp in results.ViolationsByFile.OrderByDescending(k => k.Value).Take(20))
+                {
+                    output.AppendLine($"  {Path.GetFileName(kvp.Key)}: {kvp.Value} violations");
+                    output.AppendLine($"    Path: {kvp.Key}");
+                }
+                output.AppendLine();
+            }
+
+            // Convention recommendations summary
+            var conventionSummary = results.Violations
+                .GroupBy(v => v.ViolationType)
+                .Select(g => new
+                {
+                    Type = g.Key,
+                    Count = g.Count(),
+                    Example = g.First()
+                })
+                .OrderByDescending(x => x.Count);
+
+            output.AppendLine($"💡 Convention Guidelines Summary:");
+            foreach (var convention in conventionSummary)
+            {
+                output.AppendLine($"  [{convention.Type}] ({convention.Count} violations)");
+                output.AppendLine($"    Convention: {convention.Example.ExpectedConvention}");
+                output.AppendLine($"    Guideline: {convention.Example.Reason}");
+                output.AppendLine();
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: API Changes - Summary
+        private static string FormatAPIChangesSummary(APIChangeResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"🔄 API Changes Summary");
+            output.AppendLine($"Comparing: {results.OldVersionLabel} → {results.NewVersionLabel}");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Analysis Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                }
+                return output.ToString();
+            }
+
+            output.AppendLine($"📊 Key Metrics:");
+            output.AppendLine($"  Total Changes: {results.TotalChanges}");
+            output.AppendLine($"  Breaking Changes: {results.BreakingChanges}");
+            output.AppendLine($"  Non-Breaking Changes: {results.NonBreakingChanges}");
+            output.AppendLine($"  Added Symbols: {results.AddedSymbols}");
+            output.AppendLine($"  Removed Symbols: {results.RemovedSymbols}");
+            output.AppendLine($"  Modified Symbols: {results.ModifiedSymbols}");
+            output.AppendLine();
+
+            // Semantic versioning recommendation
+            var versionIcon = results.RecommendedVersionBump switch
+            {
+                "Major" => "🔴",
+                "Minor" => "🟡",
+                "Patch" => "🟢",
+                _ => "⚪"
+            };
+            output.AppendLine($"{versionIcon} Versioning Recommendation:");
+            output.AppendLine($"  {results.RecommendedVersionBump} version bump");
+            output.AppendLine($"  Reason: {results.VersioningReason}");
+
+            return output.ToString();
+        }
+
+        // Formatter: API Changes - Normal
+        private static string FormatAPIChangesNormal(APIChangeResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"🔄 API Change Analysis");
+            output.AppendLine($"Comparing: {results.OldVersionLabel} → {results.NewVersionLabel}");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Analysis Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                }
+                output.AppendLine();
+                return output.ToString();
+            }
+
+            // Statistics
+            output.AppendLine($"📊 Analysis Statistics:");
+            output.AppendLine($"  Total Changes: {results.TotalChanges}");
+            output.AppendLine($"  Breaking Changes: {results.BreakingChanges}");
+            output.AppendLine($"  Non-Breaking Changes: {results.NonBreakingChanges}");
+            output.AppendLine($"  Internal Changes: {results.InternalChanges}");
+            output.AppendLine($"  Added Symbols: {results.AddedSymbols}");
+            output.AppendLine($"  Removed Symbols: {results.RemovedSymbols}");
+            output.AppendLine($"  Modified Symbols: {results.ModifiedSymbols}");
+            output.AppendLine($"  Analyzed Old Symbols: {results.AnalyzedOldSymbols:N0}");
+            output.AppendLine($"  Analyzed New Symbols: {results.AnalyzedNewSymbols:N0}");
+            output.AppendLine();
+
+            // Semantic versioning recommendation
+            var versionIcon = results.RecommendedVersionBump switch
+            {
+                "Major" => "🔴",
+                "Minor" => "🟡",
+                "Patch" => "🟢",
+                _ => "⚪"
+            };
+            output.AppendLine($"{versionIcon} Versioning Recommendation:");
+            output.AppendLine($"  Recommended Bump: {results.RecommendedVersionBump}");
+            output.AppendLine($"  Reason: {results.VersioningReason}");
+            output.AppendLine();
+
+            // Changes by type
+            if (results.ChangesByType.Any())
+            {
+                output.AppendLine($"📋 Changes by Type:");
+                foreach (var kvp in results.ChangesByType.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Changes by symbol kind
+            if (results.ChangesBySymbolKind.Any())
+            {
+                output.AppendLine($"🔤 Changes by Symbol Kind:");
+                foreach (var kvp in results.ChangesBySymbolKind.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Top 10 critical/breaking changes
+            var breakingChanges = results.Changes
+                .Where(c => c.ImpactLevel == "Breaking")
+                .OrderByDescending(c => c.Severity == "Critical" ? 2 : 1)
+                .Take(10)
+                .ToList();
+
+            if (breakingChanges.Any())
+            {
+                output.AppendLine($"🔴 Breaking Changes (showing {breakingChanges.Count}):");
+                foreach (var change in breakingChanges)
+                {
+                    var severityIcon = change.Severity == "Critical" ? "🔴" : "🟠";
+                    output.AppendLine($"  {severityIcon} [{change.ChangeType}] {change.SymbolKind}: {change.SymbolName}");
+                    output.AppendLine($"    {change.Description}");
+                    if (!string.IsNullOrWhiteSpace(change.OldSignature))
+                    {
+                        output.AppendLine($"    Old: {change.OldSignature}");
+                    }
+                    if (!string.IsNullOrWhiteSpace(change.NewSignature))
+                    {
+                        output.AppendLine($"    New: {change.NewSignature}");
+                    }
+                    output.AppendLine($"    Migration: {change.MigrationGuidance}");
+                    output.AppendLine();
+                }
+            }
+
+            // Top 10 additions
+            var additions = results.Changes
+                .Where(c => c.ChangeType == "Added")
+                .Take(10)
+                .ToList();
+
+            if (additions.Any())
+            {
+                output.AppendLine($"✅ New Additions (showing {additions.Count}):");
+                foreach (var change in additions)
+                {
+                    output.AppendLine($"  + {change.SymbolKind}: {change.SymbolName}");
+                    if (!string.IsNullOrWhiteSpace(change.NewSignature))
+                    {
+                        output.AppendLine($"    Signature: {change.NewSignature}");
+                    }
+                    output.AppendLine();
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: API Changes - Detailed
+        private static string FormatAPIChangesDetailed(APIChangeResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"🔄 Comprehensive API Change Analysis");
+            output.AppendLine($"Comparing: {results.OldVersionLabel} → {results.NewVersionLabel}");
+            output.AppendLine($"Old Version: {results.OldVersionPath}");
+            output.AppendLine($"New Version: {results.NewVersionPath}");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Analysis Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                    if (!string.IsNullOrWhiteSpace(warning.Details))
+                    {
+                        output.AppendLine($"    Details: {warning.Details}");
+                    }
+                }
+                output.AppendLine();
+                return output.ToString();
+            }
+
+            // Complete statistics
+            output.AppendLine($"📊 Complete Analysis Statistics:");
+            output.AppendLine($"  Total Changes: {results.TotalChanges}");
+            output.AppendLine($"  Breaking Changes: {results.BreakingChanges}");
+            output.AppendLine($"  Non-Breaking Changes: {results.NonBreakingChanges}");
+            output.AppendLine($"  Internal Changes: {results.InternalChanges}");
+            output.AppendLine($"  Added Symbols: {results.AddedSymbols}");
+            output.AppendLine($"  Removed Symbols: {results.RemovedSymbols}");
+            output.AppendLine($"  Modified Symbols: {results.ModifiedSymbols}");
+            output.AppendLine($"  Critical Severity: {results.CriticalChanges}");
+            output.AppendLine($"  High Severity: {results.HighSeverityChanges}");
+            output.AppendLine($"  Medium Severity: {results.MediumSeverityChanges}");
+            output.AppendLine($"  Low Severity: {results.LowSeverityChanges}");
+            output.AppendLine($"  Analyzed Old Symbols: {results.AnalyzedOldSymbols:N0}");
+            output.AppendLine($"  Analyzed New Symbols: {results.AnalyzedNewSymbols:N0}");
+            output.AppendLine();
+
+            // Semantic versioning recommendation
+            var versionIcon = results.RecommendedVersionBump switch
+            {
+                "Major" => "🔴",
+                "Minor" => "🟡",
+                "Patch" => "🟢",
+                _ => "⚪"
+            };
+            output.AppendLine($"{versionIcon} Semantic Versioning Recommendation:");
+            output.AppendLine($"  Recommended Bump: {results.RecommendedVersionBump}");
+            output.AppendLine($"  Reason: {results.VersioningReason}");
+            output.AppendLine();
+
+            // Complete changes by type
+            if (results.ChangesByType.Any())
+            {
+                output.AppendLine($"📋 All Changes by Type:");
+                foreach (var kvp in results.ChangesByType.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Complete changes by symbol kind
+            if (results.ChangesBySymbolKind.Any())
+            {
+                output.AppendLine($"🔤 All Changes by Symbol Kind:");
+                foreach (var kvp in results.ChangesBySymbolKind.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Changes by namespace
+            if (results.ChangesByNamespace.Any())
+            {
+                output.AppendLine($"📦 Changes by Namespace:");
+                foreach (var kvp in results.ChangesByNamespace.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Group changes by impact level and change type
+            var changesByImpact = results.Changes.GroupBy(c => c.ImpactLevel).OrderByDescending(g =>
+                g.Key == "Breaking" ? 3 : g.Key == "NonBreaking" ? 2 : 1);
+
+            foreach (var impactGroup in changesByImpact)
+            {
+                var icon = impactGroup.Key switch
+                {
+                    "Breaking" => "🔴",
+                    "NonBreaking" => "🟢",
+                    _ => "⚪"
+                };
+
+                output.AppendLine($"{icon} {impactGroup.Key} Changes ({impactGroup.Count()}):");
+                output.AppendLine();
+
+                // Group by change type within impact level
+                var byType = impactGroup.GroupBy(c => c.ChangeType);
+                foreach (var typeGroup in byType)
+                {
+                    output.AppendLine($"  [{typeGroup.Key}] ({typeGroup.Count()} changes):");
+                    foreach (var change in typeGroup)
+                    {
+                        output.AppendLine($"    • {change.SymbolKind}: {change.FullSymbolName}");
+                        output.AppendLine($"      Severity: {change.Severity}");
+                        output.AppendLine($"      Description: {change.Description}");
+
+                        if (!string.IsNullOrWhiteSpace(change.OldSignature))
+                        {
+                            output.AppendLine($"      Old Signature: {change.OldSignature}");
+                        }
+                        if (!string.IsNullOrWhiteSpace(change.NewSignature))
+                        {
+                            output.AppendLine($"      New Signature: {change.NewSignature}");
+                        }
+                        if (!string.IsNullOrWhiteSpace(change.OldAccessibility))
+                        {
+                            output.AppendLine($"      Accessibility: {change.OldAccessibility} → {change.NewAccessibility}");
+                        }
+                        if (!string.IsNullOrWhiteSpace(change.Namespace))
+                        {
+                            output.AppendLine($"      Namespace: {change.Namespace}");
+                        }
+                        if (!string.IsNullOrWhiteSpace(change.DeclaringType))
+                        {
+                            output.AppendLine($"      Declaring Type: {change.DeclaringType}");
+                        }
+
+                        output.AppendLine($"      Migration Guidance: {change.MigrationGuidance}");
+
+                        if (change.AffectedAreas.Any())
+                        {
+                            output.AppendLine($"      Affected Areas: {string.Join(", ", change.AffectedAreas)}");
+                        }
+
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Migration summary
+            output.AppendLine($"📝 Migration Summary:");
+            if (results.BreakingChanges > 0)
+            {
+                output.AppendLine($"  ⚠️ {results.BreakingChanges} breaking change(s) require code updates");
+                output.AppendLine($"  • Review all removed and modified APIs");
+                output.AppendLine($"  • Update consumer code to use new signatures");
+                output.AppendLine($"  • Test thoroughly before deployment");
+            }
+            if (results.AddedSymbols > 0)
+            {
+                output.AppendLine($"  ✅ {results.AddedSymbols} new API(s) available");
+                output.AppendLine($"  • Update documentation with new features");
+                output.AppendLine($"  • Consider deprecation notices for replaced APIs");
+            }
+            if (results.TotalChanges == 0)
+            {
+                output.AppendLine($"  ✅ No API changes detected - versions are API-compatible");
             }
 
             return output.ToString();

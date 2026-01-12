@@ -1,7 +1,7 @@
 # New Tool Opportunities for RoslynCSMCP
 
 **Date**: 2026-01-12
-**Current Tools**: 32
+**Current Tools**: 34
 
 ---
 
@@ -99,15 +99,17 @@ Based on the current tool coverage analysis, here are other recommended tools in
 - **Effort**: 2-3 days
 - **Status**: Completed 2026-01-12
 
-#### 4. AnalyzeNamingConventions (Medium Priority)
+#### 4. AnalyzeNamingConventions (Medium Priority) ✅ IMPLEMENTED
 - **Why**: Code consistency enforcement
 - **Value**: Automated code review for naming standards
 - **Effort**: 1-2 days
+- **Status**: Completed 2026-01-12
 
-#### 5. AnalyzeAPIChanges (Medium Priority)
+#### 5. AnalyzeAPIChanges (Medium Priority) ✅ IMPLEMENTED
 - **Why**: Track breaking changes between versions
 - **Value**: Semantic versioning guidance, migration planning
 - **Effort**: 3-4 days
+- **Status**: Completed 2026-01-12
 
 ---
 
@@ -192,6 +194,45 @@ Based on the current tool coverage analysis, here are other recommended tools in
    - Fix recommendations with code examples
    - Filterable by issue type
    - Groups by type, project, file, and severity
+   - 3 format modes (summary/normal/detailed)
+   - Token optimization: 40-70% savings
+
+10. **AnalyzeNamingConventions** (2026-01-12)
+   - C# naming convention compliance analysis
+   - 7 violation types: Interface, Type, Method, Property, Field, Parameter, TypeParameter naming
+   - Interface naming validation (IPascalCase)
+   - Type naming validation (PascalCase for classes, structs, enums, delegates)
+   - Method and property naming (PascalCase)
+   - Field naming validation (private/protected: _camelCase, public: PascalCase, constants: PascalCase or UPPER_CASE)
+   - Parameter naming (camelCase)
+   - Type parameter naming (TPascalCase)
+   - Provides suggested names for violations
+   - Severity classification (High/Medium/Low)
+   - Compliance score calculation (percentage of symbols following conventions)
+   - Scope filtering (all/public/internal symbols)
+   - Groups violations by type, symbol kind, project, and file
+   - Convention guidelines and recommendations
+   - 3 format modes (summary/normal/detailed)
+   - Token optimization: 40-70% savings
+
+11. **AnalyzeAPIChanges** (2026-01-12)
+   - API change analysis between two solution versions
+   - Detects added symbols (new APIs)
+   - Identifies removed symbols (breaking changes)
+   - Tracks method signature changes (parameters, return types)
+   - Monitors accessibility changes (public/internal/protected/private)
+   - Detects type modifier changes (abstract, sealed)
+   - Tracks base type changes in inheritance hierarchies
+   - Monitors property type changes
+   - Impact level classification (Breaking/NonBreaking/Internal)
+   - Severity levels (Critical/High/Medium/Low)
+   - Migration guidance for each change
+   - Semantic versioning recommendations (Major/Minor/Patch)
+   - Automatic version bump suggestions based on changes
+   - Groups changes by type, symbol kind, and namespace
+   - Identifies affected areas for each change
+   - Compares public API surface between versions
+   - Optional internal API comparison
    - 3 format modes (summary/normal/detailed)
    - Token optimization: 40-70% savings
 

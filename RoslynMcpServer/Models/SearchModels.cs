@@ -1006,4 +1006,135 @@ namespace RoslynMcpServer.Models
         // Issues by file
         public Dictionary<string, int> IssuesByFile { get; set; } = new();
     }
+
+    /// <summary>
+    /// Represents a naming convention violation
+    /// </summary>
+    public class NamingViolation
+    {
+        public string SymbolName { get; set; } = string.Empty;
+        public string SymbolKind { get; set; } = string.Empty; // Class, Interface, Method, Field, etc.
+        public string ViolationType { get; set; } = string.Empty; // InterfaceNaming, Casing, PrivateFieldNaming, etc.
+        public string Severity { get; set; } = string.Empty; // High, Medium, Low
+        public string CurrentName { get; set; } = string.Empty;
+        public string SuggestedName { get; set; } = string.Empty;
+        public string ExpectedConvention { get; set; } = string.Empty;
+        public string Reason { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string Accessibility { get; set; } = string.Empty;
+        public string Namespace { get; set; } = string.Empty;
+        public string DeclaringType { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Results from naming convention analysis
+    /// </summary>
+    public class NamingConventionResults
+    {
+        public List<NamingViolation> Violations { get; set; } = new();
+
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int AnalyzedSymbols { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics
+        public int TotalViolations => Violations.Count;
+        public int HighSeverityViolations => Violations.Count(v => v.Severity == "High");
+        public int MediumSeverityViolations => Violations.Count(v => v.Severity == "Medium");
+        public int LowSeverityViolations => Violations.Count(v => v.Severity == "Low");
+
+        // Violations by type
+        public Dictionary<string, int> ViolationsByType { get; set; } = new();
+
+        // Violations by symbol kind
+        public Dictionary<string, int> ViolationsBySymbolKind { get; set; } = new();
+
+        // Violations by project
+        public Dictionary<string, int> ViolationsByProject { get; set; } = new();
+
+        // Violations by file
+        public Dictionary<string, int> ViolationsByFile { get; set; } = new();
+
+        // Compliance score (percentage of symbols following conventions)
+        public double ComplianceScore => AnalyzedSymbols > 0
+            ? ((AnalyzedSymbols - TotalViolations) * 100.0 / AnalyzedSymbols)
+            : 100.0;
+    }
+
+    /// <summary>
+    /// Represents an API change between two versions
+    /// </summary>
+    public class APIChange
+    {
+        public string SymbolName { get; set; } = string.Empty;
+        public string FullSymbolName { get; set; } = string.Empty;
+        public string SymbolKind { get; set; } = string.Empty; // Type, Method, Property, Field, Event
+        public string ChangeType { get; set; } = string.Empty; // Added, Removed, Modified, AccessibilityChanged, SignatureChanged
+        public string ImpactLevel { get; set; } = string.Empty; // Breaking, NonBreaking, Internal
+        public string Severity { get; set; } = string.Empty; // Critical, High, Medium, Low
+        public string Description { get; set; } = string.Empty;
+        public string OldVersion { get; set; } = string.Empty;
+        public string NewVersion { get; set; } = string.Empty;
+        public string OldSignature { get; set; } = string.Empty;
+        public string NewSignature { get; set; } = string.Empty;
+        public string OldAccessibility { get; set; } = string.Empty;
+        public string NewAccessibility { get; set; } = string.Empty;
+        public string Namespace { get; set; } = string.Empty;
+        public string DeclaringType { get; set; } = string.Empty;
+        public string MigrationGuidance { get; set; } = string.Empty;
+        public List<string> AffectedAreas { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Results from API change analysis
+    /// </summary>
+    public class APIChangeResults
+    {
+        public List<APIChange> Changes { get; set; } = new();
+
+        public string OldVersionPath { get; set; } = string.Empty;
+        public string NewVersionPath { get; set; } = string.Empty;
+        public string OldVersionLabel { get; set; } = string.Empty;
+        public string NewVersionLabel { get; set; } = string.Empty;
+
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedOldSymbols { get; set; }
+        public int AnalyzedNewSymbols { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics
+        public int TotalChanges => Changes.Count;
+        public int BreakingChanges => Changes.Count(c => c.ImpactLevel == "Breaking");
+        public int NonBreakingChanges => Changes.Count(c => c.ImpactLevel == "NonBreaking");
+        public int InternalChanges => Changes.Count(c => c.ImpactLevel == "Internal");
+
+        public int AddedSymbols => Changes.Count(c => c.ChangeType == "Added");
+        public int RemovedSymbols => Changes.Count(c => c.ChangeType == "Removed");
+        public int ModifiedSymbols => Changes.Count(c => c.ChangeType == "Modified" ||
+                                                          c.ChangeType == "AccessibilityChanged" ||
+                                                          c.ChangeType == "SignatureChanged");
+
+        public int CriticalChanges => Changes.Count(c => c.Severity == "Critical");
+        public int HighSeverityChanges => Changes.Count(c => c.Severity == "High");
+        public int MediumSeverityChanges => Changes.Count(c => c.Severity == "Medium");
+        public int LowSeverityChanges => Changes.Count(c => c.Severity == "Low");
+
+        // Changes by type
+        public Dictionary<string, int> ChangesByType { get; set; } = new();
+
+        // Changes by symbol kind
+        public Dictionary<string, int> ChangesBySymbolKind { get; set; } = new();
+
+        // Changes by namespace
+        public Dictionary<string, int> ChangesByNamespace { get; set; } = new();
+
+        // Semantic versioning recommendation
+        public string RecommendedVersionBump { get; set; } = string.Empty; // Major, Minor, Patch
+        public string VersioningReason { get; set; } = string.Empty;
+    }
 }
