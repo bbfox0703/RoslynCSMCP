@@ -1,7 +1,7 @@
 # New Tool Opportunities for RoslynCSMCP
 
 **Date**: 2026-01-12
-**Current Tools**: 31
+**Current Tools**: 32
 
 ---
 
@@ -81,20 +81,23 @@ Up to Date (12 packages):
 
 Based on the current tool coverage analysis, here are other recommended tools in priority order:
 
-#### 1. GetTestCoverage (High Priority)
+#### 1. GetTestCoverage (High Priority) ✅ IMPLEMENTED
 - **Why**: Current `FindTestsForType` only finds tests, but doesn't analyze coverage
 - **Value**: Identifies untested code, especially high-risk areas (complex methods without tests)
 - **Effort**: 2-3 days
+- **Status**: Completed 2026-01-12
 
-#### 2. GetChangeImpact (High Priority)
+#### 2. GetChangeImpact (High Priority) ✅ IMPLEMENTED
 - **Why**: Risk assessment before refactoring
 - **Value**: Shows impact radius of changes (what breaks if you modify this symbol)
 - **Effort**: 3-4 days
+- **Status**: Completed 2026-01-12
 
-#### 3. FindPerformanceIssues (Medium Priority)
+#### 3. FindPerformanceIssues (Medium Priority) ✅ IMPLEMENTED
 - **Why**: Detect common performance anti-patterns
-- **Value**: LINQ misuse, string concatenation in loops, boxing issues
+- **Value**: LINQ misuse, string concatenation in loops, boxing issues, sync-over-async
 - **Effort**: 2-3 days
+- **Status**: Completed 2026-01-12
 
 #### 4. AnalyzeNamingConventions (Medium Priority)
 - **Why**: Code consistency enforcement
@@ -174,6 +177,21 @@ Based on the current tool coverage analysis, here are other recommended tools in
    - Public API impact analysis
    - Cross-project dependency tracking
    - Actionable refactoring recommendations
+   - 3 format modes (summary/normal/detailed)
+   - Token optimization: 40-70% savings
+
+9. **FindPerformanceIssues** (2026-01-12)
+   - Performance anti-pattern detection
+   - 5 issue types: LINQ misuse, string concatenation in loops, sync-over-async, IDisposable not disposed, exception handling
+   - LINQ pattern analysis (Count() vs Any(), multiple ToList(), unnecessary materialization)
+   - Sync-over-async detection (.Result, .Wait() in async methods)
+   - Resource leak detection (IDisposable without using statements)
+   - Exception handling anti-patterns (empty catch blocks)
+   - Severity classification (Critical/High/Medium/Low)
+   - Performance impact estimation (0-10 scale)
+   - Fix recommendations with code examples
+   - Filterable by issue type
+   - Groups by type, project, file, and severity
    - 3 format modes (summary/normal/detailed)
    - Token optimization: 40-70% savings
 
