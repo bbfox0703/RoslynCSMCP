@@ -773,4 +773,108 @@ namespace RoslynMcpServer.Models
         public int MediumVulnerabilities => Vulnerabilities.Count(v => v.Severity == "Medium");
         public int LowVulnerabilities => Vulnerabilities.Count(v => v.Severity == "Low");
     }
+
+    /// <summary>
+    /// Represents a type (class/interface) and its test coverage
+    /// </summary>
+    public class TypeCoverage
+    {
+        public string TypeName { get; set; } = string.Empty;
+        public string FullTypeName { get; set; } = string.Empty;
+        public string Namespace { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string Accessibility { get; set; } = string.Empty;
+        public bool IsAbstract { get; set; }
+        public bool IsSealed { get; set; }
+
+        // Test information
+        public bool HasTests { get; set; }
+        public List<string> TestClasses { get; set; } = new();
+        public int TestCount { get; set; }
+
+        // Member coverage
+        public int TotalPublicMembers { get; set; }
+        public int TestedPublicMembers { get; set; }
+        public List<MemberCoverage> UncoveredMembers { get; set; } = new();
+
+        // Complexity information
+        public int CyclomaticComplexity { get; set; }
+        public int MaxMethodComplexity { get; set; }
+
+        // Coverage percentage
+        public double CoveragePercentage => TotalPublicMembers > 0
+            ? (TestedPublicMembers * 100.0 / TotalPublicMembers)
+            : 0;
+
+        // Risk assessment
+        public string RiskLevel { get; set; } = string.Empty; // Critical, High, Medium, Low
+    }
+
+    /// <summary>
+    /// Represents a member (method/property) and its test coverage
+    /// </summary>
+    public class MemberCoverage
+    {
+        public string MemberName { get; set; } = string.Empty;
+        public string MemberKind { get; set; } = string.Empty; // Method, Property, Event
+        public string Signature { get; set; } = string.Empty;
+        public string DeclaringType { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public bool HasTest { get; set; }
+        public List<string> TestMethods { get; set; } = new();
+        public int CyclomaticComplexity { get; set; }
+        public bool IsPublic { get; set; }
+        public bool IsVirtual { get; set; }
+        public bool IsAbstract { get; set; }
+    }
+
+    /// <summary>
+    /// Represents coverage statistics for a project or namespace
+    /// </summary>
+    public class CoverageStatistics
+    {
+        public string Name { get; set; } = string.Empty; // Project or namespace name
+        public int TotalTypes { get; set; }
+        public int TestedTypes { get; set; }
+        public int UncoveredTypes { get; set; }
+        public int TotalPublicMembers { get; set; }
+        public int TestedPublicMembers { get; set; }
+        public int UncoveredPublicMembers { get; set; }
+        public double TypeCoveragePercentage => TotalTypes > 0 ? (TestedTypes * 100.0 / TotalTypes) : 0;
+        public double MemberCoveragePercentage => TotalPublicMembers > 0 ? (TestedPublicMembers * 100.0 / TotalPublicMembers) : 0;
+    }
+
+    /// <summary>
+    /// Wrapper for test coverage analysis results
+    /// </summary>
+    public class TestCoverageResults
+    {
+        public List<TypeCoverage> TypeCoverages { get; set; } = new();
+        public Dictionary<string, CoverageStatistics> ProjectStatistics { get; set; } = new();
+        public Dictionary<string, CoverageStatistics> NamespaceStatistics { get; set; } = new();
+
+        public int AnalyzedProjects { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Overall statistics
+        public int TotalTypes { get; set; }
+        public int TestedTypes { get; set; }
+        public int UncoveredTypes => TotalTypes - TestedTypes;
+        public int TotalPublicMembers { get; set; }
+        public int TestedPublicMembers { get; set; }
+        public int UncoveredPublicMembers => TotalPublicMembers - TestedPublicMembers;
+
+        // Coverage percentages
+        public double OverallTypeCoverage => TotalTypes > 0 ? (TestedTypes * 100.0 / TotalTypes) : 0;
+        public double OverallMemberCoverage => TotalPublicMembers > 0 ? (TestedPublicMembers * 100.0 / TotalPublicMembers) : 0;
+
+        // Risk analysis
+        public int CriticalRiskTypes { get; set; } // High complexity, no tests
+        public int HighRiskTypes { get; set; }     // Medium complexity, no tests
+        public int MediumRiskTypes { get; set; }   // Low complexity, no tests or High complexity, partial tests
+        public int LowRiskTypes { get; set; }      // Fully tested
+    }
 }

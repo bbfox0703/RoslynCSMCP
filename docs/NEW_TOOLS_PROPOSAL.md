@@ -1,7 +1,7 @@
 # New Tool Opportunities for RoslynCSMCP
 
 **Date**: 2026-01-12
-**Current Tools**: 28
+**Current Tools**: 30
 
 ---
 
@@ -145,6 +145,25 @@ Based on the current tool coverage analysis, here are other recommended tools in
    - 3 format modes (summary/normal/detailed)
    - Detailed view includes suggested XML documentation for each undocumented symbol
    - Token optimization: 40-60% savings
+
+6. **AnalyzePackages** (2026-01-12)
+   - NuGet package analysis and management
+   - Check for package updates (with version gap analysis)
+   - Detect version conflicts across projects
+   - Identify unused packages (via namespace usage analysis)
+   - Placeholder for security vulnerability checking
+   - 3 format modes (summary/normal/detailed)
+   - Token optimization: 40-70% savings
+
+7. **GetTestCoverage** (2026-01-12)
+   - Comprehensive test coverage analysis
+   - Type-level and member-level coverage percentages
+   - Risk assessment (Critical/High/Medium/Low based on complexity and coverage)
+   - Groups by project or namespace
+   - Identifies high-risk uncovered code
+   - Calculates cyclomatic complexity
+   - 3 format modes (summary/normal/detailed)
+   - Token optimization: 40-70% savings
 
 ---
 

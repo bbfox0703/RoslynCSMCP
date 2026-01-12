@@ -3,9 +3,9 @@
 This document lists all available MCP tools provided by RoslynCSMCP server for C# code analysis.
 
 > **Last Updated**: 2026-01-12
-> **Total Tools**: 29
+> **Total Tools**: 30
 >
-> **Recent Additions**: FindTODOComments, FindLargeFiles, FindDeprecatedAPIs, GetFileStatistics, AnalyzePackages
+> **Recent Additions**: FindTODOComments, FindLargeFiles, FindDeprecatedAPIs, GetFileStatistics, AnalyzePackages, GetTestCoverage
 
 ---
 
@@ -314,9 +314,49 @@ Use AnalyzePackages tool with:
 
 ---
 
+### 25. GetTestCoverage
+**Description**: Comprehensive test coverage analysis - identify untested code, calculate coverage percentages, and assess high-risk areas
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `scope` (string, optional): Scope: public (only public types), all (all types). Default: public
+- `groupBy` (string, optional): Group by: project, namespace. Default: project
+
+**Example Usage**:
+```
+Use GetTestCoverage tool with:
+- solutionPath: "D:\MyProject\MyProject.sln"
+- format: "normal"
+- groupBy: "project"
+```
+
+**Features**:
+- Analyzes test coverage for all types in non-test projects
+- Calculates type-level and member-level coverage percentages
+- Identifies uncovered types and methods
+- Assesses risk levels based on complexity and test coverage:
+  - **Critical Risk**: High complexity, no tests
+  - **High Risk**: Medium complexity, no tests
+  - **Medium Risk**: Low complexity without tests or high complexity with partial tests
+  - **Low Risk**: Well-tested code
+- Groups coverage statistics by project or namespace
+- Identifies high-risk areas requiring immediate testing attention
+- Calculates cyclomatic complexity for each type and method
+
+**Output Information**:
+- Overall type coverage percentage
+- Overall member coverage percentage
+- Coverage breakdown by project/namespace
+- List of high-risk uncovered types
+- Detailed member coverage for critical types
+- Risk analysis summary
+
+---
+
 ## 🚀 Utility Tools
 
-### 25. FindTODOComments
+### 26. FindTODOComments
 **Description**: Find all TODO, FIXME, HACK, and NOTE comments across the solution
 
 **Parameters**:
@@ -327,7 +367,7 @@ Use AnalyzePackages tool with:
 
 ---
 
-### 26. FindLargeFiles
+### 27. FindLargeFiles
 **Description**: Find large source files that may need refactoring
 
 **Parameters**:
@@ -338,7 +378,7 @@ Use AnalyzePackages tool with:
 
 ---
 
-### 27. FindDeprecatedAPIs
+### 28. FindDeprecatedAPIs
 **Description**: Find usages of deprecated/obsolete APIs (both internal and .NET framework)
 
 **Parameters**:
@@ -349,7 +389,7 @@ Use AnalyzePackages tool with:
 
 ---
 
-### 28. GetFileStatistics
+### 29. GetFileStatistics
 **Description**: Get detailed statistics for a specific C# source file
 
 **Parameters**:
@@ -359,7 +399,7 @@ Use AnalyzePackages tool with:
 
 ---
 
-### 29. BatchQuery
+### 30. BatchQuery
 **Description**: Execute multiple queries in a single batch request
 
 **Parameters**:

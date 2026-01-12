@@ -1251,6 +1251,62 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Analyze test coverage for all types in solution - identify untested code, coverage percentages, and high-risk areas")]
+        public static async Task<string> GetTestCoverage(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+            string format = "normal",
+            [Description("Scope: public (only public types), all (all types). Default: public")]
+            string scope = "public",
+            [Description("Group by: project, namespace. Default: project")]
+            string groupBy = "project",
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<TestCoverageAnalyzer>>();
+
+            try
+            {
+                // Validate solution path
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<TestCoverageAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Test coverage analyzer service not available.";
+                }
+
+                // Perform analysis
+                var diagnosticLogger = serviceProvider?.GetService<DiagnosticLogger>();
+                Func<Task<TestCoverageResults>> operation = async () =>
+                    await analyzer.AnalyzeTestCoverageAsync(solutionPath, scope, groupBy);
+
+                var results = diagnosticLogger != null
+                    ? await diagnosticLogger.LoggedExecutionAsync(
+                        "GetTestCoverage",
+                        operation,
+                        new { solutionPath, format, scope, groupBy })
+                    : await operation();
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatTestCoverageSummary(results),
+                    "detailed" => FormatTestCoverageDetailed(results, groupBy),
+                    _ => FormatTestCoverageNormal(results, groupBy)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error analyzing test coverage");
+                return $"Error: An unexpected error occurred while analyzing test coverage: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Get complete class hierarchy showing ancestors (base classes/interfaces) and descendants (derived classes)")]
         public static async Task<string> GetClassHierarchy(
             [Description("Type name to analyze hierarchy for")] string typeName,
@@ -6039,6 +6095,271 @@ namespace RoslynMcpServer.Tools
                 "low" => "🔵",
                 _ => "⚪"
             };
+        }
+
+        // Formatter: Test Coverage - Summary
+        private static string FormatTestCoverageSummary(TestCoverageResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine("🧪 Test Coverage Summary");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  - {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Overall coverage
+            output.AppendLine("📊 Overall Coverage:");
+            output.AppendLine($"  Type Coverage: {results.TestedTypes}/{results.TotalTypes} ({results.OverallTypeCoverage:F1}%)");
+            output.AppendLine($"  Member Coverage: {results.TestedPublicMembers}/{results.TotalPublicMembers} ({results.OverallMemberCoverage:F1}%)");
+            output.AppendLine($"  Analyzed Projects: {results.AnalyzedProjects}");
+            if (results.FailedProjects > 0)
+                output.AppendLine($"  Failed Projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Risk analysis
+            if (results.CriticalRiskTypes > 0 || results.HighRiskTypes > 0)
+            {
+                output.AppendLine("⚠️ Risk Analysis:");
+                if (results.CriticalRiskTypes > 0)
+                    output.AppendLine($"  🔴 Critical Risk: {results.CriticalRiskTypes} types (high complexity, no tests)");
+                if (results.HighRiskTypes > 0)
+                    output.AppendLine($"  🔶 High Risk: {results.HighRiskTypes} types (medium complexity, no tests)");
+                if (results.MediumRiskTypes > 0)
+                    output.AppendLine($"  🟡 Medium Risk: {results.MediumRiskTypes} types");
+                output.AppendLine();
+            }
+
+            // Status summary
+            if (results.OverallTypeCoverage >= 80)
+            {
+                output.AppendLine("✅ Excellent test coverage!");
+            }
+            else if (results.OverallTypeCoverage >= 60)
+            {
+                output.AppendLine("⚠️ Good coverage, but room for improvement");
+            }
+            else if (results.OverallTypeCoverage >= 40)
+            {
+                output.AppendLine("⚠️ Moderate coverage - consider adding more tests");
+            }
+            else
+            {
+                output.AppendLine("🔴 Low coverage - significant testing needed");
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Test Coverage - Normal
+        private static string FormatTestCoverageNormal(TestCoverageResults results, string groupBy)
+        {
+            var output = new StringBuilder();
+            output.AppendLine("🧪 Test Coverage Analysis");
+            output.AppendLine();
+
+            // Overall statistics
+            output.AppendLine("📊 Overall Statistics:");
+            output.AppendLine($"  Types: {results.TestedTypes}/{results.TotalTypes} tested ({results.OverallTypeCoverage:F1}%)");
+            output.AppendLine($"  Public Members: {results.TestedPublicMembers}/{results.TotalPublicMembers} tested ({results.OverallMemberCoverage:F1}%)");
+            output.AppendLine($"  Uncovered Types: {results.UncoveredTypes}");
+            output.AppendLine($"  Uncovered Members: {results.UncoveredPublicMembers}");
+            output.AppendLine($"  Analyzed Projects: {results.AnalyzedProjects}");
+            output.AppendLine();
+
+            // Risk analysis
+            output.AppendLine("⚠️ Risk Analysis:");
+            output.AppendLine($"  🔴 Critical Risk: {results.CriticalRiskTypes} types");
+            output.AppendLine($"  🔶 High Risk: {results.HighRiskTypes} types");
+            output.AppendLine($"  🟡 Medium Risk: {results.MediumRiskTypes} types");
+            output.AppendLine($"  ✅ Low Risk: {results.LowRiskTypes} types");
+            output.AppendLine();
+
+            // Coverage by group
+            if (groupBy.ToLower() == "project" && results.ProjectStatistics.Any())
+            {
+                output.AppendLine($"📦 Coverage by Project (showing top 10):");
+                foreach (var stat in results.ProjectStatistics.Values
+                    .OrderBy(s => s.TypeCoveragePercentage)
+                    .Take(10))
+                {
+                    var icon = stat.TypeCoveragePercentage >= 80 ? "✅" :
+                               stat.TypeCoveragePercentage >= 60 ? "⚠️" : "🔴";
+                    output.AppendLine($"  {icon} {stat.Name}:");
+                    output.AppendLine($"     Types: {stat.TestedTypes}/{stat.TotalTypes} ({stat.TypeCoveragePercentage:F1}%)");
+                    output.AppendLine($"     Members: {stat.TestedPublicMembers}/{stat.TotalPublicMembers} ({stat.MemberCoveragePercentage:F1}%)");
+                }
+                output.AppendLine();
+            }
+            else if (groupBy.ToLower() == "namespace" && results.NamespaceStatistics.Any())
+            {
+                output.AppendLine($"📁 Coverage by Namespace (showing top 10):");
+                foreach (var stat in results.NamespaceStatistics.Values
+                    .OrderBy(s => s.TypeCoveragePercentage)
+                    .Take(10))
+                {
+                    var icon = stat.TypeCoveragePercentage >= 80 ? "✅" :
+                               stat.TypeCoveragePercentage >= 60 ? "⚠️" : "🔴";
+                    output.AppendLine($"  {icon} {stat.Name}:");
+                    output.AppendLine($"     Types: {stat.TestedTypes}/{stat.TotalTypes} ({stat.TypeCoveragePercentage:F1}%)");
+                    output.AppendLine($"     Members: {stat.TestedPublicMembers}/{stat.TotalPublicMembers} ({stat.MemberCoveragePercentage:F1}%)");
+                }
+                output.AppendLine();
+            }
+
+            // High-risk types (top 10)
+            var highRiskTypes = results.TypeCoverages
+                .Where(t => t.RiskLevel == "Critical" || t.RiskLevel == "High")
+                .OrderByDescending(t => t.CyclomaticComplexity)
+                .Take(10)
+                .ToList();
+
+            if (highRiskTypes.Any())
+            {
+                output.AppendLine($"🔴 High-Risk Uncovered Types (showing top 10 of {results.CriticalRiskTypes + results.HighRiskTypes}):");
+                foreach (var type in highRiskTypes)
+                {
+                    var riskIcon = type.RiskLevel == "Critical" ? "🔴" : "🔶";
+                    output.AppendLine($"  {riskIcon} {type.FullTypeName} @ {type.FilePath}:{type.LineNumber}");
+                    output.AppendLine($"     Complexity: {type.CyclomaticComplexity} | Max Method: {type.MaxMethodComplexity}");
+                    output.AppendLine($"     Uncovered Members: {type.UncoveredMembers.Count}/{type.TotalPublicMembers}");
+                    output.AppendLine();
+                }
+            }
+
+            // Warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  - {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Test Coverage - Detailed
+        private static string FormatTestCoverageDetailed(TestCoverageResults results, string groupBy)
+        {
+            var output = new StringBuilder();
+            output.AppendLine("🧪 Comprehensive Test Coverage Analysis");
+            output.AppendLine();
+
+            // Full statistics
+            output.AppendLine("📊 Complete Statistics:");
+            output.AppendLine($"  Total Types: {results.TotalTypes}");
+            output.AppendLine($"  Tested Types: {results.TestedTypes}");
+            output.AppendLine($"  Uncovered Types: {results.UncoveredTypes}");
+            output.AppendLine($"  Type Coverage: {results.OverallTypeCoverage:F1}%");
+            output.AppendLine();
+            output.AppendLine($"  Total Public Members: {results.TotalPublicMembers}");
+            output.AppendLine($"  Tested Members: {results.TestedPublicMembers}");
+            output.AppendLine($"  Uncovered Members: {results.UncoveredPublicMembers}");
+            output.AppendLine($"  Member Coverage: {results.OverallMemberCoverage:F1}%");
+            output.AppendLine();
+            output.AppendLine($"  Analyzed Projects: {results.AnalyzedProjects}");
+            output.AppendLine($"  Failed Projects: {results.FailedProjects}");
+            output.AppendLine();
+
+            // Detailed risk analysis
+            output.AppendLine("⚠️ Risk Analysis:");
+            output.AppendLine($"  🔴 Critical Risk: {results.CriticalRiskTypes} types (high complexity, no tests)");
+            output.AppendLine($"  🔶 High Risk: {results.HighRiskTypes} types (medium complexity, no tests)");
+            output.AppendLine($"  🟡 Medium Risk: {results.MediumRiskTypes} types");
+            output.AppendLine($"  ✅ Low Risk: {results.LowRiskTypes} types (well tested)");
+            output.AppendLine();
+
+            // All group statistics
+            if (groupBy.ToLower() == "project" && results.ProjectStatistics.Any())
+            {
+                output.AppendLine($"📦 Coverage by Project ({results.ProjectStatistics.Count} projects):");
+                foreach (var stat in results.ProjectStatistics.Values.OrderBy(s => s.TypeCoveragePercentage))
+                {
+                    var icon = stat.TypeCoveragePercentage >= 80 ? "✅" :
+                               stat.TypeCoveragePercentage >= 60 ? "⚠️" : "🔴";
+                    output.AppendLine($"  {icon} {stat.Name}:");
+                    output.AppendLine($"     Types: {stat.TestedTypes}/{stat.TotalTypes} ({stat.TypeCoveragePercentage:F1}%)");
+                    output.AppendLine($"     Members: {stat.TestedPublicMembers}/{stat.TotalPublicMembers} ({stat.MemberCoveragePercentage:F1}%)");
+                    output.AppendLine($"     Uncovered: {stat.UncoveredTypes} types, {stat.UncoveredPublicMembers} members");
+                    output.AppendLine();
+                }
+            }
+            else if (groupBy.ToLower() == "namespace" && results.NamespaceStatistics.Any())
+            {
+                output.AppendLine($"📁 Coverage by Namespace ({results.NamespaceStatistics.Count} namespaces):");
+                foreach (var stat in results.NamespaceStatistics.Values.OrderBy(s => s.TypeCoveragePercentage))
+                {
+                    var icon = stat.TypeCoveragePercentage >= 80 ? "✅" :
+                               stat.TypeCoveragePercentage >= 60 ? "⚠️" : "🔴";
+                    output.AppendLine($"  {icon} {stat.Name}:");
+                    output.AppendLine($"     Types: {stat.TestedTypes}/{stat.TotalTypes} ({stat.TypeCoveragePercentage:F1}%)");
+                    output.AppendLine($"     Members: {stat.TestedPublicMembers}/{stat.TotalPublicMembers} ({stat.MemberCoveragePercentage:F1}%)");
+                    output.AppendLine($"     Uncovered: {stat.UncoveredTypes} types, {stat.UncoveredPublicMembers} members");
+                    output.AppendLine();
+                }
+            }
+
+            // All critical and high risk types
+            var criticalHighRiskTypes = results.TypeCoverages
+                .Where(t => t.RiskLevel == "Critical" || t.RiskLevel == "High")
+                .OrderByDescending(t => t.CyclomaticComplexity)
+                .ToList();
+
+            if (criticalHighRiskTypes.Any())
+            {
+                output.AppendLine($"🔴 All Critical & High-Risk Types ({criticalHighRiskTypes.Count}):");
+                foreach (var type in criticalHighRiskTypes)
+                {
+                    var riskIcon = type.RiskLevel == "Critical" ? "🔴" : "🔶";
+                    output.AppendLine($"  {riskIcon} {type.RiskLevel} - {type.FullTypeName}");
+                    output.AppendLine($"     Location: {type.FilePath}:{type.LineNumber}");
+                    output.AppendLine($"     Project: {type.ProjectName}");
+                    output.AppendLine($"     Complexity: Total={type.CyclomaticComplexity}, Max Method={type.MaxMethodComplexity}");
+                    output.AppendLine($"     Coverage: {type.TestedPublicMembers}/{type.TotalPublicMembers} members ({type.CoveragePercentage:F1}%)");
+                    output.AppendLine($"     Tests: {(type.HasTests ? $"{type.TestCount} tests in {type.TestClasses.Count} test classes" : "No tests found")}");
+
+                    if (type.UncoveredMembers.Any() && type.UncoveredMembers.Count <= 10)
+                    {
+                        output.AppendLine($"     Uncovered members:");
+                        foreach (var member in type.UncoveredMembers)
+                        {
+                            output.AppendLine($"       - {member.Signature} (complexity: {member.CyclomaticComplexity})");
+                        }
+                    }
+                    else if (type.UncoveredMembers.Count > 10)
+                    {
+                        output.AppendLine($"     Uncovered members: {type.UncoveredMembers.Count} (too many to list)");
+                    }
+                    output.AppendLine();
+                }
+            }
+
+            // Warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Analysis Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                    if (!string.IsNullOrWhiteSpace(warning.Details))
+                    {
+                        output.AppendLine($"    Details: {warning.Details}");
+                    }
+                }
+                output.AppendLine();
+            }
+
+            return output.ToString();
         }
 
         #endregion
