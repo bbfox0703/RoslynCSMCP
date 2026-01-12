@@ -3,9 +3,9 @@
 This document lists all available MCP tools provided by RoslynCSMCP server for C# code analysis.
 
 > **Last Updated**: 2026-01-12
-> **Total Tools**: 30
+> **Total Tools**: 31
 >
-> **Recent Additions**: FindTODOComments, FindLargeFiles, FindDeprecatedAPIs, GetFileStatistics, AnalyzePackages, GetTestCoverage
+> **Recent Additions**: FindTODOComments, FindLargeFiles, FindDeprecatedAPIs, GetFileStatistics, AnalyzePackages, GetTestCoverage, GetChangeImpact
 
 ---
 
@@ -354,9 +354,66 @@ Use GetTestCoverage tool with:
 
 ---
 
+### 26. GetChangeImpact
+**Description**: Analyze the impact of changing a symbol - identify all dependent code, assess risk level, and get actionable recommendations before refactoring
+
+**Parameters**:
+- `symbolName` (string): Symbol name to analyze (class, method, property, etc.)
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `maxDepth` (int, optional): Maximum depth for indirect dependency analysis (default: 3)
+- `includeIndirectReferences` (bool, optional): Include indirect references (default: true)
+
+**Example Usage**:
+```
+Use GetChangeImpact tool with:
+- symbolName: "UserService"
+- solutionPath: "D:\MyProject\MyProject.sln"
+- format: "normal"
+- maxDepth: 3
+```
+
+**Features**:
+- Identifies all code that references the target symbol
+- Distinguishes between direct and indirect dependencies
+- Builds dependency chains showing how changes propagate
+- Calculates impact radius (files, projects affected)
+- Assesses risk level (Critical/High/Medium/Low) based on:
+  - Public API exposure
+  - Number of references
+  - Cross-project dependencies
+  - Interface/abstract class changes
+- Detects breaking changes automatically
+- Provides actionable recommendations for safe refactoring
+
+**Risk Assessment Criteria**:
+- **Critical**: Public API with 20+ references
+- **High**: 50+ references or 5+ projects impacted
+- **Medium**: 10+ references or 2+ projects impacted
+- **Low**: Limited impact, internal use only
+
+**Output Information**:
+- Target symbol details (name, kind, accessibility, location)
+- Impact statistics (direct/indirect references, impacted projects/files)
+- Impact breakdown by project
+- Dependency chains (showing propagation paths)
+- Risk level with detailed reasoning
+- Breaking change detection and reasons
+- Specific recommendations based on impact analysis
+- Code locations for all impacted symbols
+
+**Recommendations Include**:
+- Versioning and deprecation strategies for public APIs
+- Migration guide suggestions for high-impact changes
+- Team coordination for cross-project changes
+- Testing strategies for breaking changes
+- Alternative approaches (extension methods, default implementations)
+
+---
+
 ## 🚀 Utility Tools
 
-### 26. FindTODOComments
+### 27. FindTODOComments
 **Description**: Find all TODO, FIXME, HACK, and NOTE comments across the solution
 
 **Parameters**:
@@ -367,7 +424,7 @@ Use GetTestCoverage tool with:
 
 ---
 
-### 27. FindLargeFiles
+### 28. FindLargeFiles
 **Description**: Find large source files that may need refactoring
 
 **Parameters**:
@@ -378,7 +435,7 @@ Use GetTestCoverage tool with:
 
 ---
 
-### 28. FindDeprecatedAPIs
+### 29. FindDeprecatedAPIs
 **Description**: Find usages of deprecated/obsolete APIs (both internal and .NET framework)
 
 **Parameters**:
@@ -389,7 +446,7 @@ Use GetTestCoverage tool with:
 
 ---
 
-### 29. GetFileStatistics
+### 30. GetFileStatistics
 **Description**: Get detailed statistics for a specific C# source file
 
 **Parameters**:
@@ -399,7 +456,7 @@ Use GetTestCoverage tool with:
 
 ---
 
-### 30. BatchQuery
+### 31. BatchQuery
 **Description**: Execute multiple queries in a single batch request
 
 **Parameters**:
@@ -424,6 +481,46 @@ Use GetTestCoverage tool with:
   }
 ]
 ```
+
+### 32. FindPerformanceIssues
+**Description**: Find common performance anti-patterns and issues in C# code - detects LINQ misuse, string concatenation in loops, sync-over-async patterns, IDisposable not disposed, and exception handling anti-patterns
+
+**Parameters**:
+- `solutionPath` (string): Path to solution file (.sln)
+- `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
+- `issueTypes` (string, optional): Comma-separated issue types to check: LinqMisuse, StringConcatenation, SyncOverAsync, DisposableNotDisposed, ExceptionHandling. Default: all
+
+**Example Usage**:
+```
+Use FindPerformanceIssues tool with:
+- solutionPath: "D:\MyProject\MyProject.sln"
+- format: "normal"
+- issueTypes: "LinqMisuse,SyncOverAsync"
+```
+
+**Features**:
+- Detects LINQ misuse patterns (Count() vs Any(), multiple ToList() calls, unnecessary materialization)
+- Identifies string concatenation in loops (recommends StringBuilder)
+- Finds sync-over-async anti-patterns (.Result, .Wait() in async methods)
+- Detects IDisposable objects not properly disposed
+- Identifies exception handling anti-patterns (empty catch blocks, catching base Exception)
+- Provides severity levels (Critical, High, Medium, Low)
+- Estimates performance impact (0-10 scale)
+- Includes fix recommendations and code examples
+- Groups issues by type, project, file, and severity
+- Shows line numbers and code context
+
+**Issue Types**:
+- **LinqMisuse**: Inefficient LINQ patterns that enumerate collections unnecessarily
+- **StringConcatenation**: String += in loops creating many intermediate objects
+- **SyncOverAsync**: Blocking calls (.Result, .Wait) in async methods causing deadlocks
+- **DisposableNotDisposed**: IDisposable objects without using statements causing resource leaks
+- **ExceptionHandling**: Empty catch blocks and improper exception handling hiding bugs
+
+**Output Formats**:
+- **summary**: Key metrics, issue counts by severity, top issue types
+- **normal**: Statistics, issues by type/project, top 10 critical and high severity issues
+- **detailed**: Complete analysis with all issues grouped by severity and type, file statistics, recommendations
 
 ---
 

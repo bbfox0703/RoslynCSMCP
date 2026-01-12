@@ -1,7 +1,7 @@
 # New Tool Opportunities for RoslynCSMCP
 
 **Date**: 2026-01-12
-**Current Tools**: 30
+**Current Tools**: 31
 
 ---
 
@@ -162,6 +162,18 @@ Based on the current tool coverage analysis, here are other recommended tools in
    - Groups by project or namespace
    - Identifies high-risk uncovered code
    - Calculates cyclomatic complexity
+   - 3 format modes (summary/normal/detailed)
+   - Token optimization: 40-70% savings
+
+8. **GetChangeImpact** (2026-01-12)
+   - Change impact analysis for symbols
+   - Direct and indirect reference tracking
+   - Dependency chain visualization
+   - Risk assessment (Critical/High/Medium/Low)
+   - Breaking change detection
+   - Public API impact analysis
+   - Cross-project dependency tracking
+   - Actionable refactoring recommendations
    - 3 format modes (summary/normal/detailed)
    - Token optimization: 40-70% savings
 

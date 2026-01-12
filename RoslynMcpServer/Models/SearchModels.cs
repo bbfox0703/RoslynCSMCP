@@ -877,4 +877,133 @@ namespace RoslynMcpServer.Models
         public int MediumRiskTypes { get; set; }   // Low complexity, no tests or High complexity, partial tests
         public int LowRiskTypes { get; set; }      // Fully tested
     }
+
+    /// <summary>
+    /// Represents a symbol that is impacted by a change
+    /// </summary>
+    public class ImpactedSymbol
+    {
+        public string SymbolName { get; set; } = string.Empty;
+        public string FullSymbolName { get; set; } = string.Empty;
+        public string SymbolKind { get; set; } = string.Empty; // Class, Method, Property, etc.
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string ReferenceKind { get; set; } = string.Empty; // Direct, Indirect
+        public int Distance { get; set; } // Distance from changed symbol (0 = direct reference)
+        public string ImpactType { get; set; } = string.Empty; // Usage, Inheritance, Implementation
+        public string CodeContext { get; set; } = string.Empty; // Code snippet showing usage
+    }
+
+    /// <summary>
+    /// Represents a dependency chain from the changed symbol to an impacted symbol
+    /// </summary>
+    public class DependencyChain
+    {
+        public List<string> Chain { get; set; } = new(); // Symbol names in the chain
+        public int ChainLength => Chain.Count;
+        public string StartSymbol => Chain.FirstOrDefault() ?? string.Empty;
+        public string EndSymbol => Chain.LastOrDefault() ?? string.Empty;
+        public List<string> ProjectsInvolved { get; set; } = new();
+        public bool CrossesProjectBoundary => ProjectsInvolved.Distinct().Count() > 1;
+    }
+
+    /// <summary>
+    /// Represents the impact of changing a symbol
+    /// </summary>
+    public class ChangeImpactResults
+    {
+        public string TargetSymbol { get; set; } = string.Empty;
+        public string TargetSymbolFullName { get; set; } = string.Empty;
+        public string SymbolKind { get; set; } = string.Empty;
+        public string Accessibility { get; set; } = string.Empty;
+        public string DeclaringType { get; set; } = string.Empty;
+        public string Namespace { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+
+        // Impact statistics
+        public int TotalImpactedSymbols { get; set; }
+        public int DirectReferences { get; set; }
+        public int IndirectReferences { get; set; }
+        public int ImpactedProjects { get; set; }
+        public int ImpactedFiles { get; set; }
+        public List<string> ImpactedProjectNames { get; set; } = new();
+
+        // Impacted symbols
+        public List<ImpactedSymbol> ImpactedSymbols { get; set; } = new();
+
+        // Dependency chains
+        public List<DependencyChain> DependencyChains { get; set; } = new();
+
+        // Risk assessment
+        public string RiskLevel { get; set; } = string.Empty; // Critical, High, Medium, Low
+        public string RiskReason { get; set; } = string.Empty;
+        public bool IsPublicAPI { get; set; }
+        public bool IsBreakingChange { get; set; }
+        public List<string> BreakingChangeReasons { get; set; } = new();
+
+        // Recommendations
+        public List<string> Recommendations { get; set; } = new();
+
+        // Warnings
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Impact by project
+        public Dictionary<string, int> ImpactByProject { get; set; } = new();
+
+        // Impact by type
+        public Dictionary<string, int> ImpactByKind { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Represents a performance issue found in code
+    /// </summary>
+    public class PerformanceIssue
+    {
+        public string IssueType { get; set; } = string.Empty; // LinqMisuse, StringConcatenation, Boxing, etc.
+        public string Severity { get; set; } = string.Empty; // Critical, High, Medium, Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string MethodName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string FixExample { get; set; } = string.Empty; // Example of how to fix
+        public double EstimatedImpact { get; set; } // Performance impact score (1-10)
+    }
+
+    /// <summary>
+    /// Wrapper for performance issue analysis results
+    /// </summary>
+    public class PerformanceIssueResults
+    {
+        public List<PerformanceIssue> Issues { get; set; } = new();
+
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics
+        public int TotalIssues => Issues.Count;
+        public int CriticalIssues => Issues.Count(i => i.Severity == "Critical");
+        public int HighIssues => Issues.Count(i => i.Severity == "High");
+        public int MediumIssues => Issues.Count(i => i.Severity == "Medium");
+        public int LowIssues => Issues.Count(i => i.Severity == "Low");
+
+        // Issues by type
+        public Dictionary<string, int> IssuesByType { get; set; } = new();
+
+        // Issues by project
+        public Dictionary<string, int> IssuesByProject { get; set; } = new();
+
+        // Issues by file
+        public Dictionary<string, int> IssuesByFile { get; set; } = new();
+    }
 }

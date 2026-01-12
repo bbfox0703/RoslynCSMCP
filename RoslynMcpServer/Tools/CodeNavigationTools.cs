@@ -1307,6 +1307,122 @@ namespace RoslynMcpServer.Tools
             }
         }
 
+        [McpServerTool, Description("Analyze impact of changing a symbol - identify all dependent code, assess risk, and get recommendations before refactoring")]
+        public static async Task<string> GetChangeImpact(
+            [Description("Symbol name to analyze (class, method, property, etc.)")] string symbolName,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+            string format = "normal",
+            [Description("Maximum depth for indirect dependency analysis (default: 3)")] int maxDepth = 3,
+            [Description("Include indirect references (default: true)")] bool includeIndirectReferences = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<ChangeImpactAnalyzer>>();
+
+            try
+            {
+                // Validate solution path
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<ChangeImpactAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Change impact analyzer service not available.";
+                }
+
+                // Perform analysis
+                var diagnosticLogger = serviceProvider?.GetService<DiagnosticLogger>();
+                Func<Task<ChangeImpactResults>> operation = async () =>
+                    await analyzer.AnalyzeChangeImpactAsync(symbolName, solutionPath, maxDepth, includeIndirectReferences);
+
+                var results = diagnosticLogger != null
+                    ? await diagnosticLogger.LoggedExecutionAsync(
+                        "GetChangeImpact",
+                        operation,
+                        new { symbolName, solutionPath, format, maxDepth, includeIndirectReferences })
+                    : await operation();
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatChangeImpactSummary(results),
+                    "detailed" => FormatChangeImpactDetailed(results),
+                    _ => FormatChangeImpactNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error analyzing change impact");
+                return $"Error: An unexpected error occurred while analyzing change impact: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Find common performance anti-patterns and issues in C# code")]
+        public static async Task<string> FindPerformanceIssues(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+            string format = "normal",
+            [Description("Comma-separated issue types to check: LinqMisuse, StringConcatenation, SyncOverAsync, DisposableNotDisposed, ExceptionHandling. Default: all")]
+            string? issueTypes = null,
+            IServiceProvider? serviceProvider = null)
+        {
+            var logger = serviceProvider?.GetService<ILogger<PerformanceIssueAnalyzer>>();
+
+            try
+            {
+                // Validate solution path
+                var validator = serviceProvider?.GetService<SecurityValidator>();
+                if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+                {
+                    return "Error: Invalid solution path provided.";
+                }
+
+                // Get analyzer service
+                var analyzer = serviceProvider?.GetService<PerformanceIssueAnalyzer>();
+                if (analyzer == null)
+                {
+                    return "Error: Performance issue analyzer service not available.";
+                }
+
+                // Parse issue types filter
+                string[]? issueTypesArray = null;
+                if (!string.IsNullOrWhiteSpace(issueTypes))
+                {
+                    issueTypesArray = issueTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                }
+
+                // Perform analysis
+                var diagnosticLogger = serviceProvider?.GetService<DiagnosticLogger>();
+                Func<Task<PerformanceIssueResults>> operation = async () =>
+                    await analyzer.AnalyzePerformanceIssuesAsync(solutionPath, issueTypesArray);
+
+                var results = diagnosticLogger != null
+                    ? await diagnosticLogger.LoggedExecutionAsync(
+                        "FindPerformanceIssues",
+                        operation,
+                        new { solutionPath, format, issueTypes })
+                    : await operation();
+
+                // Format output based on format parameter
+                return format.ToLowerInvariant() switch
+                {
+                    "summary" => FormatPerformanceIssuesSummary(results),
+                    "detailed" => FormatPerformanceIssuesDetailed(results),
+                    _ => FormatPerformanceIssuesNormal(results)
+                };
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Error finding performance issues");
+                return $"Error: An unexpected error occurred while analyzing performance issues: {ex.Message}";
+            }
+        }
+
         [McpServerTool, Description("Get complete class hierarchy showing ancestors (base classes/interfaces) and descendants (derived classes)")]
         public static async Task<string> GetClassHierarchy(
             [Description("Type name to analyze hierarchy for")] string typeName,
@@ -6356,6 +6472,584 @@ namespace RoslynMcpServer.Tools
                         output.AppendLine($"    Details: {warning.Details}");
                     }
                 }
+                output.AppendLine();
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Change Impact - Summary
+        private static string FormatChangeImpactSummary(ChangeImpactResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"🔄 Change Impact Summary: {results.TargetSymbol}");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  - {warning.Message}");
+                }
+                output.AppendLine();
+                return output.ToString();
+            }
+
+            // Symbol info
+            output.AppendLine($"Symbol: {results.TargetSymbolFullName}");
+            output.AppendLine($"Type: {results.SymbolKind} ({results.Accessibility})");
+            if (!string.IsNullOrEmpty(results.ProjectName))
+                output.AppendLine($"Location: {results.ProjectName}");
+            output.AppendLine();
+
+            // Impact statistics
+            output.AppendLine("📊 Impact:");
+            output.AppendLine($"  Total References: {results.TotalImpactedSymbols} ({results.DirectReferences} direct, {results.IndirectReferences} indirect)");
+            output.AppendLine($"  Impacted Projects: {results.ImpactedProjects}");
+            output.AppendLine($"  Impacted Files: {results.ImpactedFiles}");
+            output.AppendLine();
+
+            // Risk assessment
+            var riskIcon = results.RiskLevel.ToLower() switch
+            {
+                "critical" => "🔴",
+                "high" => "🔶",
+                "medium" => "🟡",
+                _ => "✅"
+            };
+            output.AppendLine($"{riskIcon} Risk Level: {results.RiskLevel}");
+            if (!string.IsNullOrEmpty(results.RiskReason))
+                output.AppendLine($"  Reason: {results.RiskReason}");
+
+            if (results.IsBreakingChange)
+            {
+                output.AppendLine($"  ⚠️ BREAKING CHANGE");
+            }
+            output.AppendLine();
+
+            // Top recommendations
+            if (results.Recommendations.Any())
+            {
+                output.AppendLine("💡 Key Recommendations:");
+                foreach (var rec in results.Recommendations.Take(3))
+                {
+                    output.AppendLine($"  {rec}");
+                }
+                output.AppendLine();
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Change Impact - Normal
+        private static string FormatChangeImpactNormal(ChangeImpactResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"🔄 Change Impact Analysis: {results.TargetSymbol}");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                }
+                output.AppendLine();
+                return output.ToString();
+            }
+
+            // Symbol information
+            output.AppendLine("🎯 Target Symbol:");
+            output.AppendLine($"  Name: {results.TargetSymbolFullName}");
+            output.AppendLine($"  Kind: {results.SymbolKind}");
+            output.AppendLine($"  Accessibility: {results.Accessibility}");
+            if (!string.IsNullOrEmpty(results.DeclaringType))
+                output.AppendLine($"  Declaring Type: {results.DeclaringType}");
+            if (!string.IsNullOrEmpty(results.Namespace))
+                output.AppendLine($"  Namespace: {results.Namespace}");
+            output.AppendLine($"  Location: {results.FilePath}:{results.LineNumber}");
+            output.AppendLine();
+
+            // Impact statistics
+            output.AppendLine("📊 Impact Statistics:");
+            output.AppendLine($"  Total Impacted Symbols: {results.TotalImpactedSymbols}");
+            output.AppendLine($"  Direct References: {results.DirectReferences}");
+            output.AppendLine($"  Indirect References: {results.IndirectReferences}");
+            output.AppendLine($"  Impacted Projects: {results.ImpactedProjects} ({string.Join(", ", results.ImpactedProjectNames.Take(5))}{(results.ImpactedProjectNames.Count > 5 ? ", ..." : "")})");
+            output.AppendLine($"  Impacted Files: {results.ImpactedFiles}");
+            output.AppendLine();
+
+            // Impact by project
+            if (results.ImpactByProject.Any())
+            {
+                output.AppendLine("📦 Impact by Project:");
+                foreach (var kvp in results.ImpactByProject.OrderByDescending(k => k.Value).Take(5))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value} references");
+                }
+                output.AppendLine();
+            }
+
+            // Risk assessment
+            var riskIcon = results.RiskLevel.ToLower() switch
+            {
+                "critical" => "🔴",
+                "high" => "🔶",
+                "medium" => "🟡",
+                _ => "✅"
+            };
+            output.AppendLine($"{riskIcon} Risk Assessment:");
+            output.AppendLine($"  Level: {results.RiskLevel}");
+            output.AppendLine($"  Reason: {results.RiskReason}");
+            output.AppendLine($"  Public API: {(results.IsPublicAPI ? "Yes" : "No")}");
+            output.AppendLine($"  Breaking Change: {(results.IsBreakingChange ? "Yes ⚠️" : "No")}");
+            if (results.BreakingChangeReasons.Any())
+            {
+                foreach (var reason in results.BreakingChangeReasons)
+                {
+                    output.AppendLine($"    - {reason}");
+                }
+            }
+            output.AppendLine();
+
+            // Dependency chains (top 5)
+            if (results.DependencyChains.Any())
+            {
+                output.AppendLine($"🔗 Dependency Chains (showing top 5 of {results.DependencyChains.Count}):");
+                foreach (var chain in results.DependencyChains.Take(5))
+                {
+                    var chainStr = string.Join(" → ", chain.Chain);
+                    var crossProject = chain.CrossesProjectBoundary ? " [CROSS-PROJECT]" : "";
+                    output.AppendLine($"  {chainStr}{crossProject}");
+                }
+                output.AppendLine();
+            }
+
+            // High impact symbols (top 10)
+            var highImpactSymbols = results.ImpactedSymbols
+                .OrderBy(s => s.Distance)
+                .ThenBy(s => s.ProjectName)
+                .Take(10)
+                .ToList();
+
+            if (highImpactSymbols.Any())
+            {
+                output.AppendLine($"📍 Impacted Locations (showing top 10 of {results.TotalImpactedSymbols}):");
+                foreach (var symbol in highImpactSymbols)
+                {
+                    var distanceStr = symbol.Distance == 0 ? "Direct" : $"Indirect (distance: {symbol.Distance})";
+                    output.AppendLine($"  [{distanceStr}] {symbol.FullSymbolName}");
+                    output.AppendLine($"    {symbol.FileName}:{symbol.LineNumber} ({symbol.ProjectName})");
+                }
+                output.AppendLine();
+            }
+
+            // Recommendations
+            if (results.Recommendations.Any())
+            {
+                output.AppendLine("💡 Recommendations:");
+                foreach (var rec in results.Recommendations)
+                {
+                    output.AppendLine($"  {rec}");
+                }
+                output.AppendLine();
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Change Impact - Detailed
+        private static string FormatChangeImpactDetailed(ChangeImpactResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"🔄 Comprehensive Change Impact Analysis");
+            output.AppendLine($"Target: {results.TargetSymbol}");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                    if (!string.IsNullOrWhiteSpace(warning.Details))
+                    {
+                        output.AppendLine($"    Details: {warning.Details}");
+                    }
+                }
+                output.AppendLine();
+                return output.ToString();
+            }
+
+            // Complete symbol information
+            output.AppendLine("🎯 Target Symbol Details:");
+            output.AppendLine($"  Full Name: {results.TargetSymbolFullName}");
+            output.AppendLine($"  Kind: {results.SymbolKind}");
+            output.AppendLine($"  Accessibility: {results.Accessibility}");
+            if (!string.IsNullOrEmpty(results.DeclaringType))
+                output.AppendLine($"  Declaring Type: {results.DeclaringType}");
+            if (!string.IsNullOrEmpty(results.Namespace))
+                output.AppendLine($"  Namespace: {results.Namespace}");
+            if (!string.IsNullOrEmpty(results.ProjectName))
+                output.AppendLine($"  Project: {results.ProjectName}");
+            output.AppendLine($"  File: {results.FilePath}");
+            output.AppendLine($"  Line: {results.LineNumber}");
+            output.AppendLine();
+
+            // Complete impact statistics
+            output.AppendLine("📊 Complete Impact Statistics:");
+            output.AppendLine($"  Total Impacted Symbols: {results.TotalImpactedSymbols}");
+            output.AppendLine($"  Direct References: {results.DirectReferences}");
+            output.AppendLine($"  Indirect References: {results.IndirectReferences}");
+            output.AppendLine($"  Impacted Projects: {results.ImpactedProjects}");
+            output.AppendLine($"  Impacted Files: {results.ImpactedFiles}");
+            output.AppendLine();
+
+            // Impact by project (all)
+            if (results.ImpactByProject.Any())
+            {
+                output.AppendLine($"📦 Impact by Project ({results.ImpactByProject.Count} projects):");
+                foreach (var kvp in results.ImpactByProject.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value} references");
+                }
+                output.AppendLine();
+            }
+
+            // Impact by symbol kind
+            if (results.ImpactByKind.Any())
+            {
+                output.AppendLine("🔍 Impact by Symbol Kind:");
+                foreach (var kvp in results.ImpactByKind.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Complete risk assessment
+            var riskIcon = results.RiskLevel.ToLower() switch
+            {
+                "critical" => "🔴",
+                "high" => "🔶",
+                "medium" => "🟡",
+                _ => "✅"
+            };
+            output.AppendLine($"{riskIcon} Risk Assessment:");
+            output.AppendLine($"  Risk Level: {results.RiskLevel}");
+            output.AppendLine($"  Risk Reason: {results.RiskReason}");
+            output.AppendLine($"  Public API: {(results.IsPublicAPI ? "Yes - Visible to external consumers" : "No - Internal use only")}");
+            output.AppendLine($"  Breaking Change: {(results.IsBreakingChange ? "Yes ⚠️" : "No")}");
+            if (results.BreakingChangeReasons.Any())
+            {
+                output.AppendLine($"  Breaking Change Reasons:");
+                foreach (var reason in results.BreakingChangeReasons)
+                {
+                    output.AppendLine($"    - {reason}");
+                }
+            }
+            output.AppendLine();
+
+            // All dependency chains
+            if (results.DependencyChains.Any())
+            {
+                output.AppendLine($"🔗 All Dependency Chains ({results.DependencyChains.Count}):");
+                foreach (var chain in results.DependencyChains)
+                {
+                    var chainStr = string.Join(" → ", chain.Chain);
+                    var crossProject = chain.CrossesProjectBoundary ? " [CROSS-PROJECT]" : "";
+                    var projectStr = $" (Projects: {string.Join(", ", chain.ProjectsInvolved)})";
+                    output.AppendLine($"  {chainStr}{crossProject}{projectStr}");
+                }
+                output.AppendLine();
+            }
+
+            // All impacted symbols grouped by project
+            if (results.ImpactedSymbols.Any())
+            {
+                output.AppendLine($"📍 All Impacted Locations ({results.TotalImpactedSymbols}):");
+                var byProject = results.ImpactedSymbols.GroupBy(s => s.ProjectName).OrderBy(g => g.Key);
+                foreach (var projectGroup in byProject)
+                {
+                    output.AppendLine($"  Project: {projectGroup.Key}");
+                    foreach (var symbol in projectGroup.OrderBy(s => s.Distance).ThenBy(s => s.FilePath))
+                    {
+                        var distanceStr = symbol.Distance == 0 ? "Direct" : $"Indirect (distance: {symbol.Distance})";
+                        output.AppendLine($"    [{distanceStr}] {symbol.FullSymbolName}");
+                        output.AppendLine($"      Location: {symbol.FileName}:{symbol.LineNumber}");
+                        output.AppendLine($"      Kind: {symbol.SymbolKind}, Impact: {symbol.ImpactType}");
+                        if (!string.IsNullOrWhiteSpace(symbol.CodeContext))
+                        {
+                            output.AppendLine($"      Context: {symbol.CodeContext}");
+                        }
+                    }
+                    output.AppendLine();
+                }
+            }
+
+            // All recommendations
+            if (results.Recommendations.Any())
+            {
+                output.AppendLine($"💡 All Recommendations ({results.Recommendations.Count}):");
+                foreach (var rec in results.Recommendations)
+                {
+                    output.AppendLine($"  {rec}");
+                }
+                output.AppendLine();
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Performance Issues - Summary
+        private static string FormatPerformanceIssuesSummary(PerformanceIssueResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"⚡ Performance Issues Summary");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Analysis Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                }
+                return output.ToString();
+            }
+
+            output.AppendLine($"📊 Key Metrics:");
+            output.AppendLine($"  Total Issues: {results.TotalIssues}");
+            output.AppendLine($"  Critical: {results.CriticalIssues}");
+            output.AppendLine($"  High: {results.HighIssues}");
+            output.AppendLine($"  Medium: {results.MediumIssues}");
+            output.AppendLine($"  Projects: {results.AnalyzedProjects}");
+            output.AppendLine($"  Files: {results.AnalyzedFiles}");
+            output.AppendLine();
+
+            // Top 5 most common issue types
+            if (results.IssuesByType.Any())
+            {
+                output.AppendLine("🔝 Top Issue Types:");
+                foreach (var kvp in results.IssuesByType.OrderByDescending(k => k.Value).Take(5))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Performance Issues - Normal
+        private static string FormatPerformanceIssuesNormal(PerformanceIssueResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"⚡ Performance Issues Analysis");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Analysis Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                }
+                output.AppendLine();
+                return output.ToString();
+            }
+
+            // Statistics
+            output.AppendLine($"📊 Analysis Statistics:");
+            output.AppendLine($"  Total Issues: {results.TotalIssues}");
+            output.AppendLine($"  Critical: {results.CriticalIssues}");
+            output.AppendLine($"  High: {results.HighIssues}");
+            output.AppendLine($"  Medium: {results.MediumIssues}");
+            output.AppendLine($"  Low: {results.LowIssues}");
+            output.AppendLine($"  Analyzed Projects: {results.AnalyzedProjects}");
+            output.AppendLine($"  Analyzed Files: {results.AnalyzedFiles}");
+            output.AppendLine();
+
+            // Issues by type
+            if (results.IssuesByType.Any())
+            {
+                output.AppendLine($"📋 Issues by Type:");
+                foreach (var kvp in results.IssuesByType.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Issues by project (top 10)
+            if (results.IssuesByProject.Any())
+            {
+                output.AppendLine($"📦 Issues by Project (top 10):");
+                foreach (var kvp in results.IssuesByProject.OrderByDescending(k => k.Value).Take(10))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Top 10 critical issues
+            var criticalIssues = results.Issues.Where(i => i.Severity == "Critical").Take(10).ToList();
+            if (criticalIssues.Any())
+            {
+                output.AppendLine($"🔴 Critical Issues (showing {criticalIssues.Count}):");
+                foreach (var issue in criticalIssues)
+                {
+                    output.AppendLine($"  [{issue.IssueType}] {issue.Title}");
+                    output.AppendLine($"    Location: {issue.FileName}:{issue.LineNumber} in {issue.MethodName}()");
+                    output.AppendLine($"    Impact: {issue.EstimatedImpact:F1}/10");
+                    output.AppendLine($"    Fix: {issue.Recommendation}");
+                    output.AppendLine();
+                }
+            }
+
+            // Top 10 high severity issues
+            var highIssues = results.Issues.Where(i => i.Severity == "High").Take(10).ToList();
+            if (highIssues.Any())
+            {
+                output.AppendLine($"🔶 High Severity Issues (showing {highIssues.Count}):");
+                foreach (var issue in highIssues)
+                {
+                    output.AppendLine($"  [{issue.IssueType}] {issue.Title}");
+                    output.AppendLine($"    Location: {issue.FileName}:{issue.LineNumber} in {issue.MethodName}()");
+                    output.AppendLine($"    Impact: {issue.EstimatedImpact:F1}/10");
+                    output.AppendLine($"    Fix: {issue.Recommendation}");
+                    output.AppendLine();
+                }
+            }
+
+            return output.ToString();
+        }
+
+        // Formatter: Performance Issues - Detailed
+        private static string FormatPerformanceIssuesDetailed(PerformanceIssueResults results)
+        {
+            var output = new StringBuilder();
+            output.AppendLine($"⚡ Comprehensive Performance Issues Analysis");
+            output.AppendLine();
+
+            // Show warnings if any
+            if (results.Warnings.Any())
+            {
+                output.AppendLine("⚠️ Analysis Warnings:");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"  [{warning.Context}] {warning.Message}");
+                    if (!string.IsNullOrWhiteSpace(warning.Details))
+                    {
+                        output.AppendLine($"    Details: {warning.Details}");
+                    }
+                }
+                output.AppendLine();
+                return output.ToString();
+            }
+
+            // Complete statistics
+            output.AppendLine($"📊 Complete Analysis Statistics:");
+            output.AppendLine($"  Total Issues: {results.TotalIssues}");
+            output.AppendLine($"  Critical: {results.CriticalIssues}");
+            output.AppendLine($"  High: {results.HighIssues}");
+            output.AppendLine($"  Medium: {results.MediumIssues}");
+            output.AppendLine($"  Low: {results.LowIssues}");
+            output.AppendLine($"  Analyzed Projects: {results.AnalyzedProjects}");
+            output.AppendLine($"  Failed Projects: {results.FailedProjects}");
+            output.AppendLine($"  Analyzed Files: {results.AnalyzedFiles}");
+            output.AppendLine();
+
+            // Complete issues by type
+            if (results.IssuesByType.Any())
+            {
+                output.AppendLine($"📋 All Issues by Type:");
+                foreach (var kvp in results.IssuesByType.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Complete issues by project
+            if (results.IssuesByProject.Any())
+            {
+                output.AppendLine($"📦 All Issues by Project:");
+                foreach (var kvp in results.IssuesByProject.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            // Group issues by severity and type
+            var issuesBySeverity = results.Issues.GroupBy(i => i.Severity).OrderByDescending(g =>
+                g.Key == "Critical" ? 4 : g.Key == "High" ? 3 : g.Key == "Medium" ? 2 : 1);
+
+            foreach (var severityGroup in issuesBySeverity)
+            {
+                var icon = severityGroup.Key switch
+                {
+                    "Critical" => "🔴",
+                    "High" => "🔶",
+                    "Medium" => "🟡",
+                    _ => "⚪"
+                };
+
+                output.AppendLine($"{icon} {severityGroup.Key} Severity Issues ({severityGroup.Count()}):");
+                output.AppendLine();
+
+                // Group by issue type within severity
+                var byType = severityGroup.GroupBy(i => i.IssueType);
+                foreach (var typeGroup in byType)
+                {
+                    output.AppendLine($"  [{typeGroup.Key}] ({typeGroup.Count()} issues):");
+                    foreach (var issue in typeGroup)
+                    {
+                        output.AppendLine($"    • {issue.Title}");
+                        output.AppendLine($"      Location: {issue.FilePath}:{issue.LineNumber}");
+                        output.AppendLine($"      Project: {issue.ProjectName}");
+                        output.AppendLine($"      Method: {issue.MethodName}()");
+                        output.AppendLine($"      Description: {issue.Description}");
+                        output.AppendLine($"      Code: {issue.CodeSnippet}");
+                        output.AppendLine($"      Recommendation: {issue.Recommendation}");
+                        output.AppendLine($"      Fix Example: {issue.FixExample}");
+                        output.AppendLine($"      Estimated Impact: {issue.EstimatedImpact:F1}/10");
+                        output.AppendLine();
+                    }
+                }
+            }
+
+            // Top files by issue count
+            if (results.IssuesByFile.Any())
+            {
+                output.AppendLine($"📄 Files with Most Issues (top 20):");
+                foreach (var kvp in results.IssuesByFile.OrderByDescending(k => k.Value).Take(20))
+                {
+                    output.AppendLine($"  {Path.GetFileName(kvp.Key)}: {kvp.Value} issues");
+                    output.AppendLine($"    Path: {kvp.Key}");
+                }
+                output.AppendLine();
+            }
+
+            // Summary recommendations by issue type
+            var recommendations = results.Issues
+                .GroupBy(i => i.IssueType)
+                .Select(g => new { Type = g.Key, Count = g.Count(), Example = g.First() })
+                .OrderByDescending(x => x.Count);
+
+            output.AppendLine($"💡 Recommendations Summary:");
+            foreach (var rec in recommendations)
+            {
+                output.AppendLine($"  [{rec.Type}] ({rec.Count} occurrences)");
+                output.AppendLine($"    General Fix: {rec.Example.Recommendation}");
+                output.AppendLine($"    Example: {rec.Example.FixExample}");
                 output.AppendLine();
             }
 
