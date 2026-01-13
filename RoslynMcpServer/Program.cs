@@ -53,21 +53,22 @@ namespace RoslynMcpServer
 
                 var builder = Host.CreateApplicationBuilder(args);
 
+                // Store environment info for logging after Serilog configuration
+                var environment = builder.Environment.EnvironmentName;
+                var logFileName = environment == "Development" ? "debug-.log" : "roslyn-mcp-.log";
+                var minLevel = environment == "Development" ? LogEventLevel.Verbose : LogEventLevel.Warning;
+
                 // Configure Serilog from appsettings.json
                 // Configuration is environment-aware (reads appsettings.Development.json in Development mode)
                 builder.Services.AddSerilog((services, loggerConfiguration) =>
                 {
-                    var environment = builder.Environment.EnvironmentName;
-
                     loggerConfiguration
                         .ReadFrom.Configuration(builder.Configuration)
                         .Enrich.FromLogContext()
                         .Enrich.WithProperty("Environment", environment);
 
                     // Override file paths to use platform-specific log directory
-                    var logFileName = environment == "Development" ? "debug-.log" : "roslyn-mcp-.log";
                     var retainedFiles = environment == "Development" ? 7 : 30;
-                    var minLevel = environment == "Development" ? LogEventLevel.Verbose : LogEventLevel.Warning;
                     var outputTemplate = environment == "Development"
                         ? "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Properties:j}{NewLine}{Exception}"
                         : "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}";
@@ -80,26 +81,26 @@ namespace RoslynMcpServer
                             retainedFileCountLimit: retainedFiles,
                             restrictedToMinimumLevel: minLevel,
                             outputTemplate: outputTemplate);
-
-                    Log.Information("Configured logging for environment: {Environment}, MinLevel: {MinLevel}, LogFile: {LogFile}",
-                        environment, minLevel, Path.Combine(logDirectory, logFileName));
-
-                    // Show PowerShell tail command for debug logs in Development mode
-                    if (environment == "Development")
-                    {
-                        var debugLogPath = Path.Combine(logDirectory, "debug-$(Get-Date -Format yyyyMMdd).log");
-                        if (OperatingSystem.IsWindows())
-                        {
-                            Log.Information("To tail debug log (PowerShell): Get-Content \"{LogPath}\" -Wait -Tail 20",
-                                $"$env:TEMP\\RoslynCSMCP\\logs\\debug-$(Get-Date -Format yyyyMMdd).log");
-                        }
-                        else
-                        {
-                            Log.Information("To tail debug log (PowerShell): Get-Content \"{LogPath}\" -Wait -Tail 20",
-                                "/tmp/RoslynCSMCP/logs/debug-$(date +%Y%m%d).log");
-                        }
-                    }
                 });
+
+                // Log configuration info AFTER Serilog is fully configured
+                Log.Information("Configured logging for environment: {Environment}, MinLevel: {MinLevel}, LogFile: {LogFile}",
+                    environment, minLevel, Path.Combine(logDirectory, logFileName));
+
+                // Show PowerShell tail command for debug logs in Development mode
+                if (environment == "Development")
+                {
+                    if (OperatingSystem.IsWindows())
+                    {
+                        Log.Information("To tail debug log (PowerShell): Get-Content \"{LogPath}\" -Wait -Tail 20",
+                            $"$env:TEMP\\RoslynCSMCP\\logs\\debug-$(Get-Date -Format yyyyMMdd).log");
+                    }
+                    else
+                    {
+                        Log.Information("To tail debug log (PowerShell): Get-Content \"{LogPath}\" -Wait -Tail 20",
+                            "/tmp/RoslynCSMCP/logs/debug-$(date +%Y%m%d).log");
+                    }
+                }
 
                 // Register services
                 builder.Services.AddSingleton<CodeAnalysisService>();
