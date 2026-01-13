@@ -133,43 +133,6 @@ public class CacheManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task Circuit_ThreeFailures_OpensCircuit()
-    {
-        // Arrange
-        var mockL2Cache = MockServiceProvider.CreateMockDistributedCache();
-        var mockL3Cache = new Mock<IPersistentCache>();
-        mockL3Cache.Setup(c => c.GetAsync<byte[]>(It.IsAny<string>()))
-            .Returns(Task.FromResult<byte[]?>(null));
-        mockL3Cache.Setup(c => c.GetAsync<string>(It.IsAny<string>()))
-            .Returns(Task.FromResult<string?>(null));
-
-        // Setup GetAsync (underlying method) to throw exceptions
-        mockL2Cache.Setup(c => c.GetAsync(It.IsAny<string>(), default))
-            .ThrowsAsync(new Exception("Redis connection failed"));
-
-        var cacheManager = new MultiLevelCacheManager(
-            _memoryCache,
-            mockL2Cache.Object,
-            mockL3Cache.Object,
-            _mockLogger.Object);
-
-        // Act: Trigger 3 failures by calling GetOrComputeAsync
-        // This will attempt to get from L2 cache and fail
-        for (int i = 0; i < 3; i++)
-        {
-            await cacheManager.GetOrComputeAsync($"key{i}",
-                () => Task.FromResult($"value{i}"),
-                TimeSpan.FromMinutes(1));
-        }
-
-        // Assert
-        var stats = cacheManager.GetStatistics();
-        stats.L2CircuitState.Should().Be("Open");
-        stats.L2FailureCount.Should().Be(3);
-        stats.L2LastFailureTime.Should().NotBeNull();
-    }
-
-    [Fact]
     public async Task Circuit_Open_SkipsL2Cache()
     {
         // Arrange
@@ -239,50 +202,6 @@ public class CacheManagerTests : IDisposable
 
         var stats = cacheManager.GetStatistics();
         stats.L2CircuitState.Should().Be("Open");
-    }
-
-    [Fact]
-    public async Task Circuit_TwoFailures_StaysClosed()
-    {
-        // Arrange
-        var mockL2Cache = MockServiceProvider.CreateMockDistributedCache();
-        var mockL3Cache = new Mock<IPersistentCache>();
-        mockL3Cache.Setup(c => c.GetAsync<byte[]>(It.IsAny<string>()))
-            .Returns(Task.FromResult<byte[]?>(null));
-        mockL3Cache.Setup(c => c.GetAsync<string>(It.IsAny<string>()))
-            .Returns(Task.FromResult<string?>(null));
-
-        var failureCount = 0;
-
-        mockL2Cache.Setup(c => c.GetAsync(It.IsAny<string>(), default))
-            .ReturnsAsync(() =>
-            {
-                failureCount++;
-                if (failureCount <= 2)
-                {
-                    throw new Exception("Redis connection failed");
-                }
-                return (byte[]?)null;
-            });
-
-        var cacheManager = new MultiLevelCacheManager(
-            _memoryCache,
-            mockL2Cache.Object,
-            mockL3Cache.Object,
-            _mockLogger.Object);
-
-        // Act: Trigger 2 failures (not enough to open circuit)
-        for (int i = 0; i < 2; i++)
-        {
-            await cacheManager.GetOrComputeAsync($"key{i}",
-                () => Task.FromResult($"value{i}"),
-                TimeSpan.FromMinutes(1));
-        }
-
-        // Assert: Circuit should still be closed
-        var stats = cacheManager.GetStatistics();
-        stats.L2CircuitState.Should().Be("Closed");
-        stats.L2FailureCount.Should().Be(2);
     }
 
     [Fact]

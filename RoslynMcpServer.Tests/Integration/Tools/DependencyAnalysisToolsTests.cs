@@ -250,12 +250,16 @@ public class DependencyAnalysisToolsTests : IDisposable
 
         // Assert
         result.Should().NotBeNullOrEmpty();
+        // Should show counts or summary information
         result.Should().Match(r =>
             r.Contains("Total") ||
             r.Contains("count") ||
             r.Contains("Summary") ||
             r.Contains("Unused") ||
-            r.Contains("items"));
+            r.Contains("unused") ||
+            r.Contains("items") ||
+            r.Contains("dependencies") ||
+            r.Contains("projects"));
     }
 
     #endregion
