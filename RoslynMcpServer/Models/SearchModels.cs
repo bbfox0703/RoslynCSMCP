@@ -1353,4 +1353,197 @@ namespace RoslynMcpServer.Models
         public string RiskLevel { get; set; } = string.Empty;  // Low, Medium, High, Critical
         public string RiskReason { get; set; } = string.Empty;
     }
+
+    // ============================================================================
+    // Phase 2 Models - Advanced Refactoring and .NET-Specific Analysis
+    // ============================================================================
+
+    #region ExtractInterface
+
+    /// <summary>
+    /// Represents a member to be extracted into an interface
+    /// </summary>
+    public class ExtractableMember
+    {
+        public string Name { get; set; } = string.Empty;
+        public string MemberType { get; set; } = string.Empty;  // Method, Property, Event
+        public string ReturnType { get; set; } = string.Empty;
+        public string Signature { get; set; } = string.Empty;  // Full signature
+        public string Documentation { get; set; } = string.Empty;  // XML doc comments
+        public bool IsSelected { get; set; } = true;  // Include in interface by default
+    }
+
+    /// <summary>
+    /// Results from interface extraction operation
+    /// </summary>
+    public class InterfaceExtractionResult
+    {
+        public string ClassName { get; set; } = string.Empty;
+        public string InterfaceName { get; set; } = string.Empty;
+        public string Namespace { get; set; } = string.Empty;
+        public string InterfaceCode { get; set; } = string.Empty;  // Generated interface code
+        public List<ExtractableMember> Members { get; set; } = new();
+        public string SuggestedFilePath { get; set; } = string.Empty;
+        public bool Success { get; set; }
+        public string ErrorMessage { get; set; } = string.Empty;
+        public List<string> Warnings { get; set; } = new();
+
+        // Statistics
+        public int TotalMembers => Members.Count;
+        public int SelectedMembers => Members.Count(m => m.IsSelected);
+    }
+
+    #endregion
+
+    #region AnalyzeDIContainer
+
+    /// <summary>
+    /// Represents a dependency injection issue
+    /// </summary>
+    public class DIContainerIssue
+    {
+        public string IssueType { get; set; } = string.Empty;  // Unregistered, LifetimeMismatch, Circular, Captive
+        public string Severity { get; set; } = string.Empty;  // Critical, High, Medium, Low
+        public string ServiceType { get; set; } = string.Empty;
+        public string ImplementationType { get; set; } = string.Empty;
+        public string ServiceLifetime { get; set; } = string.Empty;  // Singleton, Scoped, Transient
+        public string Description { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public List<string> DependencyChain { get; set; } = new();  // For circular dependencies
+    }
+
+    /// <summary>
+    /// Results from DI container analysis
+    /// </summary>
+    public class DIContainerResults
+    {
+        public List<DIContainerIssue> Issues { get; set; } = new();
+        public int AnalyzedServices { get; set; }
+        public int AnalyzedConstructors { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by issue type
+        public int UnregisteredCount { get; set; }
+        public int LifetimeMismatchCount { get; set; }
+        public int CircularDependencyCount { get; set; }
+        public int CaptiveDependencyCount { get; set; }
+
+        // Statistics by severity
+        public int CriticalCount { get; set; }
+        public int HighCount { get; set; }
+        public int MediumCount { get; set; }
+        public int LowCount { get; set; }
+
+        public int TotalIssues => Issues.Count;
+    }
+
+    #endregion
+
+    #region AnalyzeExceptionHandling
+
+    /// <summary>
+    /// Represents an exception handling anti-pattern or issue
+    /// </summary>
+    public class ExceptionHandlingIssue
+    {
+        public string IssueType { get; set; } = string.Empty;  // EmptyCatch, SwallowedException, GenericCatch, MissingUsing
+        public string Severity { get; set; } = string.Empty;  // High, Medium, Low
+        public string Description { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string MethodName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string ExceptionType { get; set; } = string.Empty;  // Exception type being caught
+        public string ProjectName { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Results from exception handling analysis
+    /// </summary>
+    public class ExceptionHandlingResults
+    {
+        public List<ExceptionHandlingIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedTryBlocks { get; set; }
+        public int AnalyzedMethods { get; set; }
+        public int TotalTryBlocks { get; set; }
+        public int TotalCatchBlocks { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by issue type
+        public int EmptyCatchCount { get; set; }
+        public int SwallowedExceptionCount { get; set; }
+        public int GenericCatchCount { get; set; }
+        public int GenericExceptionCount { get; set; }  // Alias for GenericCatchCount
+        public int MissingUsingCount { get; set; }
+
+        // Statistics by severity
+        public int HighSeverityCount { get; set; }
+        public int MediumSeverityCount { get; set; }
+        public int LowSeverityCount { get; set; }
+        public int HighCount { get; set; }    // Alias for HighSeverityCount
+        public int MediumCount { get; set; }  // Alias for MediumSeverityCount
+        public int LowCount { get; set; }     // Alias for LowSeverityCount
+
+        public int TotalIssues => Issues.Count;
+    }
+
+    #endregion
+
+    #region FindThreadSafetyIssues
+
+    /// <summary>
+    /// Represents a thread safety issue or potential race condition
+    /// </summary>
+    public class ThreadSafetyIssue
+    {
+        public string IssueType { get; set; } = string.Empty;  // MutableStatic, UnsynchronizedAccess, UnsafeCollection, DoubleCheckLocking
+        public string Severity { get; set; } = string.Empty;  // Critical, High, Medium, Low
+        public string Description { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string MemberName { get; set; } = string.Empty;  // Field, property, or method name
+        public string MemberType { get; set; } = string.Empty;  // Field, Property, Method
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public bool IsStaticMember { get; set; }
+    }
+
+    /// <summary>
+    /// Results from thread safety analysis
+    /// </summary>
+    public class ThreadSafetyResults
+    {
+        public List<ThreadSafetyIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int AnalyzedTypes { get; set; }
+        public int AnalyzedMembers { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by issue type
+        public int MutableStaticCount { get; set; }
+        public int UnsynchronizedAccessCount { get; set; }
+        public int UnsafeCollectionCount { get; set; }
+        public int DoubleCheckLockingCount { get; set; }
+        public int AsyncDeadlockCount { get; set; }
+        public int SharedStateCount { get; set; }
+        public int DoubleLockingCount { get; set; }
+
+        // Statistics by severity
+        public int CriticalCount { get; set; }
+        public int HighCount { get; set; }
+        public int MediumCount { get; set; }
+        public int LowCount { get; set; }
+
+        public int TotalIssues => Issues.Count;
+    }
+
+    #endregion
 }
