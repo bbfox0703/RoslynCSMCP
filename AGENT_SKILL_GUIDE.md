@@ -224,6 +224,66 @@ Use these tools when you need to **understand dependencies** between projects, p
 
 ---
 
+#### AnalyzeDIContainer 🆕
+**When to use:**
+- "Analyze my dependency injection configuration"
+- "Find unregistered dependencies"
+- "Check for captive dependencies"
+- "Detect circular dependencies in DI"
+- Preventing runtime DI failures
+- Validating service lifetimes
+
+**Detects (5 issue types):**
+1. **Circular Dependencies** (Critical severity) - Services depending on each other in a cycle
+2. **Unregistered Dependencies** (High severity) - Constructor parameters not registered in DI container
+3. **Captive Dependencies** (High severity) - Singleton → Scoped/Transient lifetime mismatches
+4. **Lifetime Mismatches** (Medium severity) - Scoped depending on Transient
+5. **Multiple Registrations** (Low severity) - Same service type registered multiple times
+
+**Features:**
+- DI registration detection (AddScoped, AddSingleton, AddTransient, TryAdd* variants)
+- Service registration map with lifetimes
+- Constructor dependency analysis
+- DFS-based circular dependency detection
+- Framework type filtering (ILogger, IConfiguration, IOptions, System.*)
+
+**Parameters:**
+- `solutionPath`: Path to .sln file
+- `format`: Output format (summary/normal/detailed)
+
+**Output:**
+- Issues grouped by type and severity
+- Service names with lifetimes
+- Dependency chains for circular dependencies
+- Specific recommendations for each issue type
+
+**Example scenarios:**
+```
+❓ "Find all DI configuration issues in my solution"
+→ Use AnalyzeDIContainer with format=normal
+
+❓ "Check for captive dependencies (Singleton → Scoped)"
+→ Use AnalyzeDIContainer with format=detailed
+
+❓ "Quick overview of DI container health"
+→ Use AnalyzeDIContainer with format=summary
+```
+
+**Captive Dependency Rules:**
+- Singleton can only depend on Singleton
+- Scoped can depend on Singleton or Scoped
+- Transient can depend on any lifetime
+
+**Recommendations provided:**
+- Circular: "Break the cycle by introducing an interface or refactoring"
+- Unregistered: "Register the missing service or check constructor"
+- Captive: "Change service lifetime or dependency lifetime"
+- Multiple registration: "Review registrations, ensure intentional overrides"
+
+**Status:** ✅ Production Ready - Validates DI configuration, detects lifetime issues and circular dependencies using DFS
+
+---
+
 ## Code Quality & Maintenance
 
 ### When to Use These Tools
@@ -408,6 +468,58 @@ Use these tools when **maintaining code quality** and identifying improvement op
 
 **Status:** ✅ **Production Ready** (Fully implemented and tested)
 
+#### AnalyzeExceptionHandling 🆕
+**When to use:**
+- "Find exception handling anti-patterns"
+- "Check for empty catch blocks"
+- Code review preparation
+- Ensuring proper error handling
+- Finding swallowed exceptions
+
+**Detects (4 issue types):**
+1. **Empty Catch Blocks** (High severity) - catch blocks with no statements
+2. **Swallowed Exceptions** (Medium severity) - exceptions caught without logging or rethrowing
+3. **Generic Exception Catches** (Low severity) - catching base `Exception` instead of specific types
+4. **Missing Using Statements** (Medium severity) - IDisposable objects not wrapped in using
+
+**Features:**
+- Logging detection heuristics (Log, Write, Trace, Debug, Error, etc.)
+- Try-catch-finally block traversal across entire solution
+- Comprehensive issue reporting with code snippets
+- Severity-based categorization
+
+**Parameters:**
+- `solutionPath`: Path to .sln file
+- `format`: Output format (summary/normal/detailed)
+
+**Output:**
+- Issues grouped by type and severity
+- File locations with line numbers
+- Code snippets showing the problematic patterns
+- Specific recommendations for each issue type
+
+**Example scenarios:**
+```
+❓ "Find all exception handling issues in my solution"
+→ Use AnalyzeExceptionHandling with format=normal
+
+❓ "Check for empty catch blocks and swallowed exceptions"
+→ Use AnalyzeExceptionHandling with format=detailed
+
+❓ "Quick overview of exception handling quality"
+→ Use AnalyzeExceptionHandling with format=summary
+```
+
+**Recommendations provided:**
+- Empty catch: "Add logging or rethrow the exception"
+- Swallowed: "Log the exception or rethrow it"
+- Generic catch: "Catch specific exception types"
+- Missing using: "Wrap in using statement or try-finally"
+
+**Status:** ✅ Production Ready - Detects 4 exception handling anti-patterns with severity-based recommendations
+
+---
+
 #### AnalyzeNamingConventions
 **When to use:**
 - Code review enforcement
@@ -476,6 +588,61 @@ Use these tools when **identifying security vulnerabilities** and **performance 
 - Performance impact score (1-10)
 - Fix recommendations
 - Code examples
+
+---
+
+#### FindThreadSafetyIssues 🆕
+**When to use:**
+- "Find thread safety issues in my code"
+- "Check for race conditions"
+- "Detect async/await deadlock patterns"
+- Concurrent programming code review
+- Before production deployment of multi-threaded code
+
+**Detects (5 issue types):**
+1. **Mutable Static Fields** (High severity) - Static fields that aren't readonly/const
+2. **Unsafe Collection Usage** (High/Medium severity) - Non-thread-safe collections (List, Dictionary, HashSet) in shared contexts
+3. **Double-Checked Locking** (Medium severity) - Classic double-check locking anti-pattern (if → lock → if)
+4. **Async Deadlock Patterns** (High severity) - .Result and .Wait() calls on Task types
+5. **Shared State Access** (Medium severity) - Instance fields accessed by multiple async methods without synchronization
+
+**Features:**
+- Static field traversal with readonly/const checking
+- Collection type pattern matching for thread-safety validation
+- Double-checked locking detection via nested if/lock syntax analysis
+- Semantic analysis for Task type detection
+- Cross-method field access analysis for async methods
+
+**Parameters:**
+- `solutionPath`: Path to .sln file
+- `format`: Output format (summary/normal/detailed)
+
+**Output:**
+- Issues grouped by type and severity
+- File locations with line numbers
+- Code snippets showing the problematic patterns
+- Specific recommendations for each issue type
+
+**Example scenarios:**
+```
+❓ "Find all thread safety issues in my solution"
+→ Use FindThreadSafetyIssues with format=normal
+
+❓ "Check for async/await deadlock patterns"
+→ Use FindThreadSafetyIssues with format=detailed
+
+❓ "Quick overview of threading issues"
+→ Use FindThreadSafetyIssues with format=summary
+```
+
+**Recommendations provided:**
+- Mutable static: "Make field readonly, use Interlocked, or add synchronization"
+- Unsafe collection: "Use ConcurrentDictionary, ConcurrentBag, or add locking"
+- Double-check locking: "Use Lazy<T> or volatile with proper memory barriers"
+- Async deadlock: "Use await instead of .Result or .Wait()"
+- Shared state: "Add lock or use immutable data structures"
+
+**Status:** ✅ Production Ready - Detects 5 thread safety patterns with severity-based recommendations
 
 ---
 
@@ -659,6 +826,50 @@ Use these tools when **planning and executing refactoring** work.
 ```
 
 **Status:** ✅ Production Ready - Detects direct dependency violations, circular dependencies, and calculates compliance scores using JSON-based layer definitions
+
+#### ExtractInterface 🆕
+**When to use:**
+- "Extract an interface from UserService class"
+- Improving testability with mock interfaces
+- Following SOLID principles (Dependency Inversion)
+- Creating abstractions for dependency injection
+- Refactoring to interface-based design
+
+**Features:**
+- Type resolution by name across solution
+- Public member extraction (methods, properties, events)
+- Auto-generated interface name (I + ClassName)
+- Interface code generation with proper syntax
+- XML documentation preservation
+- Name conflict detection
+- Suggested file path generation
+
+**Parameters:**
+- `solutionPath`: Path to .sln file
+- `typeName`: Class name to extract interface from
+- `interfaceName`: Target interface name (optional, auto-generated as I + ClassName)
+
+**Output:**
+- Complete interface definition code
+- Member list extracted (methods, properties, events)
+- Suggested file path for the new interface
+- Name conflict warnings if interface already exists
+
+**Example scenarios:**
+```
+❓ "Extract interface from UserService"
+→ Use ExtractInterface with typeName="UserService"
+
+❓ "Create IOrderProcessor interface from OrderProcessor class"
+→ Use ExtractInterface with typeName="OrderProcessor", interfaceName="IOrderProcessor"
+
+❓ "Make ProductRepository testable with an interface"
+→ Use ExtractInterface with typeName="ProductRepository"
+```
+
+**Status:** ✅ Production Ready - Extracts public members, generates complete interface code, detects conflicts
+
+---
 
 #### GetChangeImpact
 **When to use:**
@@ -906,6 +1117,26 @@ Tools are designed to be resilient:
 2. `FindTestsForType` - Specific type tests
 3. `AnalyzeCodeComplexity` - Prioritize high-complexity untested code
 
+#### DI Container Validation
+1. `AnalyzeDIContainer` - Check for unregistered/captive/circular dependencies
+2. `FindReferences` - Understand service usage patterns
+3. `GetClassHierarchy` - Check interface implementations
+
+#### Thread Safety Audit
+1. `FindThreadSafetyIssues` - Race conditions and async deadlocks
+2. `FindCodeSmells` - Long methods that might hide complexity
+3. `GetCallHierarchy` - Understand async call chains
+
+#### Exception Handling Review
+1. `AnalyzeExceptionHandling` - Anti-patterns and swallowed exceptions
+2. `FindCodeSmells` - Identify complex methods prone to error handling issues
+3. `FindSecurityIssues` - Security-related exception handling
+
+#### Interface Extraction Workflow
+1. `GetTypeSignature` - Understand class structure
+2. `ExtractInterface` - Generate interface definition
+3. `FindReferences` - See where class is used to plan migration
+
 ---
 
 ## Integration Tips
@@ -949,9 +1180,13 @@ RoslynCSMCP provides comprehensive code analysis capabilities through Roslyn. By
 **Quick decision tree:**
 - Need to find code? → **SearchSymbols**, **FindReferences**
 - Need to understand structure? → **GetProjectStructure**, **GetFileOutline**
-- Need to assess quality? → **AnalyzeCodeComplexity**, **FindUnusedCode**
+- Need to assess quality? → **AnalyzeCodeComplexity**, **FindCodeSmells**, **FindUnusedCode**
 - Need to check security? → **FindSecurityIssues**, **AnalyzePackages**
-- Need to plan refactoring? → **GetChangeImpact**, **FindReferences**
+- Need to plan refactoring? → **GetChangeImpact**, **FindReferences**, **ExtractInterface**
 - Need to analyze tests? → **GetTestCoverage**, **FindTestsForType**
+- Need to check DI configuration? → **AnalyzeDIContainer**
+- Need to check thread safety? → **FindThreadSafetyIssues**
+- Need to check exception handling? → **AnalyzeExceptionHandling**
+- Need to check architecture? → **AnalyzeLayerViolations**, **GetDependencyGraph**
 
 For detailed implementation guidance, see [CLAUDE.md](./CLAUDE.md).

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using Microsoft.Build.Locator;
 using RoslynMcpServer.Services;
+using RoslynMcpServer.Configuration;
 using Serilog;
 using Serilog.Events;
 
@@ -142,7 +143,19 @@ namespace RoslynMcpServer
                 // Register HeartbeatService as a background service
                 builder.Services.AddHostedService<HeartbeatService>();
 
+                // Load and log tool profile configuration
+                var toolProfileConfig = ToolProfileConfig.Load();
+                var toolStats = McpToolFilterExtensions.GetToolStatistics(toolProfileConfig);
+                Log.Information("Tool Profile: {Profile}", toolProfileConfig.ActiveProfile);
+                Log.Information("Tool Statistics: {EnabledTools}/{TotalTools} tools enabled",
+                    toolStats.EnabledTools, toolStats.TotalTools);
+                Log.Information("Estimated token usage: ~{Tokens} tokens (savings: ~{Savings})",
+                    toolStats.EstimatedTokensEnabled, toolStats.TokenSavings);
+
                 // Configure MCP server
+                // NOTE: Current MCP SDK doesn't support per-tool filtering.
+                // All tools are registered; profile config is for documentation/planning.
+                // To reduce tokens, see docs/TOKEN_OPTIMIZATION.md for manual tool reduction.
                 builder.Services
                     .AddMcpServer()
                     .WithStdioServerTransport()

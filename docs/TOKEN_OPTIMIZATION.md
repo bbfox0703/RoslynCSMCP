@@ -1,7 +1,110 @@
 # Token Optimization Guide
 
-**Last Updated**: 2026-01-11
-**Status**: ✅ Phase 4 Complete (6 tools optimized)
+**Last Updated**: 2026-01-16
+**Status**: ✅ Phase 4 Complete (6 tools optimized) + Tool Profiles Added
+
+---
+
+## 🚀 Tool Profile System (NEW)
+
+### The Problem: Initial Tool Registration Token Cost
+
+When RoslynCSMCP starts, it registers **42 MCP tools** with Claude. Each tool definition includes:
+- Tool name and description
+- Parameter definitions with descriptions
+- **Estimated cost: ~175 tokens per tool = ~7,350 tokens total**
+
+This happens **before any conversation** and consumes context window space.
+
+### Solution: Tool Profiles
+
+Tool Profiles let you control which tool categories are logically "enabled". While the MCP SDK currently loads all tools, this configuration:
+1. Documents your preferred tool set
+2. Logs token estimates at startup
+3. Prepares for future SDK filtering support
+
+### Profile Options
+
+| Profile | Tools | Est. Tokens | Use Case |
+|---------|-------|-------------|----------|
+| `minimal` | 6 | ~1,050 | Quick navigation only |
+| `standard` | 19 | ~3,325 | Daily development (recommended) |
+| `extended` | 28 | ~4,900 | Full development workflow |
+| `full` | 42 | ~7,350 | All tools available |
+| `custom` | ? | ? | User-defined selection |
+
+### Configuration
+
+**Option 1: Environment Variable**
+```bash
+# In claude_desktop_config.json
+"env": {
+  "ROSLYN_MCP_PROFILE": "standard"
+}
+```
+
+**Option 2: Configuration File**
+
+Edit `tool-profiles.json` in the server directory:
+```json
+{
+  "activeProfile": "standard",
+  "profiles": {
+    "minimal": ["@Navigation"],
+    "standard": ["@Navigation", "@CodeQuality", "@Security"],
+    "custom": ["SearchSymbols", "FindReferences", "AnalyzeCodeComplexity"]
+  }
+}
+```
+
+### Tool Categories
+
+| Category | Tools | Description |
+|----------|-------|-------------|
+| `@Navigation` | 6 | SearchSymbols, FindReferences, GetSymbolInfo, GetProjectStructure, GetFileOutline, FindImplementations |
+| `@CodeQuality` | 6 | AnalyzeCodeComplexity, FindCodeSmells, FindUnusedCode, FindDuplicateCode, FindMagicNumbers, AnalyzeNamingConventions |
+| `@Security` | 3 | FindSecurityIssues, FindThreadSafetyIssues, AnalyzeExceptionHandling |
+| `@Dependencies` | 5 | AnalyzeDependencies, GetDependencyGraph, FindUnusedDependencies, AnalyzePackages, AnalyzeDIContainer |
+| `@Refactoring` | 4 | RenameSymbolSafely, ExtractInterface, GetChangeImpact, AnalyzeLayerViolations |
+| `@Testing` | 2 | FindTestsForType, GetTestCoverage |
+| `@Metrics` | 3 | GetCodeMetrics, GetFileStatistics, AnalyzeDocumentationCoverage |
+| `@Advanced` | 13 | BatchQuery, FindReferencesFiltered, GetCallHierarchy, etc. |
+
+### Immediate Token Reduction (Manual)
+
+Until the MCP SDK supports per-tool filtering, you can manually reduce tools:
+
+**Method 1: Comment out tools in source code**
+```csharp
+// In CodeNavigationTools.cs, comment out unused tools:
+// [McpServerTool, Description("...")]
+// public static async Task<string> FindLargeFiles(...) { ... }
+```
+
+**Method 2: Create a minimal build configuration**
+```xml
+<!-- In RoslynMcpServer.csproj -->
+<PropertyGroup Condition="'$(Configuration)'=='Minimal'">
+  <DefineConstants>MINIMAL_TOOLS</DefineConstants>
+</PropertyGroup>
+```
+
+Then wrap tools with `#if !MINIMAL_TOOLS`:
+```csharp
+#if !MINIMAL_TOOLS
+[McpServerTool, Description("...")]
+public static async Task<string> AdvancedTool(...) { ... }
+#endif
+```
+
+### Startup Log Output
+
+When the server starts, you'll see:
+```
+[INF] Tool Profile: standard
+[INF] Tool Statistics: 19/42 tools enabled
+[INF] Estimated token usage: ~3325 tokens (savings: ~4025)
+```
 
 ---
 
