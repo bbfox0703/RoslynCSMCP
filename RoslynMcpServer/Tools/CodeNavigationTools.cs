@@ -4,8 +4,8 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using RoslynMcpServer.Models;
-using RoslynMcpServer.Services;
+using RoslynMcpServer.Core.Models;
+using RoslynMcpServer.Core.Services;
 using System.ComponentModel;
 using System.Text;
 
@@ -1805,7 +1805,7 @@ namespace RoslynMcpServer.Tools
         }
 
         // Summary mode: Minimal information (30-50 tokens)
-        private static string FormatSymbolInfoSummary(RoslynMcpServer.Models.SymbolInfo? info)
+        private static string FormatSymbolInfoSummary(RoslynMcpServer.Core.Models.SymbolInfo? info)
         {
             if (info == null)
                 return "Symbol not found.";
@@ -1846,7 +1846,7 @@ namespace RoslynMcpServer.Tools
         }
 
         // Basic mode: Balanced information (80-120 tokens)
-        private static string FormatSymbolInfoBasic(RoslynMcpServer.Models.SymbolInfo? info)
+        private static string FormatSymbolInfoBasic(RoslynMcpServer.Core.Models.SymbolInfo? info)
         {
             if (info == null)
                 return "Symbol not found.";
@@ -1905,7 +1905,7 @@ namespace RoslynMcpServer.Tools
         }
 
         // Full mode: Comprehensive information (150-250 tokens, original behavior)
-        private static string FormatSymbolInfoFull(RoslynMcpServer.Models.SymbolInfo? info)
+        private static string FormatSymbolInfoFull(RoslynMcpServer.Core.Models.SymbolInfo? info)
         {
             if (info == null)
                 return "Symbol not found.";

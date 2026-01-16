@@ -3,8 +3,10 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using Microsoft.Build.Locator;
-using RoslynMcpServer.Services;
+using RoslynMcpServer.Core.Services;
+using RoslynMcpServer.Core.Configuration;
 using RoslynMcpServer.Configuration;
+using RoslynMcpServer.Services;
 using Serilog;
 using Serilog.Events;
 

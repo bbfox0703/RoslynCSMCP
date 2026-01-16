@@ -46,7 +46,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Project Reference -->
+    <!-- Project References -->
+    <ProjectReference Include="..\src\RoslynMcpServer.Core\RoslynMcpServer.Core.csproj" />
     <ProjectReference Include="..\RoslynMcpServer\RoslynMcpServer.csproj" />
   </ItemGroup>
 

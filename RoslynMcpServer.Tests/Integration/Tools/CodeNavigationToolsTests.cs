@@ -3,7 +3,7 @@ using RoslynMcpServer.Tools;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Caching.Memory;
-using RoslynMcpServer.Services;
+using RoslynMcpServer.Core.Services;
 using Microsoft.Build.Locator;
 
 namespace RoslynMcpServer.Tests.Integration.Tools;

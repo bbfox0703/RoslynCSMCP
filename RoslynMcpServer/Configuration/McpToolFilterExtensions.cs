@@ -3,6 +3,7 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
+using RoslynMcpServer.Core.Configuration;
 
 namespace RoslynMcpServer.Configuration;
 
