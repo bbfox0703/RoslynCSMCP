@@ -312,6 +312,102 @@ Use these tools when **maintaining code quality** and identifying improvement op
 - BUG: Known bugs
 - OPTIMIZE: Performance improvements needed
 
+#### FindMagicNumbers 🆕
+**When to use:**
+- "Find all hardcoded values"
+- "What numbers should be constants?"
+- Code quality audits
+- Preparing for internationalization
+- Configuration extraction
+
+**Detects:**
+- Numeric literals (excluding common: 0, 1, -1, 2)
+- String literals (configurable minimum length)
+- Excludes attributes and test assertions
+- Context-aware filtering
+
+**Features:**
+- Priority categorization (High/Medium/Low based on occurrence)
+- Suggested constant names
+- Grouped by value with counts
+- File locations and code context
+
+**Output formats:**
+- `summary`: Counts only
+- `normal`: Grouped list with first few occurrences
+- `detailed`: All occurrences with suggested names
+
+**Parameters:**
+- `includeStrings`: Include string literals (default: true)
+- `includeNumbers`: Include numeric literals (default: true)
+- `minStringLength`: Minimum string length (default: 3)
+
+**Example scenarios:**
+```
+❓ "Find all magic numbers in my solution"
+→ Use FindMagicNumbers with default settings
+
+❓ "Find hardcoded strings only"
+→ Use FindMagicNumbers with includeNumbers=false
+
+❓ "Show me all numeric constants that should be extracted"
+→ Use FindMagicNumbers with format=detailed, includeStrings=false
+```
+
+#### FindCodeSmells 🆕 ✅
+**When to use:**
+- "What code smells exist in my project?"
+- Code review preparation
+- Identifying refactoring candidates
+- Learning code quality practices
+- Technical debt assessment
+
+**Detects (10 patterns) - All Implemented:**
+1. **Long Method** - Methods with too many lines (20-29: Low, 30-49: Medium, 50+: High)
+2. **Large Class** - Classes with too many members or lines (300+ lines/20+ members: Medium, 500+ lines/30+ members: High)
+3. **Long Parameter List** - Excessive parameters (4: Low, 5: Medium, 6+: High)
+4. **Feature Envy** - Methods accessing other classes more than their own
+5. **Data Clumps** - Repeated parameter patterns across methods
+6. **Primitive Obsession** - 3+ parameters of same primitive type
+7. **Switch Statements** - Large switches (5-7 cases: Medium, 8+: High)
+8. **Message Chains** - Long method chains (3+ levels: Medium, 5+: High)
+9. **Middle Man** - Classes that just delegate (>50% methods delegate: Medium, >75%: High)
+10. **Speculative Generality** - Unused abstractions (abstract classes, single-member interfaces)
+
+**Output formats:**
+- `summary`: Counts by type and severity
+- `normal`: Top 10 of each severity level with locations (recommended)
+- `detailed`: All smells with full metrics, recommendations, and code snippets
+
+**Parameters:**
+- `smellTypes`: "all" or comma-separated list (e.g., "LongMethod,LargeClass")
+- `severity`: "All", "High", "Medium", or "Low"
+- `format`: "summary", "normal", or "detailed"
+
+**Example scenarios:**
+```
+❓ "Find all code smells in my solution"
+→ Use FindCodeSmells with format=normal
+
+❓ "Show only critical issues"
+→ Use FindCodeSmells with severity=High, format=detailed
+
+❓ "Check for long methods and large classes"
+→ Use FindCodeSmells with smellTypes="LongMethod,LargeClass"
+
+❓ "Quick overview of code quality issues"
+→ Use FindCodeSmells with format=summary
+```
+
+**Output includes:**
+- Grouped by smell type and severity
+- File locations and line numbers
+- Specific metrics (line count, parameter count, etc.)
+- Tailored recommendations for each smell
+- Quick recommendations summary (detailed mode)
+
+**Status:** ✅ **Production Ready** (Fully implemented and tested)
+
 #### AnalyzeNamingConventions
 **When to use:**
 - Code review enforcement
@@ -435,6 +531,134 @@ Use these tools when **working with tests** and **analyzing test coverage**.
 Use these tools when **planning and executing refactoring** work.
 
 ### Available Tools
+
+#### RenameSymbolSafely ✅
+**When to use:**
+- "Rename this class safely"
+- "What would break if I rename this method?"
+- Before performing renames
+- Understanding rename impact
+
+**Features:**
+- Finds all references to symbol
+- Preview mode (default - no changes made)
+- Conflict detection (new name already exists)
+- Risk assessment
+- Cross-file renaming support
+- Atomic operations (all or nothing)
+
+**Safety Checks:**
+- Validates new name doesn't conflict
+- Checks accessibility constraints
+- Warns about breaking changes
+- Identifies impact scope
+
+**Parameters:**
+- `symbolName`: Current name
+- `newName`: New name
+- `solutionPath`: Solution file path
+- `previewOnly`: Preview (true) or execute (false), default: true
+
+**Modes:**
+- `previewOnly=true`: Shows what would change (safe, recommended)
+- `previewOnly=false`: Actually performs rename (use with caution)
+
+**Output:**
+- Files affected count
+- Total locations to change
+- Risk level assessment
+- Conflict warnings
+- Preview of changes
+
+**Example scenarios:**
+```
+❓ "Can I safely rename UserService to AccountService?"
+→ Use RenameSymbolSafely in preview mode (default)
+
+❓ "Show me everywhere GetUser is referenced"
+→ Use RenameSymbolSafely with previewOnly=true (safer than FindReferences for rename planning)
+
+❓ "Rename ConfigManager to SettingsManager everywhere"
+→ First use previewOnly=true to review, then previewOnly=false to execute
+```
+
+**Risk Levels:**
+- **Low**: Private members, single project
+- **Medium**: Internal members, few projects
+- **High**: Public members, many references
+- **Critical**: Public API, cross-project, breaking changes
+
+**Status:** ✅ Production Ready - Safe symbol renaming with preview mode, conflict detection, and intelligent risk assessment
+
+#### AnalyzeLayerViolations ✅
+**When to use:**
+- "Does my code follow Clean Architecture?"
+- "Check layered architecture compliance"
+- Enforcing architectural rules
+- Preventing dependency violations
+
+**Architecture Patterns Supported:**
+- Clean Architecture (Presentation → Application → Domain → Infrastructure)
+- Onion Architecture
+- Hexagonal Architecture
+- DDD (Domain-Driven Design) layers
+- Custom layer definitions
+
+**Features:**
+- JSON-based layer definitions
+- Pattern matching for project classification
+- Dependency rule validation
+- Circular dependency detection
+- Compliance scoring
+- Violation recommendations
+
+**Layer Definition Format:**
+```json
+{
+  "layers": [
+    {"name": "Presentation", "projects": ["*.Web", "*.API"]},
+    {"name": "Application", "projects": ["*.Application", "*.Services"]},
+    {"name": "Domain", "projects": ["*.Domain", "*.Core"]},
+    {"name": "Infrastructure", "projects": ["*.Data", "*.Infrastructure"]}
+  ],
+  "rules": [
+    {"from": "Presentation", "to": "Application", "allowed": true},
+    {"from": "Presentation", "to": "Infrastructure", "allowed": false},
+    {"from": "Application", "to": "Domain", "allowed": true},
+    {"from": "Domain", "to": "Infrastructure", "allowed": false}
+  ]
+}
+```
+
+**Violations Detected:**
+- Direct dependency violations (e.g., Presentation → Infrastructure)
+- Circular dependencies between layers
+- Reverse dependencies (dependencies pointing "up" the stack)
+
+**Output:**
+- Total violations by severity
+- Compliance score (percentage)
+- Detailed violation list with recommendations
+- Impacted projects and references
+
+**Parameters:**
+- `solutionPath`: Solution file path
+- `layerDefinitionsJson`: JSON layer configuration
+- `format`: Output format (summary/normal/detailed)
+
+**Example scenarios:**
+```
+❓ "Check if my solution follows Clean Architecture"
+→ Use AnalyzeLayerViolations with Clean Architecture layer definition
+
+❓ "Find all places where UI directly accesses database"
+→ Define layers with rule: Presentation → Data = not allowed
+
+❓ "Validate DDD boundaries"
+→ Define Domain layer rules preventing external dependencies
+```
+
+**Status:** ✅ Production Ready - Detects direct dependency violations, circular dependencies, and calculates compliance scores using JSON-based layer definitions
 
 #### GetChangeImpact
 **When to use:**

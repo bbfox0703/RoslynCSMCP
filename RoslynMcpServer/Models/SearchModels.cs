@@ -1137,4 +1137,220 @@ namespace RoslynMcpServer.Models
         public string RecommendedVersionBump { get; set; } = string.Empty; // Major, Minor, Patch
         public string VersioningReason { get; set; } = string.Empty;
     }
+
+    // Phase 1 Tools Models (New)
+
+    /// <summary>
+    /// Represents a magic number or hardcoded literal in code
+    /// </summary>
+    public class MagicNumber
+    {
+        public string Value { get; set; } = string.Empty;  // The literal value
+        public string Type { get; set; } = string.Empty;  // Number, String, Boolean
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string ContainingMember { get; set; } = string.Empty;  // Method or property name
+        public string ContainingType { get; set; } = string.Empty;  // Class name
+        public string CodeContext { get; set; } = string.Empty;  // Line of code
+        public string SuggestedConstantName { get; set; } = string.Empty;  // Suggested name
+        public string Reason { get; set; } = string.Empty;  // Why it's considered magic
+    }
+
+    /// <summary>
+    /// Results from magic number analysis
+    /// </summary>
+    public class MagicNumberResults
+    {
+        public List<MagicNumber> MagicNumbers { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by type
+        public int NumericLiterals { get; set; }
+        public int StringLiterals { get; set; }
+        public int BooleanLiterals { get; set; }
+
+        // Statistics by severity
+        public int HighPriority { get; set; }  // Used in multiple places
+        public int MediumPriority { get; set; }  // Used once but in important logic
+        public int LowPriority { get; set; }  // Simple cases
+
+        public int TotalMagicNumbers => MagicNumbers.Count;
+    }
+
+    /// <summary>
+    /// Represents a code smell detected in the codebase
+    /// </summary>
+    public class CodeSmell
+    {
+        public string SmellType { get; set; } = string.Empty;  // LongMethod, LargeClass, etc.
+        public string Severity { get; set; } = string.Empty;  // High, Medium, Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string SymbolName { get; set; } = string.Empty;  // Method, class, etc.
+        public string SymbolKind { get; set; } = string.Empty;  // Method, Class, Property
+        public Dictionary<string, object> Metrics { get; set; } = new();  // Specific metrics
+        public string CodeSnippet { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Results from code smell analysis
+    /// </summary>
+    public class CodeSmellResults
+    {
+        public List<CodeSmell> Smells { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int AnalyzedSymbols { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics by severity
+        public int HighSeverity { get; set; }
+        public int MediumSeverity { get; set; }
+        public int LowSeverity { get; set; }
+
+        // Statistics by smell type
+        public Dictionary<string, int> SmellsByType { get; set; } = new();
+
+        public int TotalSmells => Smells.Count;
+    }
+
+    /// <summary>
+    /// Represents an architecture layer definition
+    /// </summary>
+    public class LayerDefinition
+    {
+        public string Name { get; set; } = string.Empty;  // Presentation, Application, etc.
+        public List<string> ProjectPatterns { get; set; } = new();  // *.Web, *.API
+        public List<string> MatchedProjects { get; set; } = new();  // Actual project names
+    }
+
+    /// <summary>
+    /// Represents an architecture dependency rule
+    /// </summary>
+    public class LayerRule
+    {
+        public string FromLayer { get; set; } = string.Empty;
+        public string ToLayer { get; set; } = string.Empty;
+        public bool Allowed { get; set; }
+    }
+
+    /// <summary>
+    /// Represents a violation of architecture rules
+    /// </summary>
+    public class LayerViolation
+    {
+        public string ViolationType { get; set; } = string.Empty;  // DirectDependency, CircularDependency
+        public string Severity { get; set; } = string.Empty;  // Critical, High, Medium
+        public string FromLayer { get; set; } = string.Empty;
+        public string ToLayer { get; set; } = string.Empty;
+        public string FromProject { get; set; } = string.Empty;
+        public string ToProject { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public List<string> ViolatingReferences { get; set; } = new();  // Specific type/namespace references
+        public string Recommendation { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Results from layer violation analysis
+    /// </summary>
+    public class LayerViolationResults
+    {
+        public List<LayerViolation> Violations { get; set; } = new();
+        public List<LayerDefinition> Layers { get; set; } = new();
+        public List<LayerRule> Rules { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        // Statistics
+        public int TotalViolations => Violations.Count;
+        public int CriticalViolations { get; set; }
+        public int HighSeverityViolations { get; set; }
+        public int MediumSeverityViolations { get; set; }
+
+        // Violations by type
+        public Dictionary<string, int> ViolationsByType { get; set; } = new();
+
+        // Compliance score
+        public double ComplianceScore { get; set; }  // Percentage of rules followed
+    }
+
+    /// <summary>
+    /// Represents a symbol that will be renamed
+    /// </summary>
+    public class RenameTarget
+    {
+        public string CurrentName { get; set; } = string.Empty;
+        public string NewName { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string SymbolKind { get; set; } = string.Empty;  // Class, Method, Property, etc.
+        public string FilePath { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string ProjectName { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Represents a location where a symbol needs to be renamed
+    /// </summary>
+    public class RenameLocation
+    {
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public int ColumnNumber { get; set; }
+        public string OldText { get; set; } = string.Empty;
+        public string NewText { get; set; } = string.Empty;
+        public string LineContext { get; set; } = string.Empty;  // The full line
+        public bool IsDefinition { get; set; }
+    }
+
+    /// <summary>
+    /// Represents a file change needed for rename
+    /// </summary>
+    public class FileRenameChange
+    {
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int ChangeCount { get; set; }
+        public List<RenameLocation> Locations { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Results from rename symbol operation
+    /// </summary>
+    public class RenameSymbolResults
+    {
+        public RenameTarget Target { get; set; } = new();
+        public List<FileRenameChange> FileChanges { get; set; } = new();
+        public bool IsPreview { get; set; }  // True if preview mode, false if executed
+        public bool Success { get; set; }
+        public string ErrorMessage { get; set; } = string.Empty;
+
+        // Statistics
+        public int TotalLocations { get; set; }
+        public int FilesAffected { get; set; }
+        public int ProjectsAffected { get; set; }
+
+        // Validation
+        public List<string> Conflicts { get; set; } = new();  // Name conflicts detected
+        public List<string> Warnings { get; set; } = new();  // Warnings about the rename
+        public bool HasConflicts => Conflicts.Any();
+
+        // Risk assessment
+        public string RiskLevel { get; set; } = string.Empty;  // Low, Medium, High, Critical
+        public string RiskReason { get; set; } = string.Empty;
+    }
 }
