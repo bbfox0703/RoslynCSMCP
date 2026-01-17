@@ -1,0 +1,103 @@
+{
+  // Tool Profile Configuration for RoslynCSMCP
+  // This file controls which MCP tools are loaded to optimize token consumption.
+  //
+  // Profiles:
+  //   - minimal: Core navigation tools only (~6 tools, ~1,000 tokens)
+  //   - standard: Navigation + Quality + Security (~19 tools, ~3,300 tokens)
+  //   - extended: Standard + Dependencies + Refactoring (~28 tools, ~4,900 tokens)
+  //   - full: All tools (~42 tools, ~7,350 tokens)
+  //   - custom: User-defined tool list
+  //
+  // To change profile, set environment variable: ROSLYN_MCP_PROFILE=minimal
+  // Or modify "activeProfile" below.
+
+  "activeProfile": "standard",
+
+  "categories": {
+    "Navigation": [
+      "SearchSymbols",
+      "FindReferences",
+      "GetSymbolInfo",
+      "GetProjectStructure",
+      "GetFileOutline",
+      "FindImplementations"
+    ],
+    "CodeQuality": [
+      "AnalyzeCodeComplexity",
+      "FindCodeSmells",
+      "FindUnusedCode",
+      "FindDuplicateCode",
+      "FindMagicNumbers",
+      "AnalyzeNamingConventions"
+    ],
+    "Security": [
+      "FindSecurityIssues",
+      "FindThreadSafetyIssues",
+      "AnalyzeExceptionHandling"
+    ],
+    "Dependencies": [
+      "AnalyzeDependencies",
+      "GetDependencyGraph",
+      "FindUnusedDependencies",
+      "AnalyzePackages",
+      "AnalyzeDIContainer"
+    ],
+    "Refactoring": [
+      "RenameSymbolSafely",
+      "ExtractInterface",
+      "GetChangeImpact",
+      "AnalyzeLayerViolations"
+    ],
+    "Testing": [
+      "FindTestsForType",
+      "GetTestCoverage"
+    ],
+    "Metrics": [
+      "GetCodeMetrics",
+      "GetFileStatistics",
+      "AnalyzeDocumentationCoverage"
+    ],
+    "Advanced": [
+      "BatchQuery",
+      "FindReferencesFiltered",
+      "FindReferencesAcrossSolutions",
+      "GetCompilationErrors",
+      "GetCallHierarchy",
+      "GetClassHierarchy",
+      "GetTypeSignature",
+      "FindAttributeUsages",
+      "FindDeprecatedAPIs",
+      "FindTODOComments",
+      "FindLargeFiles",
+      "AnalyzeAPIChanges",
+      "FindPerformanceIssues"
+    ]
+  },
+
+  "profiles": {
+    "minimal": [
+      "@Navigation"
+    ],
+    "standard": [
+      "@Navigation",
+      "@CodeQuality",
+      "@Security"
+    ],
+    "extended": [
+      "@Navigation",
+      "@CodeQuality",
+      "@Security",
+      "@Dependencies",
+      "@Refactoring"
+    ],
+    "full": [
+      "*"
+    ],
+    "custom": [
+      "SearchSymbols",
+      "FindReferences",
+      "AnalyzeCodeComplexity"
+    ]
+  }
+}

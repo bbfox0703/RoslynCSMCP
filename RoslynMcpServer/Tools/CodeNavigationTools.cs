@@ -4,8 +4,8 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using RoslynMcpServer.Models;
-using RoslynMcpServer.Services;
+using RoslynMcpServer.Core.Models;
+using RoslynMcpServer.Core.Services;
 using System.ComponentModel;
 using System.Text;
 
@@ -1805,7 +1805,7 @@ namespace RoslynMcpServer.Tools
         }
 
         // Summary mode: Minimal information (30-50 tokens)
-        private static string FormatSymbolInfoSummary(RoslynMcpServer.Models.SymbolInfo? info)
+        private static string FormatSymbolInfoSummary(RoslynMcpServer.Core.Models.SymbolInfo? info)
         {
             if (info == null)
                 return "Symbol not found.";
@@ -1846,7 +1846,7 @@ namespace RoslynMcpServer.Tools
         }
 
         // Basic mode: Balanced information (80-120 tokens)
-        private static string FormatSymbolInfoBasic(RoslynMcpServer.Models.SymbolInfo? info)
+        private static string FormatSymbolInfoBasic(RoslynMcpServer.Core.Models.SymbolInfo? info)
         {
             if (info == null)
                 return "Symbol not found.";
@@ -1905,7 +1905,7 @@ namespace RoslynMcpServer.Tools
         }
 
         // Full mode: Comprehensive information (150-250 tokens, original behavior)
-        private static string FormatSymbolInfoFull(RoslynMcpServer.Models.SymbolInfo? info)
+        private static string FormatSymbolInfoFull(RoslynMcpServer.Core.Models.SymbolInfo? info)
         {
             if (info == null)
                 return "Symbol not found.";
@@ -7792,5 +7792,1647 @@ namespace RoslynMcpServer.Tools
         }
 
         #endregion
+
+        #region Phase 1 Tools
+
+        [McpServerTool, Description("Find magic numbers and hardcoded literals that should be extracted as constants")]
+        public static async Task<string> FindMagicNumbers(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (with suggestions). Default: normal")]
+            string format = "normal",
+            [Description("Include string literals (default: true)")] bool includeStrings = true,
+            [Description("Include numeric literals (default: true)")] bool includeNumbers = true,
+            [Description("Minimum string length to consider (default: 3)")] int minStringLength = 3,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var phase1Service = serviceProvider?.GetService(typeof(Phase1AnalysisService)) as Phase1AnalysisService;
+                if (phase1Service == null)
+                {
+                    return "Error: Phase1AnalysisService not available. Please ensure the service is registered.";
+                }
+
+                var results = await phase1Service.FindMagicNumbersAsync(
+                    solutionPath,
+                    includeStrings,
+                    includeNumbers,
+                    minStringLength);
+
+                return FormatMagicNumberResults(results, format);
+            }
+            catch (Exception ex)
+            {
+                return $"Error: An unexpected error occurred while finding magic numbers: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Find code smells and anti-patterns in the solution")]
+        public static async Task<string> FindCodeSmells(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (with metrics). Default: normal")]
+            string format = "normal",
+            [Description("Comma-separated smell types: LongMethod, LargeClass, LongParameterList, FeatureEnvy, DataClumps, PrimitiveObsession, SwitchStatements, SpeculativeGenerality, MessageChains, MiddleMan. Default: all")]
+            string smellTypes = "all",
+            [Description("Severity filter: High, Medium, Low, All (default: All)")] string severity = "All",
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var phase1Service = serviceProvider?.GetService(typeof(Phase1AnalysisService)) as Phase1AnalysisService;
+                if (phase1Service == null)
+                {
+                    return "Error: Phase1AnalysisService not available. Please ensure the service is registered.";
+                }
+
+                var smellTypeArray = smellTypes.Equals("all", StringComparison.OrdinalIgnoreCase)
+                    ? new[] { "LongMethod", "LargeClass", "LongParameterList", "FeatureEnvy", "DataClumps", "PrimitiveObsession", "SwitchStatements", "SpeculativeGenerality", "MessageChains", "MiddleMan" }
+                    : smellTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+                var results = await phase1Service.FindCodeSmellsAsync(solutionPath, smellTypeArray, severity);
+
+                return FormatCodeSmellResults(results, format);
+            }
+            catch (Exception ex)
+            {
+                return $"Error: An unexpected error occurred while finding code smells: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Analyze architecture layer violations based on defined rules (Clean Architecture, DDD, etc.)")]
+        public static async Task<string> AnalyzeLayerViolations(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("JSON string defining layers and rules. Example: {\"layers\":[{\"name\":\"Presentation\",\"projects\":[\"*.Web\"]},{\"name\":\"Domain\",\"projects\":[\"*.Domain\"]}],\"rules\":[{\"from\":\"Presentation\",\"to\":\"Domain\",\"allowed\":true}]}")]
+            string layerDefinitionsJson,
+            [Description("Output format: summary (counts only), normal (grouped list), detailed (with recommendations). Default: normal")]
+            string format = "normal",
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var phase1Service = serviceProvider?.GetService(typeof(Phase1AnalysisService)) as Phase1AnalysisService;
+                if (phase1Service == null)
+                {
+                    return "Error: Phase1AnalysisService not available. Please ensure the service is registered.";
+                }
+
+                var results = await phase1Service.AnalyzeLayerViolationsAsync(solutionPath, layerDefinitionsJson);
+
+                return FormatLayerViolationResults(results, format);
+            }
+            catch (Exception ex)
+            {
+                return $"Error: An unexpected error occurred while analyzing layer violations: {ex.Message}";
+            }
+        }
+
+        [McpServerTool, Description("Safely rename a symbol with preview and conflict detection")]
+        public static async Task<string> RenameSymbolSafely(
+            [Description("Current symbol name to rename")] string symbolName,
+            [Description("New name for the symbol")] string newName,
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Preview only (true) or execute rename (false). Default: true")] bool previewOnly = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var phase1Service = serviceProvider?.GetService(typeof(Phase1AnalysisService)) as Phase1AnalysisService;
+                if (phase1Service == null)
+                {
+                    return "Error: Phase1AnalysisService not available. Please ensure the service is registered.";
+                }
+
+                var results = await phase1Service.RenameSymbolAsync(solutionPath, symbolName, newName, previewOnly);
+
+                return FormatRenameSymbolResults(results);
+            }
+            catch (Exception ex)
+            {
+                return $"Error: An unexpected error occurred while renaming symbol: {ex.Message}";
+            }
+        }
+
+        #endregion
+
+        #region Phase 1 Formatters
+
+        private static string FormatMagicNumberResults(MagicNumberResults results, string format)
+        {
+            var output = new StringBuilder();
+
+            output.AppendLine($"# Magic Numbers Analysis\n");
+            output.AppendLine($"📊 Summary:");
+            output.AppendLine($"  • Total magic numbers: {results.TotalMagicNumbers}");
+            output.AppendLine($"  • Numeric literals: {results.NumericLiterals}");
+            output.AppendLine($"  • String literals: {results.StringLiterals}");
+            output.AppendLine($"  • Analyzed projects: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Analyzed files: {results.AnalyzedFiles}");
+
+            if (results.FailedProjects > 0)
+            {
+                output.AppendLine($"  ⚠️ Failed projects: {results.FailedProjects}");
+            }
+
+            output.AppendLine($"\n🎯 Priority:");
+            output.AppendLine($"  • High priority: {results.HighPriority} (used 3+ times)");
+            output.AppendLine($"  • Medium priority: {results.MediumPriority} (used 2 times)");
+            output.AppendLine($"  • Low priority: {results.LowPriority} (used once)");
+            output.AppendLine();
+
+            if (format == "summary")
+                return output.ToString();
+
+            // Group by type
+            var byType = results.MagicNumbers.GroupBy(m => m.Type);
+
+            foreach (var typeGroup in byType)
+            {
+                output.AppendLine($"## {typeGroup.Key} Literals ({typeGroup.Count()})\n");
+
+                // Group by value to show duplicates
+                var byValue = typeGroup.GroupBy(m => m.Value)
+                    .OrderByDescending(g => g.Count())
+                    .ThenBy(g => g.Key);
+
+                int shown = 0;
+                foreach (var valueGroup in byValue)
+                {
+                    if (shown >= 50 && format == "normal") break; // Limit in normal mode
+
+                    var first = valueGroup.First();
+                    var count = valueGroup.Count();
+                    var priority = count >= 3 ? "🔴 High" : count >= 2 ? "🟡 Medium" : "🟢 Low";
+
+                    output.AppendLine($"### Value: `{first.Value}` ({count} occurrence{(count > 1 ? "s" : "")}) - {priority}\n");
+
+                    if (format == "detailed")
+                    {
+                        output.AppendLine($"**Suggested constant:** `{first.SuggestedConstantName}`\n");
+                    }
+
+                    // Show first few occurrences
+                    int occurrenceShown = 0;
+                    foreach (var magic in valueGroup.OrderBy(m => m.ProjectName).ThenBy(m => m.FilePath))
+                    {
+                        if (occurrenceShown >= 3 && format == "normal") break;
+
+                        output.AppendLine($"  • {magic.FileName}:{magic.LineNumber} in `{magic.ContainingType}.{magic.ContainingMember}`");
+                        if (format == "detailed")
+                        {
+                            output.AppendLine($"    ```csharp");
+                            output.AppendLine($"    {magic.CodeContext}");
+                            output.AppendLine($"    ```");
+                        }
+
+                        occurrenceShown++;
+                        shown++;
+                    }
+
+                    if (valueGroup.Count() > occurrenceShown)
+                    {
+                        output.AppendLine($"    ... and {valueGroup.Count() - occurrenceShown} more occurrence(s)");
+                    }
+
+                    output.AppendLine();
+                }
+
+                if (byValue.Count() > shown)
+                {
+                    output.AppendLine($"*... and {byValue.Count() - shown} more unique values*\n");
+                }
+            }
+
+            // Warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine($"## ⚠️ Warnings ({results.Warnings.Count})\n");
+                foreach (var warning in results.Warnings.Take(10))
+                {
+                    output.AppendLine($"  • {warning.Context}: {warning.Message}");
+                }
+                if (results.Warnings.Count > 10)
+                {
+                    output.AppendLine($"  ... and {results.Warnings.Count - 10} more warnings");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        private static string FormatCodeSmellResults(CodeSmellResults results, string format)
+        {
+            var output = new StringBuilder();
+
+            output.AppendLine($"# Code Smells Analysis\n");
+            output.AppendLine($"📊 Summary:");
+            output.AppendLine($"  • Total smells: {results.TotalSmells}");
+            output.AppendLine($"  • High severity: {results.HighSeverity} 🔴");
+            output.AppendLine($"  • Medium severity: {results.MediumSeverity} 🟡");
+            output.AppendLine($"  • Low severity: {results.LowSeverity} 🟢");
+            output.AppendLine($"  • Analyzed projects: {results.AnalyzedProjects}");
+            output.AppendLine($"  • Analyzed files: {results.AnalyzedFiles}");
+            output.AppendLine($"  • Analyzed symbols: {results.AnalyzedSymbols}");
+
+            if (results.FailedProjects > 0)
+            {
+                output.AppendLine($"  ⚠️ Failed projects: {results.FailedProjects}");
+            }
+
+            output.AppendLine();
+
+            if (results.SmellsByType.Any())
+            {
+                output.AppendLine($"📈 By Type:");
+                foreach (var kvp in results.SmellsByType.OrderByDescending(k => k.Value))
+                {
+                    output.AppendLine($"  • {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            if (format == "summary" || !results.Smells.Any())
+            {
+                if (!results.Smells.Any())
+                {
+                    output.AppendLine("✅ No code smells detected! Your code looks clean.");
+                }
+                return output.ToString();
+            }
+
+            // Group by smell type for better organization
+            var smellsByType = results.Smells.GroupBy(s => s.SmellType);
+
+            foreach (var typeGroup in smellsByType.OrderByDescending(g => g.Count()))
+            {
+                output.AppendLine($"## {typeGroup.Key} ({typeGroup.Count()} occurrences)\n");
+
+                // Group by severity within type
+                var bySeverity = typeGroup.GroupBy(s => s.Severity)
+                    .OrderByDescending(g => g.Key == "High" ? 3 : g.Key == "Medium" ? 2 : 1);
+
+                foreach (var severityGroup in bySeverity)
+                {
+                    var icon = severityGroup.Key == "High" ? "🔴" : severityGroup.Key == "Medium" ? "🟡" : "🟢";
+                    output.AppendLine($"### {icon} {severityGroup.Key} Severity ({severityGroup.Count()})\n");
+
+                    int shown = 0;
+                    foreach (var smell in severityGroup.OrderBy(s => s.ProjectName).ThenBy(s => s.FileName))
+                    {
+                        if (format == "normal" && shown >= 10) break; // Limit in normal mode
+
+                        output.AppendLine($"**{smell.Title}**");
+                        output.AppendLine($"  • Location: `{smell.FileName}:{smell.LineNumber}` in `{smell.SymbolName}`");
+                        output.AppendLine($"  • Project: {smell.ProjectName}");
+
+                        if (format == "detailed")
+                        {
+                            output.AppendLine($"  • Description: {smell.Description}");
+
+                            if (smell.Metrics.Any())
+                            {
+                                output.AppendLine($"  • Metrics:");
+                                foreach (var metric in smell.Metrics)
+                                {
+                                    output.AppendLine($"    - {metric.Key}: {metric.Value}");
+                                }
+                            }
+
+                            output.AppendLine($"  • Recommendation: {smell.Recommendation}");
+
+                            if (!string.IsNullOrEmpty(smell.CodeSnippet))
+                            {
+                                output.AppendLine($"  • Code:");
+                                output.AppendLine($"    ```csharp");
+                                output.AppendLine($"    {smell.CodeSnippet}");
+                                output.AppendLine($"    ```");
+                            }
+                        }
+
+                        output.AppendLine();
+                        shown++;
+                    }
+
+                    if (format == "normal" && severityGroup.Count() > shown)
+                    {
+                        output.AppendLine($"*... and {severityGroup.Count() - shown} more {severityGroup.Key.ToLower()} severity issues*\n");
+                    }
+                }
+            }
+
+            // Warnings section
+            if (results.Warnings.Any())
+            {
+                output.AppendLine($"## ⚠️ Warnings ({results.Warnings.Count})\n");
+                foreach (var warning in results.Warnings.Take(10))
+                {
+                    output.AppendLine($"  • {warning.Context}: {warning.Message}");
+                }
+                if (results.Warnings.Count > 10)
+                {
+                    output.AppendLine($"  ... and {results.Warnings.Count - 10} more warnings");
+                }
+                output.AppendLine();
+            }
+
+            // Summary recommendations
+            if (format == "detailed" && results.Smells.Any())
+            {
+                output.AppendLine($"## 💡 Quick Recommendations\n");
+
+                if (results.SmellsByType.ContainsKey("LongMethod"))
+                {
+                    output.AppendLine($"• **Long Methods**: Extract smaller, well-named methods. Aim for <20 lines per method.");
+                }
+
+                if (results.SmellsByType.ContainsKey("LargeClass"))
+                {
+                    output.AppendLine($"• **Large Classes**: Apply Single Responsibility Principle. Split into focused classes.");
+                }
+
+                if (results.SmellsByType.ContainsKey("LongParameterList"))
+                {
+                    output.AppendLine($"• **Long Parameter Lists**: Use Parameter Object pattern or Builder pattern.");
+                }
+
+                if (results.SmellsByType.ContainsKey("FeatureEnvy"))
+                {
+                    output.AppendLine($"• **Feature Envy**: Move methods to the classes they use most (Move Method refactoring).");
+                }
+
+                if (results.SmellsByType.ContainsKey("DataClumps"))
+                {
+                    output.AppendLine($"• **Data Clumps**: Create value objects or DTOs for repeated parameter groups.");
+                }
+
+                if (results.SmellsByType.ContainsKey("PrimitiveObsession"))
+                {
+                    output.AppendLine($"• **Primitive Obsession**: Introduce domain-specific value objects instead of primitives.");
+                }
+
+                if (results.SmellsByType.ContainsKey("SwitchStatements"))
+                {
+                    output.AppendLine($"• **Switch Statements**: Consider polymorphism (Strategy, State, or Command patterns).");
+                }
+
+                if (results.SmellsByType.ContainsKey("MessageChains"))
+                {
+                    output.AppendLine($"• **Message Chains**: Use Hide Delegate pattern to reduce coupling.");
+                }
+
+                if (results.SmellsByType.ContainsKey("MiddleMan"))
+                {
+                    output.AppendLine($"• **Middle Man**: Remove unnecessary delegation or add real behavior.");
+                }
+
+                if (results.SmellsByType.ContainsKey("SpeculativeGenerality"))
+                {
+                    output.AppendLine($"• **Speculative Generality**: Remove unused abstractions. Follow YAGNI principle.");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        private static string FormatLayerViolationResults(LayerViolationResults results, string format)
+        {
+            var output = new StringBuilder();
+
+            output.AppendLine($"# Architecture Layer Violations\n");
+
+            // Summary section
+            output.AppendLine($"📊 Summary:");
+            output.AppendLine($"  • Total violations: {results.TotalViolations}");
+            output.AppendLine($"  • Critical: {results.CriticalViolations} 🔴");
+            output.AppendLine($"  • High severity: {results.HighSeverityViolations} 🟠");
+            output.AppendLine($"  • Medium severity: {results.MediumSeverityViolations} 🟡");
+            output.AppendLine($"  • Compliance score: {results.ComplianceScore:F1}% {(results.ComplianceScore >= 90 ? "✅" : results.ComplianceScore >= 70 ? "⚠️" : "❌")}");
+            output.AppendLine($"  • Analyzed projects: {results.AnalyzedProjects}");
+            output.AppendLine();
+
+            // Layer definitions
+            if (results.Layers.Any())
+            {
+                output.AppendLine($"🏗️ Architecture Layers:");
+                foreach (var layer in results.Layers)
+                {
+                    var projectCount = layer.MatchedProjects.Count;
+                    output.AppendLine($"  • {layer.Name}: {projectCount} project(s)");
+                    if (format == "detailed" && projectCount > 0)
+                    {
+                        foreach (var project in layer.MatchedProjects)
+                        {
+                            output.AppendLine($"    - {project}");
+                        }
+                    }
+                }
+                output.AppendLine();
+            }
+
+            // Violations by type
+            if (results.ViolationsByType.Any())
+            {
+                output.AppendLine($"📈 Violations by Type:");
+                foreach (var kvp in results.ViolationsByType.OrderByDescending(x => x.Value))
+                {
+                    output.AppendLine($"  • {kvp.Key}: {kvp.Value}");
+                }
+                output.AppendLine();
+            }
+
+            if (format == "summary" || !results.Violations.Any())
+                return output.ToString();
+
+            // Violations section
+            output.AppendLine($"## Violations\n");
+
+            // Group by severity
+            var criticalViolations = results.Violations.Where(v => v.Severity == "Critical").ToList();
+            var highViolations = results.Violations.Where(v => v.Severity == "High").ToList();
+            var mediumViolations = results.Violations.Where(v => v.Severity == "Medium").ToList();
+
+            // Critical violations
+            if (criticalViolations.Any())
+            {
+                output.AppendLine($"### 🔴 Critical Violations ({criticalViolations.Count})\n");
+                var displayCount = format == "detailed" ? criticalViolations.Count : Math.Min(10, criticalViolations.Count);
+                for (int i = 0; i < displayCount; i++)
+                {
+                    var v = criticalViolations[i];
+                    output.AppendLine($"**{i + 1}. {v.ViolationType}**");
+                    output.AppendLine($"  - **Description:** {v.Description}");
+                    if (v.ViolatingReferences.Any())
+                    {
+                        output.AppendLine($"  - **Cycle:** {string.Join(" → ", v.ViolatingReferences)} → {v.ViolatingReferences.First()}");
+                    }
+                    output.AppendLine($"  - **Recommendation:** {v.Recommendation}");
+                    output.AppendLine();
+                }
+                if (format != "detailed" && criticalViolations.Count > 10)
+                {
+                    output.AppendLine($"*...and {criticalViolations.Count - 10} more critical violations*\n");
+                }
+            }
+
+            // High severity violations
+            if (highViolations.Any())
+            {
+                output.AppendLine($"### 🟠 High Severity Violations ({highViolations.Count})\n");
+                var displayCount = format == "detailed" ? highViolations.Count : Math.Min(10, highViolations.Count);
+                for (int i = 0; i < displayCount; i++)
+                {
+                    var v = highViolations[i];
+                    output.AppendLine($"**{i + 1}. {v.ViolationType}: {v.FromLayer} → {v.ToLayer}**");
+                    output.AppendLine($"  - **Projects:** {v.FromProject} → {v.ToProject}");
+                    output.AppendLine($"  - **Description:** {v.Description}");
+                    if (format == "detailed")
+                    {
+                        output.AppendLine($"  - **Recommendation:** {v.Recommendation}");
+                    }
+                    output.AppendLine();
+                }
+                if (format != "detailed" && highViolations.Count > 10)
+                {
+                    output.AppendLine($"*...and {highViolations.Count - 10} more high severity violations*\n");
+                }
+            }
+
+            // Medium severity violations
+            if (mediumViolations.Any())
+            {
+                output.AppendLine($"### 🟡 Medium Severity Violations ({mediumViolations.Count})\n");
+                var displayCount = format == "detailed" ? mediumViolations.Count : Math.Min(5, mediumViolations.Count);
+                for (int i = 0; i < displayCount; i++)
+                {
+                    var v = mediumViolations[i];
+                    output.AppendLine($"**{i + 1}. {v.ViolationType}: {v.FromLayer} → {v.ToLayer}**");
+                    output.AppendLine($"  - **Projects:** {v.FromProject} → {v.ToProject}");
+                    if (format == "detailed")
+                    {
+                        output.AppendLine($"  - **Description:** {v.Description}");
+                        output.AppendLine($"  - **Recommendation:** {v.Recommendation}");
+                    }
+                    output.AppendLine();
+                }
+                if (format != "detailed" && mediumViolations.Count > 5)
+                {
+                    output.AppendLine($"*...and {mediumViolations.Count - 5} more medium severity violations*\n");
+                }
+            }
+
+            // Recommendations section for detailed format
+            if (format == "detailed" && results.Violations.Any())
+            {
+                output.AppendLine($"## 💡 Quick Recommendations\n");
+
+                if (criticalViolations.Any())
+                {
+                    output.AppendLine($"### Circular Dependencies");
+                    output.AppendLine($"- Break circular dependencies immediately - they prevent proper testing and deployment");
+                    output.AppendLine($"- Use Dependency Inversion Principle (define interfaces in lower layers)");
+                    output.AppendLine($"- Consider extracting shared code to a common layer");
+                    output.AppendLine();
+                }
+
+                if (highViolations.Any())
+                {
+                    output.AppendLine($"### Direct Dependency Violations");
+                    output.AppendLine($"- Review architectural rules - ensure they match your intended design");
+                    output.AppendLine($"- Refactor violating code to follow the layered architecture");
+                    output.AppendLine($"- Use dependency injection to reverse dependencies where needed");
+                    output.AppendLine();
+                }
+
+                if (mediumViolations.Any())
+                {
+                    output.AppendLine($"### Undefined Dependencies");
+                    output.AppendLine($"- Define explicit rules for all layer-to-layer dependencies");
+                    output.AppendLine($"- Document your architecture constraints in the layer definitions JSON");
+                    output.AppendLine($"- Consider whether these dependencies should be allowed or refactored");
+                    output.AppendLine();
+                }
+            }
+
+            // Warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine($"## ⚠️ Warnings\n");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"- **{warning.Context}:** {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            return output.ToString();
+        }
+
+        private static string FormatRenameSymbolResults(RenameSymbolResults results)
+        {
+            var output = new StringBuilder();
+
+            output.AppendLine($"# Rename Symbol: {results.Target.CurrentName} → {results.Target.NewName}\n");
+
+            // Error handling
+            if (!results.Success && !string.IsNullOrEmpty(results.ErrorMessage))
+            {
+                output.AppendLine($"❌ **Error:** {results.ErrorMessage}\n");
+                if (results.HasConflicts)
+                {
+                    output.AppendLine($"## Conflicts\n");
+                    foreach (var conflict in results.Conflicts)
+                    {
+                        output.AppendLine($"- {conflict}");
+                    }
+                    output.AppendLine();
+                }
+                return output.ToString();
+            }
+
+            // Summary section
+            output.AppendLine($"📊 Summary:");
+            output.AppendLine($"  • Mode: {(results.IsPreview ? "Preview (no changes made) 👁️" : "Executed (changes applied) ✅")}");
+            output.AppendLine($"  • Symbol: {results.Target.SymbolKind} in {results.Target.ProjectName}");
+            output.AppendLine($"  • Total locations: {results.TotalLocations}");
+            output.AppendLine($"  • Files affected: {results.FilesAffected}");
+            output.AppendLine($"  • Projects affected: {results.ProjectsAffected}");
+
+            var riskEmoji = results.RiskLevel switch
+            {
+                "Critical" => "🔴",
+                "High" => "🟠",
+                "Medium" => "🟡",
+                _ => "🟢"
+            };
+            output.AppendLine($"  • Risk level: {results.RiskLevel} {riskEmoji} ({results.RiskReason})");
+            output.AppendLine();
+
+            // Target information
+            output.AppendLine($"## Target Symbol\n");
+            output.AppendLine($"- **Kind:** {results.Target.SymbolKind}");
+            output.AppendLine($"- **Current name:** {results.Target.CurrentName}");
+            output.AppendLine($"- **New name:** {results.Target.NewName}");
+            output.AppendLine($"- **Full name:** {results.Target.FullName}");
+            output.AppendLine($"- **Location:** {results.Target.FilePath}:{results.Target.LineNumber}");
+            output.AppendLine();
+
+            // Conflicts
+            if (results.HasConflicts)
+            {
+                output.AppendLine($"## ⚠️ Conflicts Detected ({results.Conflicts.Count})\n");
+                foreach (var conflict in results.Conflicts)
+                {
+                    output.AppendLine($"- {conflict}");
+                }
+                output.AppendLine();
+                output.AppendLine($"**Action Required:** Resolve conflicts before executing rename.\n");
+            }
+
+            // Warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine($"## ⚠️ Warnings ({results.Warnings.Count})\n");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"- {warning}");
+                }
+                output.AppendLine();
+            }
+
+            // File changes
+            if (results.FileChanges.Any())
+            {
+                output.AppendLine($"## File Changes ({results.FilesAffected} files)\n");
+
+                foreach (var fileChange in results.FileChanges.Take(20))
+                {
+                    output.AppendLine($"### {fileChange.FileName} ({fileChange.ChangeCount} {(fileChange.ChangeCount == 1 ? "change" : "changes")})\n");
+                    output.AppendLine($"**Path:** `{fileChange.FilePath}`\n");
+
+                    // Group by definition vs references
+                    var definition = fileChange.Locations.Where(l => l.IsDefinition).ToList();
+                    var references = fileChange.Locations.Where(l => !l.IsDefinition).ToList();
+
+                    if (definition.Any())
+                    {
+                        output.AppendLine($"**Definition:**");
+                        foreach (var loc in definition)
+                        {
+                            output.AppendLine($"- Line {loc.LineNumber}: `{loc.LineContext.Trim()}`");
+                        }
+                        output.AppendLine();
+                    }
+
+                    if (references.Any())
+                    {
+                        output.AppendLine($"**References ({references.Count}):**");
+                        var displayCount = Math.Min(5, references.Count);
+                        for (int i = 0; i < displayCount; i++)
+                        {
+                            var loc = references[i];
+                            output.AppendLine($"- Line {loc.LineNumber}, Col {loc.ColumnNumber}: `{loc.LineContext.Trim()}`");
+                        }
+                        if (references.Count > 5)
+                        {
+                            output.AppendLine($"  *...and {references.Count - 5} more references*");
+                        }
+                        output.AppendLine();
+                    }
+                }
+
+                if (results.FileChanges.Count > 20)
+                {
+                    output.AppendLine($"*...and {results.FileChanges.Count - 20} more files*\n");
+                }
+            }
+
+            // Recommendations
+            output.AppendLine($"## 💡 Recommendations\n");
+
+            if (results.IsPreview)
+            {
+                output.AppendLine($"### Next Steps (Preview Mode)");
+                output.AppendLine($"1. **Review all changes** above to ensure correctness");
+                output.AppendLine($"2. **Check for semantic issues** - ensure new name makes sense");
+                output.AppendLine($"3. **Verify no conflicts** - resolve any naming conflicts first");
+
+                if (!results.HasConflicts)
+                {
+                    output.AppendLine($"4. **Execute rename** - set `previewOnly=false` to apply changes");
+                }
+                else
+                {
+                    output.AppendLine($"4. **Resolve conflicts** - fix naming conflicts before executing");
+                }
+                output.AppendLine();
+            }
+            else
+            {
+                output.AppendLine($"### Post-Rename Actions");
+                output.AppendLine($"1. **Rebuild solution** - ensure all projects compile");
+                output.AppendLine($"2. **Run tests** - verify functionality is preserved");
+                output.AppendLine($"3. **Check version control** - review changes before committing");
+                output.AppendLine($"4. **Update documentation** - if the symbol is part of public API");
+                output.AppendLine();
+            }
+
+            // Risk-specific recommendations
+            if (results.RiskLevel == "Critical" || results.RiskLevel == "High")
+            {
+                output.AppendLine($"### Risk Mitigation ({results.RiskLevel} Risk)");
+
+                if (results.Target.SymbolKind == "NamedType")
+                {
+                    output.AppendLine($"- Type renames affect many parts of codebase");
+                    output.AppendLine($"- Consider incremental rename in phases");
+                }
+
+                if (results.TotalLocations > 100)
+                {
+                    output.AppendLine($"- Large number of references - consider breaking into smaller renames");
+                    output.AppendLine($"- Run tests frequently during rename process");
+                }
+
+                if (results.ProjectsAffected > 5)
+                {
+                    output.AppendLine($"- Multi-project impact - coordinate with team");
+                    output.AppendLine($"- Ensure all dependent projects are updated together");
+                }
+
+                if (results.RiskReason.Contains("public API"))
+                {
+                    output.AppendLine($"- Public API change - consider versioning and deprecation");
+                    output.AppendLine($"- Update public documentation and release notes");
+                }
+
+                output.AppendLine();
+            }
+
+            // Success message
+            if (results.Success)
+            {
+                if (results.IsPreview)
+                {
+                    output.AppendLine($"**Preview completed successfully!** Review changes above before executing.");
+                }
+                else
+                {
+                    output.AppendLine($"**Rename executed successfully!** ✅ Remember to rebuild and test.");
+                }
+            }
+
+            return output.ToString();
+        }
+
+        #endregion
+
+        #region Phase 2 Tools - Advanced Refactoring and .NET-Specific Analysis
+
+        // ============================================================================
+        // ExtractInterface - Extract interface from a class
+        // ============================================================================
+
+        [McpServerTool, Description("Extract interface from a class for better testability and SOLID principles")]
+        public static async Task<string> ExtractInterface(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Class name to extract interface from")] string typeName,
+            [Description("Target interface name (optional, auto-generated as IClassName)")] string? interfaceName = null,
+            [Description("Target namespace (optional, same as class by default)")] string? targetNamespace = null,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var phase2Service = serviceProvider?.GetService(typeof(Phase2AnalysisService)) as Phase2AnalysisService;
+                if (phase2Service == null)
+                {
+                    return "Error: Phase2AnalysisService not available. Please ensure the service is registered.";
+                }
+
+                var results = await phase2Service.ExtractInterfaceAsync(
+                    solutionPath,
+                    typeName,
+                    interfaceName,
+                    targetNamespace);
+
+                return FormatInterfaceExtractionResults(results);
+            }
+            catch (Exception ex)
+            {
+                return $"Error: An unexpected error occurred while extracting interface: {ex.Message}";
+            }
+        }
+
+        // ============================================================================
+        // AnalyzeExceptionHandling - Detect exception handling anti-patterns
+        // ============================================================================
+
+        [McpServerTool, Description("Analyze exception handling patterns and detect anti-patterns (empty catch, swallowed exceptions)")]
+        public static async Task<string> AnalyzeExceptionHandling(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Check empty catch blocks (default: true)")] bool checkEmptyCatch = true,
+            [Description("Check swallowed exceptions (default: true)")] bool checkSwallowedExceptions = true,
+            [Description("Check missing using statements (default: true)")] bool checkMissingUsing = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var phase2Service = serviceProvider?.GetService(typeof(Phase2AnalysisService)) as Phase2AnalysisService;
+                if (phase2Service == null)
+                {
+                    return "Error: Phase2AnalysisService not available. Please ensure the service is registered.";
+                }
+
+                var results = await phase2Service.AnalyzeExceptionHandlingAsync(
+                    solutionPath,
+                    checkEmptyCatch,
+                    checkSwallowedExceptions,
+                    checkMissingUsing);
+
+                return FormatExceptionHandlingResults(results);
+            }
+            catch (Exception ex)
+            {
+                return $"Error: An unexpected error occurred while analyzing exception handling: {ex.Message}";
+            }
+        }
+
+        // ============================================================================
+        // AnalyzeDIContainer - Analyze dependency injection configuration
+        // ============================================================================
+
+        [McpServerTool, Description("Analyze dependency injection container configuration for common issues (unregistered dependencies, lifetime mismatches)")]
+        public static async Task<string> AnalyzeDIContainer(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Check service lifetime issues (default: true)")] bool checkLifetimes = true,
+            [Description("Check circular dependencies (default: true)")] bool checkCircular = true,
+            [Description("Check captive dependencies (default: true)")] bool checkCaptive = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var phase2Service = serviceProvider?.GetService(typeof(Phase2AnalysisService)) as Phase2AnalysisService;
+                if (phase2Service == null)
+                {
+                    return "Error: Phase2AnalysisService not available. Please ensure the service is registered.";
+                }
+
+                var results = await phase2Service.AnalyzeDIContainerAsync(
+                    solutionPath,
+                    checkLifetimes,
+                    checkCircular,
+                    checkCaptive);
+
+                return FormatDIContainerResults(results);
+            }
+            catch (Exception ex)
+            {
+                return $"Error: An unexpected error occurred while analyzing DI container: {ex.Message}";
+            }
+        }
+
+        // ============================================================================
+        // FindThreadSafetyIssues - Detect thread safety issues and race conditions
+        // ============================================================================
+
+        [McpServerTool, Description("Detect common thread safety issues and potential race conditions (mutable static fields, unsynchronized access)")]
+        public static async Task<string> FindThreadSafetyIssues(
+            [Description("Path to solution file (.sln)")] string solutionPath,
+            [Description("Check mutable static fields (default: true)")] bool checkStaticFields = true,
+            [Description("Check unsynchronized shared state (default: true)")] bool checkSharedState = true,
+            [Description("Check unsafe collection operations (default: true)")] bool checkCollections = true,
+            IServiceProvider? serviceProvider = null)
+        {
+            try
+            {
+                var phase2Service = serviceProvider?.GetService(typeof(Phase2AnalysisService)) as Phase2AnalysisService;
+                if (phase2Service == null)
+                {
+                    return "Error: Phase2AnalysisService not available. Please ensure the service is registered.";
+                }
+
+                var results = await phase2Service.FindThreadSafetyIssuesAsync(
+                    solutionPath,
+                    checkStaticFields,
+                    checkSharedState,
+                    checkCollections);
+
+                return FormatThreadSafetyResults(results);
+            }
+            catch (Exception ex)
+            {
+                return $"Error: An unexpected error occurred while finding thread safety issues: {ex.Message}";
+            }
+        }
+
+        // ============================================================================
+        // Formatting Methods for Phase 2 Tools
+        // ============================================================================
+
+        private static string FormatInterfaceExtractionResults(InterfaceExtractionResult results)
+        {
+            var output = new StringBuilder();
+
+            output.AppendLine($"# Extract Interface: {results.ClassName} → {results.InterfaceName}\n");
+
+            // Error handling
+            if (!results.Success && !string.IsNullOrEmpty(results.ErrorMessage))
+            {
+                output.AppendLine($"❌ **Error:** {results.ErrorMessage}\n");
+                return output.ToString();
+            }
+
+            // Summary
+            output.AppendLine($"📊 Summary:");
+            output.AppendLine($"  • Class: {results.ClassName}");
+            output.AppendLine($"  • Interface: {results.InterfaceName}");
+            output.AppendLine($"  • Namespace: {results.Namespace}");
+            output.AppendLine($"  • Total members: {results.TotalMembers}");
+            output.AppendLine($"  • Selected members: {results.SelectedMembers}");
+            output.AppendLine();
+
+            // Warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine($"## ⚠️ Warnings ({results.Warnings.Count})\n");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"- {warning}");
+                }
+                output.AppendLine();
+            }
+
+            // Members to extract
+            if (results.Members.Any())
+            {
+                output.AppendLine($"## Members to Extract ({results.SelectedMembers})\n");
+
+                // Group by type
+                var methods = results.Members.Where(m => m.MemberType == "Method" && m.IsSelected).ToList();
+                var properties = results.Members.Where(m => m.MemberType == "Property" && m.IsSelected).ToList();
+                var events = results.Members.Where(m => m.MemberType == "Event" && m.IsSelected).ToList();
+
+                if (methods.Any())
+                {
+                    output.AppendLine($"### Methods ({methods.Count})");
+                    foreach (var method in methods)
+                    {
+                        output.AppendLine($"- `{method.Signature}`");
+                        if (!string.IsNullOrWhiteSpace(method.Documentation))
+                        {
+                            output.AppendLine($"  - {method.Documentation}");
+                        }
+                    }
+                    output.AppendLine();
+                }
+
+                if (properties.Any())
+                {
+                    output.AppendLine($"### Properties ({properties.Count})");
+                    foreach (var property in properties)
+                    {
+                        output.AppendLine($"- `{property.Signature}`");
+                        if (!string.IsNullOrWhiteSpace(property.Documentation))
+                        {
+                            output.AppendLine($"  - {property.Documentation}");
+                        }
+                    }
+                    output.AppendLine();
+                }
+
+                if (events.Any())
+                {
+                    output.AppendLine($"### Events ({events.Count})");
+                    foreach (var evt in events)
+                    {
+                        output.AppendLine($"- `{evt.Signature}`");
+                    }
+                    output.AppendLine();
+                }
+            }
+
+            // Generated code
+            output.AppendLine($"## Generated Interface Code\n");
+            output.AppendLine("```csharp");
+            output.AppendLine(results.InterfaceCode);
+            output.AppendLine("```\n");
+
+            // Suggested file path
+            if (!string.IsNullOrWhiteSpace(results.SuggestedFilePath))
+            {
+                output.AppendLine($"## Suggested File Path\n");
+                output.AppendLine($"`{results.SuggestedFilePath}`\n");
+            }
+
+            // Recommendations
+            output.AppendLine($"## 💡 Next Steps\n");
+            output.AppendLine($"1. **Review the generated interface** - Ensure all necessary members are included");
+            output.AppendLine($"2. **Create the interface file** - Save to suggested path or your preferred location");
+            output.AppendLine($"3. **Update the class** - Add interface implementation (`public class {results.ClassName} : {results.InterfaceName}`)");
+            output.AppendLine($"4. **Update DI registration** - Register as interface-implementation pair");
+            output.AppendLine($"5. **Update consumers** - Change dependencies from concrete class to interface");
+            output.AppendLine();
+
+            if (results.Success)
+            {
+                output.AppendLine($"**Interface extraction successful!** ✅ Ready to improve testability and follow SOLID principles.");
+            }
+
+            return output.ToString();
+        }
+
+        private static string FormatExceptionHandlingResults(ExceptionHandlingResults results)
+        {
+            var output = new StringBuilder();
+
+            output.AppendLine($"# Exception Handling Analysis\n");
+
+            // Summary
+            output.AppendLine($"## 📊 Summary\n");
+            output.AppendLine($"- **Projects analyzed:** {results.AnalyzedProjects}");
+            output.AppendLine($"- **Total try blocks:** {results.TotalTryBlocks}");
+            output.AppendLine($"- **Total catch blocks:** {results.TotalCatchBlocks}");
+            output.AppendLine($"- **Total issues found:** {results.TotalIssues}");
+            output.AppendLine();
+
+            // Issue breakdown
+            if (results.TotalIssues > 0)
+            {
+                output.AppendLine($"## 🔍 Issue Breakdown\n");
+                output.AppendLine($"| Issue Type | Count | Severity |");
+                output.AppendLine($"|------------|-------|----------|");
+
+                if (results.EmptyCatchCount > 0)
+                    output.AppendLine($"| Empty Catch Blocks | {results.EmptyCatchCount} | High |");
+
+                if (results.SwallowedExceptionCount > 0)
+                    output.AppendLine($"| Swallowed Exceptions | {results.SwallowedExceptionCount} | Medium |");
+
+                if (results.GenericExceptionCount > 0)
+                    output.AppendLine($"| Generic Exception Catches | {results.GenericExceptionCount} | Low |");
+
+                if (results.MissingUsingCount > 0)
+                    output.AppendLine($"| Missing Using Statements | {results.MissingUsingCount} | Medium |");
+
+                output.AppendLine();
+
+                // Severity summary
+                output.AppendLine($"**Severity Distribution:**");
+                output.AppendLine($"- 🔴 High: {results.HighCount}");
+                output.AppendLine($"- 🟡 Medium: {results.MediumCount}");
+                output.AppendLine($"- 🟢 Low: {results.LowCount}");
+                output.AppendLine();
+            }
+
+            // Detailed issues grouped by type
+            if (results.Issues.Any())
+            {
+                output.AppendLine($"## 📋 Detailed Issues\n");
+
+                // Group by issue type
+                var groupedIssues = results.Issues.GroupBy(i => i.IssueType).OrderBy(g => g.Key);
+
+                foreach (var group in groupedIssues)
+                {
+                    var issueTypeName = group.Key switch
+                    {
+                        "EmptyCatch" => "Empty Catch Blocks",
+                        "SwallowedException" => "Swallowed Exceptions",
+                        "GenericException" => "Generic Exception Catches",
+                        "MissingUsing" => "Missing Using Statements",
+                        _ => group.Key
+                    };
+
+                    output.AppendLine($"### {issueTypeName} ({group.Count()})\n");
+
+                    foreach (var issue in group.Take(10)) // Limit to first 10 per type
+                    {
+                        var severityEmoji = issue.Severity switch
+                        {
+                            "High" => "🔴",
+                            "Medium" => "🟡",
+                            "Low" => "🟢",
+                            _ => "⚪"
+                        };
+
+                        output.AppendLine($"{severityEmoji} **{issue.Severity}** - {issue.FilePath}:{issue.LineNumber}");
+                        output.AppendLine($"   - **Issue:** {issue.Description}");
+                        output.AppendLine($"   - **Recommendation:** {issue.Recommendation}");
+
+                        // Show code snippet if available and not too long
+                        if (!string.IsNullOrWhiteSpace(issue.CodeSnippet) && issue.CodeSnippet.Length < 200)
+                        {
+                            output.AppendLine($"   - **Code:**");
+                            output.AppendLine($"     ```csharp");
+                            output.AppendLine($"     {issue.CodeSnippet.Replace("\n", "\n     ")}");
+                            output.AppendLine($"     ```");
+                        }
+
+                        output.AppendLine();
+                    }
+
+                    if (group.Count() > 10)
+                    {
+                        output.AppendLine($"*... and {group.Count() - 10} more {issueTypeName.ToLower()}*\n");
+                    }
+                }
+            }
+
+            // Warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine($"## ⚠️ Warnings\n");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"- **{warning.Context}:** {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Recommendations
+            if (results.TotalIssues > 0)
+            {
+                output.AppendLine($"## 💡 Recommendations\n");
+
+                if (results.EmptyCatchCount > 0)
+                {
+                    output.AppendLine($"### Empty Catch Blocks ({results.EmptyCatchCount})");
+                    output.AppendLine($"Empty catch blocks silently swallow exceptions and make debugging nearly impossible.");
+                    output.AppendLine($"- Add logging to understand what exceptions are occurring");
+                    output.AppendLine($"- Rethrow the exception if it cannot be handled");
+                    output.AppendLine($"- Use specific exception types instead of catching everything");
+                    output.AppendLine();
+                }
+
+                if (results.SwallowedExceptionCount > 0)
+                {
+                    output.AppendLine($"### Swallowed Exceptions ({results.SwallowedExceptionCount})");
+                    output.AppendLine($"Exceptions that are caught but neither logged nor rethrown hide critical errors.");
+                    output.AppendLine($"- Add logging: `_logger.LogError(ex, \"Error message\")`");
+                    output.AppendLine($"- Rethrow if the exception cannot be fully handled: `throw;`");
+                    output.AppendLine($"- Consider wrapping in a more specific exception: `throw new CustomException(\"message\", ex);`");
+                    output.AppendLine();
+                }
+
+                if (results.GenericExceptionCount > 0)
+                {
+                    output.AppendLine($"### Generic Exception Catches ({results.GenericExceptionCount})");
+                    output.AppendLine($"Catching `System.Exception` can hide programming errors and unexpected exceptions.");
+                    output.AppendLine($"- Catch specific exception types: `IOException`, `ArgumentException`, etc.");
+                    output.AppendLine($"- Use exception filters when catching general exceptions: `catch (Exception ex) when (ex is not OutOfMemoryException)`");
+                    output.AppendLine($"- Only catch general exceptions at application boundaries (e.g., top-level handlers)");
+                    output.AppendLine();
+                }
+
+                if (results.MissingUsingCount > 0)
+                {
+                    output.AppendLine($"### Missing Using Statements ({results.MissingUsingCount})");
+                    output.AppendLine($"IDisposable types that aren't wrapped in `using` statements may leak resources.");
+                    output.AppendLine($"- Use `using` statement: `using (var stream = File.OpenRead(...)) {{ ... }}`");
+                    output.AppendLine($"- Use `using` declaration (C# 8+): `using var stream = File.OpenRead(...);`");
+                    output.AppendLine($"- Manually call `.Dispose()` in a finally block if `using` cannot be used");
+                    output.AppendLine();
+                }
+            }
+
+            // Success message
+            if (results.TotalIssues == 0)
+            {
+                output.AppendLine($"## ✅ No Issues Found!\n");
+                output.AppendLine($"Your exception handling looks good! All {results.TotalCatchBlocks} catch blocks follow best practices.");
+            }
+            else
+            {
+                output.AppendLine($"## 🎯 Next Steps\n");
+                output.AppendLine($"1. **Prioritize High severity issues** - Fix empty catch blocks first");
+                output.AppendLine($"2. **Add logging** - Ensure all exceptions are logged for debugging");
+                output.AppendLine($"3. **Use specific exception types** - Catch only what you can handle");
+                output.AppendLine($"4. **Wrap IDisposable usage** - Use `using` statements to prevent resource leaks");
+                output.AppendLine($"5. **Review swallowed exceptions** - Ensure critical errors aren't being hidden");
+            }
+
+            return output.ToString();
+        }
+
+        private static string FormatDIContainerResults(DIContainerResults results)
+        {
+            var output = new StringBuilder();
+
+            output.AppendLine($"# DI Container Analysis\n");
+
+            // Summary
+            output.AppendLine($"## 📊 Summary\n");
+            output.AppendLine($"- **Services analyzed:** {results.AnalyzedServices}");
+            output.AppendLine($"- **Constructors analyzed:** {results.AnalyzedConstructors}");
+            output.AppendLine($"- **Total issues found:** {results.TotalIssues}");
+            output.AppendLine();
+
+            // Issue breakdown
+            if (results.TotalIssues > 0)
+            {
+                output.AppendLine($"## 🔍 Issue Breakdown\n");
+                output.AppendLine($"| Issue Type | Count | Severity |");
+                output.AppendLine($"|------------|-------|----------|");
+
+                if (results.CircularDependencyCount > 0)
+                    output.AppendLine($"| Circular Dependencies | {results.CircularDependencyCount} | Critical |");
+
+                if (results.UnregisteredCount > 0)
+                    output.AppendLine($"| Unregistered Dependencies | {results.UnregisteredCount} | High |");
+
+                if (results.CaptiveDependencyCount > 0)
+                    output.AppendLine($"| Captive Dependencies | {results.CaptiveDependencyCount} | High |");
+
+                if (results.LifetimeMismatchCount > 0)
+                    output.AppendLine($"| Lifetime Mismatches | {results.LifetimeMismatchCount} | Medium |");
+
+                var multipleRegistrations = results.Issues.Count(i => i.IssueType == "MultipleRegistration");
+                if (multipleRegistrations > 0)
+                    output.AppendLine($"| Multiple Registrations | {multipleRegistrations} | Low |");
+
+                output.AppendLine();
+
+                // Severity summary
+                output.AppendLine($"**Severity Distribution:**");
+                if (results.CriticalCount > 0)
+                    output.AppendLine($"- 🔴 Critical: {results.CriticalCount}");
+                output.AppendLine($"- 🔴 High: {results.HighCount}");
+                output.AppendLine($"- 🟡 Medium: {results.MediumCount}");
+                output.AppendLine($"- 🟢 Low: {results.LowCount}");
+                output.AppendLine();
+            }
+
+            // Detailed issues grouped by type
+            if (results.Issues.Any())
+            {
+                output.AppendLine($"## 📋 Detailed Issues\n");
+
+                // Group by issue type with priority order
+                var groupedIssues = results.Issues
+                    .GroupBy(i => i.IssueType)
+                    .OrderBy(g => GetIssuePriority(g.Key));
+
+                foreach (var group in groupedIssues)
+                {
+                    var issueTypeName = group.Key switch
+                    {
+                        "CircularDependency" => "Circular Dependencies",
+                        "UnregisteredDependency" => "Unregistered Dependencies",
+                        "CaptiveDependency" => "Captive Dependencies",
+                        "LifetimeMismatch" => "Lifetime Mismatches",
+                        "MultipleRegistration" => "Multiple Registrations",
+                        _ => group.Key
+                    };
+
+                    output.AppendLine($"### {issueTypeName} ({group.Count()})\n");
+
+                    foreach (var issue in group.Take(10)) // Limit to first 10 per type
+                    {
+                        var severityEmoji = issue.Severity switch
+                        {
+                            "Critical" => "🔴⚠️",
+                            "High" => "🔴",
+                            "Medium" => "🟡",
+                            "Low" => "🟢",
+                            _ => "⚪"
+                        };
+
+                        output.AppendLine($"{severityEmoji} **{issue.Severity}**");
+                        output.AppendLine($"   - **Service:** `{issue.ServiceType}`");
+
+                        if (!string.IsNullOrEmpty(issue.ImplementationType))
+                            output.AppendLine($"   - **Implementation:** `{issue.ImplementationType}`");
+
+                        if (!string.IsNullOrEmpty(issue.ServiceLifetime))
+                            output.AppendLine($"   - **Lifetime:** {issue.ServiceLifetime}");
+
+                        output.AppendLine($"   - **Issue:** {issue.Description}");
+                        output.AppendLine($"   - **Recommendation:** {issue.Recommendation}");
+
+                        if (issue.DependencyChain != null && issue.DependencyChain.Any())
+                        {
+                            output.AppendLine($"   - **Dependency Chain:** {string.Join(" → ", issue.DependencyChain)}");
+                        }
+
+                        if (!string.IsNullOrEmpty(issue.FilePath) && issue.FilePath != "Multiple Files")
+                        {
+                            output.AppendLine($"   - **Location:** {issue.FilePath}:{issue.LineNumber}");
+                        }
+
+                        output.AppendLine();
+                    }
+
+                    if (group.Count() > 10)
+                    {
+                        output.AppendLine($"*... and {group.Count() - 10} more {issueTypeName.ToLower()}*\n");
+                    }
+                }
+            }
+
+            // Warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine($"## ⚠️ Warnings\n");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"- **{warning.Context}:** {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Recommendations
+            if (results.TotalIssues > 0)
+            {
+                output.AppendLine($"## 💡 Recommendations\n");
+
+                if (results.CircularDependencyCount > 0)
+                {
+                    output.AppendLine($"### Circular Dependencies ({results.CircularDependencyCount}) - CRITICAL");
+                    output.AppendLine($"Circular dependencies cause runtime failures and must be resolved.");
+                    output.AppendLine($"- **Break the cycle:** Introduce an interface or abstract class");
+                    output.AppendLine($"- **Use a factory pattern:** Inject `IServiceProvider` or create a factory");
+                    output.AppendLine($"- **Refactor design:** Consider if the dependencies indicate poor separation of concerns");
+                    output.AppendLine($"- **Event-based communication:** Use events or mediator pattern to decouple services");
+                    output.AppendLine();
+                }
+
+                if (results.UnregisteredCount > 0)
+                {
+                    output.AppendLine($"### Unregistered Dependencies ({results.UnregisteredCount})");
+                    output.AppendLine($"Services injected but not registered will cause runtime failures.");
+                    output.AppendLine($"- Register missing services: `services.AddScoped<IService, ServiceImpl>()`");
+                    output.AppendLine($"- Choose appropriate lifetime: Singleton (app lifetime), Scoped (request lifetime), Transient (per use)");
+                    output.AppendLine($"- Verify spelling and namespace of dependency types");
+                    output.AppendLine();
+                }
+
+                if (results.CaptiveDependencyCount > 0)
+                {
+                    output.AppendLine($"### Captive Dependencies ({results.CaptiveDependencyCount})");
+                    output.AppendLine($"Longer-lived services holding references to shorter-lived services can cause bugs.");
+                    output.AppendLine($"- **Singleton → Scoped/Transient:** Change Singleton to Scoped, or make dependency Singleton");
+                    output.AppendLine($"- **Scoped → Transient:** Change Scoped to Transient, or make dependency Scoped");
+                    output.AppendLine($"- **Use service locator pattern:** Inject `IServiceProvider` and resolve dependencies on-demand");
+                    output.AppendLine($"- **Refactor to factory:** Create a factory that resolves the dependency when needed");
+                    output.AppendLine();
+                }
+
+                if (results.LifetimeMismatchCount > 0)
+                {
+                    output.AppendLine($"### Lifetime Mismatches ({results.LifetimeMismatchCount})");
+                    output.AppendLine($"Service lifetime mismatches can cause subtle bugs and memory leaks.");
+                    output.AppendLine($"- Review lifetime registrations for consistency");
+                    output.AppendLine($"- Ensure longer-lived services don't depend on shorter-lived ones");
+                    output.AppendLine();
+                }
+
+                var multipleRegs = results.Issues.Count(i => i.IssueType == "MultipleRegistration");
+                if (multipleRegs > 0)
+                {
+                    output.AppendLine($"### Multiple Registrations ({multipleRegs})");
+                    output.AppendLine($"Multiple registrations for the same service can cause confusion.");
+                    output.AppendLine($"- Use `TryAddScoped/Singleton/Transient` to register only if not already registered");
+                    output.AppendLine($"- Remove duplicate registrations if unintentional");
+                    output.AppendLine($"- Document if multiple registrations are intentional (last registration wins)");
+                    output.AppendLine();
+                }
+            }
+
+            // Success message
+            if (results.TotalIssues == 0)
+            {
+                output.AppendLine($"## ✅ No Issues Found!\n");
+                output.AppendLine($"Your DI container configuration looks good! All {results.AnalyzedServices} services are properly registered.");
+            }
+            else
+            {
+                output.AppendLine($"## 🎯 Next Steps\n");
+                output.AppendLine($"1. **Fix Critical issues first** - Circular dependencies will cause runtime failures");
+                output.AppendLine($"2. **Register missing dependencies** - Unregistered services cause startup failures");
+                output.AppendLine($"3. **Resolve captive dependencies** - Fix lifetime mismatches to prevent bugs");
+                output.AppendLine($"4. **Review multiple registrations** - Ensure they're intentional");
+                output.AppendLine($"5. **Test dependency resolution** - Use `ValidateScopes()` in development");
+            }
+
+            return output.ToString();
+        }
+
+        private static int GetIssuePriority(string issueType)
+        {
+            return issueType switch
+            {
+                "CircularDependency" => 1,
+                "UnregisteredDependency" => 2,
+                "CaptiveDependency" => 3,
+                "LifetimeMismatch" => 4,
+                "MultipleRegistration" => 5,
+                _ => 99
+            };
+        }
+
+        private static string FormatThreadSafetyResults(ThreadSafetyResults results)
+        {
+            var output = new StringBuilder();
+
+            output.AppendLine($"# Thread Safety Analysis\n");
+
+            // Summary
+            output.AppendLine($"## 📊 Summary\n");
+            output.AppendLine($"- **Projects analyzed:** {results.AnalyzedProjects}");
+            output.AppendLine($"- **Files analyzed:** {results.AnalyzedFiles}");
+            output.AppendLine($"- **Total issues found:** {results.TotalIssues}");
+            output.AppendLine();
+
+            // Issue breakdown
+            if (results.TotalIssues > 0)
+            {
+                output.AppendLine($"## 🔍 Issue Breakdown\n");
+                output.AppendLine($"| Issue Type | Count | Severity |");
+                output.AppendLine($"|------------|-------|----------|");
+
+                if (results.MutableStaticCount > 0)
+                    output.AppendLine($"| Mutable Static Fields | {results.MutableStaticCount} | High |");
+
+                if (results.AsyncDeadlockCount > 0)
+                    output.AppendLine($"| Async Deadlock Patterns | {results.AsyncDeadlockCount} | High |");
+
+                if (results.UnsafeCollectionCount > 0)
+                    output.AppendLine($"| Unsafe Collections | {results.UnsafeCollectionCount} | High/Medium |");
+
+                if (results.SharedStateCount > 0)
+                    output.AppendLine($"| Shared State Access | {results.SharedStateCount} | Medium |");
+
+                if (results.DoubleLockingCount > 0)
+                    output.AppendLine($"| Double-Checked Locking | {results.DoubleLockingCount} | Medium |");
+
+                var asyncBlockingCount = results.Issues.Count(i => i.IssueType == "AsyncBlockingPattern");
+                if (asyncBlockingCount > 0)
+                    output.AppendLine($"| Async Blocking Patterns | {asyncBlockingCount} | Low |");
+
+                output.AppendLine();
+
+                // Severity summary
+                output.AppendLine($"**Severity Distribution:**");
+                if (results.CriticalCount > 0)
+                    output.AppendLine($"- 🔴 Critical: {results.CriticalCount}");
+                output.AppendLine($"- 🔴 High: {results.HighCount}");
+                output.AppendLine($"- 🟡 Medium: {results.MediumCount}");
+                output.AppendLine($"- 🟢 Low: {results.LowCount}");
+                output.AppendLine();
+            }
+
+            // Detailed issues grouped by type
+            if (results.Issues.Any())
+            {
+                output.AppendLine($"## 📋 Detailed Issues\n");
+
+                // Group by issue type with priority order
+                var groupedIssues = results.Issues
+                    .GroupBy(i => i.IssueType)
+                    .OrderBy(g => GetThreadSafetyIssuePriority(g.Key));
+
+                foreach (var group in groupedIssues)
+                {
+                    var issueTypeName = group.Key switch
+                    {
+                        "MutableStaticField" => "Mutable Static Fields",
+                        "AsyncDeadlock" => "Async Deadlock Patterns",
+                        "UnsafeCollection" => "Unsafe Collections",
+                        "SharedStateAccess" => "Shared State Access",
+                        "DoubleCheckLocking" => "Double-Checked Locking",
+                        "AsyncBlockingPattern" => "Async Blocking Patterns",
+                        _ => group.Key
+                    };
+
+                    output.AppendLine($"### {issueTypeName} ({group.Count()})\n");
+
+                    foreach (var issue in group.Take(10)) // Limit to first 10 per type
+                    {
+                        var severityEmoji = issue.Severity switch
+                        {
+                            "Critical" => "🔴⚠️",
+                            "High" => "🔴",
+                            "Medium" => "🟡",
+                            "Low" => "🟢",
+                            _ => "⚪"
+                        };
+
+                        output.AppendLine($"{severityEmoji} **{issue.Severity}**");
+
+                        if (!string.IsNullOrEmpty(issue.MemberName))
+                            output.AppendLine($"   - **Member:** `{issue.MemberName}`");
+
+                        output.AppendLine($"   - **Issue:** {issue.Description}");
+                        output.AppendLine($"   - **Recommendation:** {issue.Recommendation}");
+
+                        if (!string.IsNullOrEmpty(issue.FilePath))
+                        {
+                            output.AppendLine($"   - **Location:** {issue.FilePath}:{issue.LineNumber}");
+                        }
+
+                        // Show code snippet if available and not too long
+                        if (!string.IsNullOrWhiteSpace(issue.CodeSnippet) && issue.CodeSnippet.Length < 150)
+                        {
+                            output.AppendLine($"   - **Code:**");
+                            output.AppendLine($"     ```csharp");
+                            output.AppendLine($"     {issue.CodeSnippet}");
+                            output.AppendLine($"     ```");
+                        }
+
+                        output.AppendLine();
+                    }
+
+                    if (group.Count() > 10)
+                    {
+                        output.AppendLine($"*... and {group.Count() - 10} more {issueTypeName.ToLower()}*\n");
+                    }
+                }
+            }
+
+            // Warnings
+            if (results.Warnings.Any())
+            {
+                output.AppendLine($"## ⚠️ Warnings\n");
+                foreach (var warning in results.Warnings)
+                {
+                    output.AppendLine($"- **{warning.Context}:** {warning.Message}");
+                }
+                output.AppendLine();
+            }
+
+            // Recommendations
+            if (results.TotalIssues > 0)
+            {
+                output.AppendLine($"## 💡 Recommendations\n");
+
+                if (results.MutableStaticCount > 0)
+                {
+                    output.AppendLine($"### Mutable Static Fields ({results.MutableStaticCount})");
+                    output.AppendLine($"Mutable static fields can cause race conditions when accessed by multiple threads.");
+                    output.AppendLine($"- **Make readonly:** Static fields that don't change after initialization should be `readonly`");
+                    output.AppendLine($"- **Use thread-safe collections:** Replace List/Dictionary with ConcurrentBag/ConcurrentDictionary");
+                    output.AppendLine($"- **Add synchronization:** Use `lock` statements or other synchronization primitives");
+                    output.AppendLine($"- **Use Lazy<T>:** For thread-safe lazy initialization");
+                    output.AppendLine();
+                }
+
+                if (results.AsyncDeadlockCount > 0)
+                {
+                    output.AppendLine($"### Async Deadlock Patterns ({results.AsyncDeadlockCount})");
+                    output.AppendLine($"Synchronous blocking on async operations can cause deadlocks in UI and ASP.NET contexts.");
+                    output.AppendLine($"- **Use await:** Replace `.Result` and `.Wait()` with `await`");
+                    output.AppendLine($"- **ConfigureAwait(false):** Use in library code to avoid capturing context");
+                    output.AppendLine($"- **GetAwaiter().GetResult():** Only if you must block (better than .Result)");
+                    output.AppendLine($"- **Async all the way:** Make calling methods async to support await");
+                    output.AppendLine();
+                }
+
+                if (results.UnsafeCollectionCount > 0)
+                {
+                    output.AppendLine($"### Unsafe Collections ({results.UnsafeCollectionCount})");
+                    output.AppendLine($"Non-thread-safe collections can corrupt when accessed concurrently.");
+                    output.AppendLine($"- **ConcurrentDictionary<K,V>:** Thread-safe alternative to Dictionary");
+                    output.AppendLine($"- **ConcurrentBag<T>:** Thread-safe alternative to List (unordered)");
+                    output.AppendLine($"- **ConcurrentQueue<T>:** Thread-safe FIFO collection");
+                    output.AppendLine($"- **ImmutableList<T>:** Immutable collections prevent modification");
+                    output.AppendLine($"- **Lock protection:** Use `lock` around collection access if alternatives aren't suitable");
+                    output.AppendLine();
+                }
+
+                if (results.SharedStateCount > 0)
+                {
+                    output.AppendLine($"### Shared State Access ({results.SharedStateCount})");
+                    output.AppendLine($"Instance fields accessed by multiple async methods may have race conditions.");
+                    output.AppendLine($"- **Review concurrency:** Determine if methods can actually run concurrently");
+                    output.AppendLine($"- **SemaphoreSlim:** Use for async-compatible locking");
+                    output.AppendLine($"- **Immutable fields:** Make fields readonly or use immutable types");
+                    output.AppendLine($"- **Local variables:** Use method parameters instead of fields when possible");
+                    output.AppendLine();
+                }
+
+                if (results.DoubleLockingCount > 0)
+                {
+                    output.AppendLine($"### Double-Checked Locking ({results.DoubleLockingCount})");
+                    output.AppendLine($"Double-checked locking requires proper memory barriers to be safe.");
+                    output.AppendLine($"- **volatile keyword:** Mark the checked field as `volatile`");
+                    output.AppendLine($"- **Lazy<T>:** Use for thread-safe lazy initialization (recommended)");
+                    output.AppendLine($"- **LazyInitializer:** Alternative for more control");
+                    output.AppendLine();
+                }
+            }
+
+            // Success message
+            if (results.TotalIssues == 0)
+            {
+                output.AppendLine($"## ✅ No Issues Found!\n");
+                output.AppendLine($"Your code appears thread-safe! No obvious concurrency issues detected in {results.AnalyzedFiles} files.");
+            }
+            else
+            {
+                output.AppendLine($"## 🎯 Next Steps\n");
+                output.AppendLine($"1. **Fix High severity issues first** - Mutable static fields and async deadlocks");
+                output.AppendLine($"2. **Review concurrent access patterns** - Ensure proper synchronization");
+                output.AppendLine($"3. **Use thread-safe collections** - Replace unsafe collections in shared contexts");
+                output.AppendLine($"4. **Test concurrency** - Use stress tests to verify thread safety");
+                output.AppendLine($"5. **Consider immutability** - Immutable data structures eliminate race conditions");
+            }
+
+            return output.ToString();
+        }
+
+        private static int GetThreadSafetyIssuePriority(string issueType)
+        {
+            return issueType switch
+            {
+                "AsyncDeadlock" => 1,
+                "MutableStaticField" => 2,
+                "UnsafeCollection" => 3,
+                "SharedStateAccess" => 4,
+                "DoubleCheckLocking" => 5,
+                "AsyncBlockingPattern" => 6,
+                _ => 99
+            };
+        }
+
+        #endregion
+
     }
 }

@@ -2,7 +2,7 @@ using RoslynMcpServer.Tests.Helpers;
 using RoslynMcpServer.Tools;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using RoslynMcpServer.Services;
+using RoslynMcpServer.Core.Services;
 using Microsoft.Build.Locator;
 
 namespace RoslynMcpServer.Tests.Integration.Tools;

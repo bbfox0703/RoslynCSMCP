@@ -19,6 +19,14 @@
     <None Update="appsettings.Development.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="tool-profiles.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Core Library Reference -->
+    <ProjectReference Include="..\src\RoslynMcpServer.Core\RoslynMcpServer.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

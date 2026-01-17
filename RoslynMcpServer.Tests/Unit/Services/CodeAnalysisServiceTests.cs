@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Moq;
-using RoslynMcpServer.Services;
+using RoslynMcpServer.Core.Services;
 using RoslynMcpServer.Tests.Helpers;
 
 namespace RoslynMcpServer.Tests.Unit.Services;

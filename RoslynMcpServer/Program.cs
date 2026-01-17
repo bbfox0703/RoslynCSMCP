@@ -3,6 +3,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using Microsoft.Build.Locator;
+using RoslynMcpServer.Core.Services;
+using RoslynMcpServer.Core.Configuration;
+using RoslynMcpServer.Configuration;
 using RoslynMcpServer.Services;
 using Serilog;
 using Serilog.Events;
@@ -130,6 +133,8 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<PerformanceIssueAnalyzer>();
                 builder.Services.AddSingleton<NamingConventionAnalyzer>();
                 builder.Services.AddSingleton<APIChangeAnalyzer>();
+                builder.Services.AddSingleton<Phase1AnalysisService>();  // Phase 1 Tools
+                builder.Services.AddSingleton<Phase2AnalysisService>();  // Phase 2 Tools
                 builder.Services.AddSingleton<SecurityValidator>();
                 builder.Services.AddSingleton<DiagnosticLogger>();
                 builder.Services.AddSingleton<IncrementalAnalyzer>();
@@ -140,7 +145,19 @@ namespace RoslynMcpServer
                 // Register HeartbeatService as a background service
                 builder.Services.AddHostedService<HeartbeatService>();
 
+                // Load and log tool profile configuration
+                var toolProfileConfig = ToolProfileConfig.Load();
+                var toolStats = McpToolFilterExtensions.GetToolStatistics(toolProfileConfig);
+                Log.Information("Tool Profile: {Profile}", toolProfileConfig.ActiveProfile);
+                Log.Information("Tool Statistics: {EnabledTools}/{TotalTools} tools enabled",
+                    toolStats.EnabledTools, toolStats.TotalTools);
+                Log.Information("Estimated token usage: ~{Tokens} tokens (savings: ~{Savings})",
+                    toolStats.EstimatedTokensEnabled, toolStats.TokenSavings);
+
                 // Configure MCP server
+                // NOTE: Current MCP SDK doesn't support per-tool filtering.
+                // All tools are registered; profile config is for documentation/planning.
+                // To reduce tokens, see docs/TOKEN_OPTIMIZATION.md for manual tool reduction.
                 builder.Services
                     .AddMcpServer()
                     .WithStdioServerTransport()

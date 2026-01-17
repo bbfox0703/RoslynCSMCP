@@ -2,7 +2,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Moq;
-using RoslynMcpServer.Services;
+using RoslynMcpServer.Core.Services;
 using RoslynMcpServer.Tests.Helpers;
 using System.Text;
 using System.Text.Json;
