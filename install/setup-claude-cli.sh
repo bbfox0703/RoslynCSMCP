@@ -86,6 +86,84 @@ show_config_example() {
     done
 }
 
+show_mcp_json_example() {
+    local root_path="$1"
+    shift
+    local selected_modules=("$@")
+
+    echo
+    echo -e "${CYAN}=== .mcp.json Example (Local Repo Scope) ===${NC}"
+    echo
+    echo -e "${YELLOW}Copy this to your project root as .mcp.json:${NC}"
+    echo
+
+    echo -e "${GREEN}{"
+    echo '  "mcpServers": {'
+
+    local first=true
+    for mod in "${selected_modules[@]}"; do
+        local name=$(get_module_field "$mod" 1)
+        local path=$(get_module_field "$mod" 2)
+        local server_name="roslyn-$(echo "$name" | tr '[:upper:]' '[:lower:]')"
+        local project_path="$root_path/$path"
+
+        if [ "$first" = false ]; then
+            echo ","
+        fi
+        first=false
+
+        echo "    \"$server_name\": {"
+        echo '      "command": "dotnet",'
+        echo "      \"args\": [\"run\", \"--project\", \"$project_path\"],"
+        echo '      "env": { "DOTNET_ENVIRONMENT": "Production" }'
+        echo -n "    }"
+    done
+
+    echo
+    echo '  }'
+    echo -e "}${NC}"
+    echo
+}
+
+generate_mcp_json() {
+    local root_path="$1"
+    local output_path="$2"
+    shift 2
+    local selected_modules=("$@")
+
+    {
+        echo '{'
+        echo '  "mcpServers": {'
+
+        local first=true
+        for mod in "${selected_modules[@]}"; do
+            local name=$(get_module_field "$mod" 1)
+            local path=$(get_module_field "$mod" 2)
+            local server_name="roslyn-$(echo "$name" | tr '[:upper:]' '[:lower:]')"
+            local project_path="$root_path/$path"
+
+            if [ "$first" = false ]; then
+                echo ","
+            fi
+            first=false
+
+            cat <<ENTRY
+    "$server_name": {
+      "command": "dotnet",
+      "args": ["run", "--project", "$project_path"],
+      "env": { "DOTNET_ENVIRONMENT": "Production" }
+    }
+ENTRY
+        done
+
+        echo
+        echo '  }'
+        echo '}'
+    } > "$output_path"
+
+    echo -e "${GREEN}   Generated: $output_path${NC}"
+}
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -280,7 +358,23 @@ done
 # Show config example
 show_config_example "$ROOT_PATH" "$SCOPE" "${SELECTED_MODULES[@]}"
 
+# Show .mcp.json example for local repo scope
+show_mcp_json_example "$ROOT_PATH" "${SELECTED_MODULES[@]}"
+
+# Ask if user wants to generate .mcp.json
+echo -e "${YELLOW}Generate .mcp.json file? (for local repo scope) [Y/N]${NC}"
+read -p "" generate_mcp_json
+if [[ "$generate_mcp_json" =~ ^[Yy]$ ]]; then
+    echo -e "${YELLOW}Output path (default: ./.mcp.json):${NC}"
+    read -p "" mcp_json_path
+    if [ -z "$mcp_json_path" ]; then
+        mcp_json_path="./.mcp.json"
+    fi
+    generate_mcp_json "$ROOT_PATH" "$mcp_json_path" "${SELECTED_MODULES[@]}"
+fi
+
 # Summary
+echo
 echo -e "${CYAN}=== Setup Complete ===${NC}"
 echo
 echo -e "${GREEN}RoslynCSMCP is configured for Claude CLI!${NC}"

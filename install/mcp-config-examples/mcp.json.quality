@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "roslyn-quality": {
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/../RoslynCSMCP/src/RoslynMcpServer.Quality"],
+      "env": {
+        "DOTNET_ENVIRONMENT": "Production"
+      }
+    }
+  }
+}
