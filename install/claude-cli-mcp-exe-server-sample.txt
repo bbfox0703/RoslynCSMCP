@@ -1,13 +1,63 @@
-# Windows 11 - Using compiled .exe (Production mode)
-# Replace the path with your actual RoslynCSMCP location
+# RoslynCSMCP - Using Compiled .exe (Faster Startup)
+# Build first: dotnet build -c Release
+# Replace paths with your actual RoslynCSMCP location
 
-# Method 1: Using Release build (recommended for production)
-claude mcp add roslyn-mcp --scope user --transport stdio --env DOTNET_ENVIRONMENT=Production --env LOG_LEVEL=Information -- D:\Github\RoslynCSMCP\RoslynMcpServer\bin\Release\net10.0\RoslynMcpServer.exe
+# ============================================================
+# MODULAR SETUP (Recommended)
+# ============================================================
 
-# Method 2: Using Debug build (for debugging)
-# claude mcp add roslyn-mcp --scope user --transport stdio --env DOTNET_ENVIRONMENT=Development --env LOG_LEVEL=Information -- D:\Github\RoslynCSMCP\RoslynMcpServer\bin\Debug\net10.0\RoslynMcpServer.exe
+# Navigation Module (6 tools)
+claude mcp add roslyn-navigation --scope user --transport stdio \
+    --env DOTNET_ENVIRONMENT=Production \
+    -- D:\Github\RoslynCSMCP\src\RoslynMcpServer.Navigation\bin\Release\net10.0\RoslynMcpServer.Navigation.exe
 
-# Note:
-# - Build the project first: dotnet build -c Release (or -c Debug)
-# - The .exe path should point to the compiled executable in bin\Release\net10.0\ or bin\Debug\net10.0\
-# - Use absolute paths (e.g., D:\Github\RoslynCSMCP\...) not relative paths
+# Quality Module (6 tools)
+claude mcp add roslyn-quality --scope user --transport stdio \
+    --env DOTNET_ENVIRONMENT=Production \
+    -- D:\Github\RoslynCSMCP\src\RoslynMcpServer.Quality\bin\Release\net10.0\RoslynMcpServer.Quality.exe
+
+# Security Module (3 tools)
+claude mcp add roslyn-security --scope user --transport stdio \
+    --env DOTNET_ENVIRONMENT=Production \
+    -- D:\Github\RoslynCSMCP\src\RoslynMcpServer.Security\bin\Release\net10.0\RoslynMcpServer.Security.exe
+
+# Dependencies Module (5 tools)
+claude mcp add roslyn-dependencies --scope user --transport stdio \
+    --env DOTNET_ENVIRONMENT=Production \
+    -- D:\Github\RoslynCSMCP\src\RoslynMcpServer.Dependencies\bin\Release\net10.0\RoslynMcpServer.Dependencies.exe
+
+# Refactoring Module (4 tools)
+claude mcp add roslyn-refactoring --scope user --transport stdio \
+    --env DOTNET_ENVIRONMENT=Production \
+    -- D:\Github\RoslynCSMCP\src\RoslynMcpServer.Refactoring\bin\Release\net10.0\RoslynMcpServer.Refactoring.exe
+
+# Testing Module (2 tools)
+claude mcp add roslyn-testing --scope user --transport stdio \
+    --env DOTNET_ENVIRONMENT=Production \
+    -- D:\Github\RoslynCSMCP\src\RoslynMcpServer.Testing\bin\Release\net10.0\RoslynMcpServer.Testing.exe
+
+# Metrics Module (3 tools)
+claude mcp add roslyn-metrics --scope user --transport stdio \
+    --env DOTNET_ENVIRONMENT=Production \
+    -- D:\Github\RoslynCSMCP\src\RoslynMcpServer.Metrics\bin\Release\net10.0\RoslynMcpServer.Metrics.exe
+
+# Advanced Module (13 tools)
+claude mcp add roslyn-advanced --scope user --transport stdio \
+    --env DOTNET_ENVIRONMENT=Production \
+    -- D:\Github\RoslynCSMCP\src\RoslynMcpServer.Advanced\bin\Release\net10.0\RoslynMcpServer.Advanced.exe
+
+# ============================================================
+# FULL VERSION (All 42 tools)
+# ============================================================
+
+claude mcp add roslyn-full --scope user --transport stdio \
+    --env DOTNET_ENVIRONMENT=Production \
+    -- D:\Github\RoslynCSMCP\RoslynMcpServer\bin\Release\net10.0\RoslynMcpServer.exe
+
+# ============================================================
+# NOTES
+# ============================================================
+# - Build first: dotnet build -c Release
+# - .exe provides faster startup than dotnet run
+# - Use absolute paths
+# - For Debug build, change Release to Debug in paths

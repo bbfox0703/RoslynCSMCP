@@ -68,6 +68,66 @@ function Show-ConfigExample {
     }
 }
 
+function Generate-McpJson {
+    param(
+        [array]$SelectedModules,
+        [string]$RootPath,
+        [string]$OutputPath
+    )
+
+    $config = @{ mcpServers = @{} }
+
+    foreach ($mod in $SelectedModules) {
+        $module = $modules[$mod]
+        $serverName = "roslyn-$($module.Name.ToLower())"
+        $projectPath = Join-Path $RootPath $module.Path
+
+        $config.mcpServers[$serverName] = @{
+            command = "dotnet"
+            args = @("run", "--project", $projectPath.Replace('\', '/'))
+            env = @{
+                DOTNET_ENVIRONMENT = "Production"
+            }
+        }
+    }
+
+    $config | ConvertTo-Json -Depth 10 | Set-Content $OutputPath -Encoding UTF8
+    Write-Host "   Generated: $OutputPath" -ForegroundColor Green
+}
+
+function Show-McpJsonExample {
+    param(
+        [array]$SelectedModules,
+        [string]$RootPath
+    )
+
+    Write-Host
+    Write-Host "=== .mcp.json Example (Local Repo Scope) ===" -ForegroundColor Cyan
+    Write-Host
+    Write-Host "Copy this to your project root as .mcp.json:" -ForegroundColor Yellow
+    Write-Host
+
+    $config = @{ mcpServers = @{} }
+
+    foreach ($mod in $SelectedModules) {
+        $module = $modules[$mod]
+        $serverName = "roslyn-$($module.Name.ToLower())"
+        $projectPath = Join-Path $RootPath $module.Path
+
+        $config.mcpServers[$serverName] = @{
+            command = "dotnet"
+            args = @("run", "--project", $projectPath.Replace('\', '/'))
+            env = @{
+                DOTNET_ENVIRONMENT = "Production"
+            }
+        }
+    }
+
+    $jsonOutput = $config | ConvertTo-Json -Depth 10
+    Write-Host $jsonOutput -ForegroundColor Green
+    Write-Host
+}
+
 if ($Help) {
     Write-Host @"
 RoslynCSMCP Setup Script for Claude CLI
@@ -256,7 +316,22 @@ foreach ($serverName in $configuredServers) {
 # Show config example
 Show-ConfigExample -SelectedModules $selectedModules -RootPath $rootPath -Scope $Scope
 
+# Show .mcp.json example for local repo scope
+Show-McpJsonExample -SelectedModules $selectedModules -RootPath $rootPath
+
+# Ask if user wants to generate .mcp.json
+Write-Host "Generate .mcp.json file? (for local repo scope)" -ForegroundColor Yellow
+$generateMcpJson = Read-Host "[Y/N]"
+if ($generateMcpJson -eq "Y" -or $generateMcpJson -eq "y") {
+    $mcpJsonPath = Read-Host "Output path (default: ./.mcp.json)"
+    if ([string]::IsNullOrWhiteSpace($mcpJsonPath)) {
+        $mcpJsonPath = "./.mcp.json"
+    }
+    Generate-McpJson -SelectedModules $selectedModules -RootPath $rootPath -OutputPath $mcpJsonPath
+}
+
 # Summary
+Write-Host
 Write-Host "=== Setup Complete ===" -ForegroundColor Cyan
 Write-Host
 Write-Host "RoslynCSMCP is configured for Claude CLI!" -ForegroundColor Green

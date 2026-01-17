@@ -1,17 +1,20 @@
 {
   "$schema": "https://modelcontextprotocol.io/schema/mcp-config.json",
   "mcpServers": {
-    "roslyn": {
+    "roslyn-navigation": {
       "command": "dotnet",
-      "args": [
-        "run",
-        "--project",
-        "/absolute/path/to/RoslynCSMCP/RoslynMcpServer"
-      ],
-      "env": {
-        "DOTNET_ENVIRONMENT": "Production",
-        "LOG_LEVEL": "Information"
-      }
+      "args": ["run", "--project", "/path/to/RoslynCSMCP/src/RoslynMcpServer.Navigation"],
+      "env": { "DOTNET_ENVIRONMENT": "Production" }
+    },
+    "roslyn-quality": {
+      "command": "dotnet",
+      "args": ["run", "--project", "/path/to/RoslynCSMCP/src/RoslynMcpServer.Quality"],
+      "env": { "DOTNET_ENVIRONMENT": "Production" }
+    },
+    "roslyn-security": {
+      "command": "dotnet",
+      "args": ["run", "--project", "/path/to/RoslynCSMCP/src/RoslynMcpServer.Security"],
+      "env": { "DOTNET_ENVIRONMENT": "Production" }
     }
   }
 }
