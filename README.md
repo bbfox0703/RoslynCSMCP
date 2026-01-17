@@ -825,6 +825,7 @@ In Production mode (default), only warnings and errors are logged to:
 | **[docs/FEATURES.md](docs/FEATURES.md)** | Complete API reference for all 42 tools |
 | **[docs/EXAMPLES.md](docs/EXAMPLES.md)** | Comprehensive usage guide with 100+ examples |
 | **[docs/TESTING.md](docs/TESTING.md)** | Testing guide (Desktop & CLI setup, MCP tests) |
+| **[docs/AGENT_SKILLS.md](docs/AGENT_SKILLS.md)** | Agent skills guide for effective tool usage |
 
 ## License
 
