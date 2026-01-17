@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Title>Roslyn C# MCP Server - Navigation Tools</Title>
+    <Description>MCP Server for C# code navigation: SearchSymbols, FindReferences, GetSymbolInfo, etc.</Description>
+    <AssemblyVersion>1.0.0.1</AssemblyVersion>
+    <FileVersion>1.0.0.1</FileVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Core Library Reference -->
+    <ProjectReference Include="..\RoslynMcpServer.Core\RoslynMcpServer.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- MCP Server SDK -->
+    <PackageReference Include="ModelContextProtocol" Version="0.5.0-preview.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
+
+    <!-- MSBuild Locator (required for each MCP server) -->
+    <PackageReference Include="Microsoft.Build.Locator" Version="1.11.2" />
+
+    <!-- Logging -->
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.0" />
+
+    <!-- Caching -->
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.1" />
+  </ItemGroup>
+
+</Project>
