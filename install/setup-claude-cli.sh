@@ -9,10 +9,82 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+GRAY='\033[0;90m'
+WHITE='\033[1;37m'
 NC='\033[0m' # No Color
 
 # Default scope
 SCOPE="user"
+
+# Module definitions (name|path|tools|tokens|description)
+declare -A MODULES
+MODULES["1"]="Full|RoslynMcpServer|42|7350|All tools in one server"
+MODULES["2"]="Navigation|src/RoslynMcpServer.Navigation|6|1050|Symbol search, references, file outline"
+MODULES["3"]="Quality|src/RoslynMcpServer.Quality|6|1050|Code smells, complexity, naming"
+MODULES["4"]="Security|src/RoslynMcpServer.Security|3|525|Security issues, thread safety"
+MODULES["5"]="Dependencies|src/RoslynMcpServer.Dependencies|5|875|Dependency analysis, packages"
+MODULES["6"]="Refactoring|src/RoslynMcpServer.Refactoring|4|700|Rename, extract interface"
+MODULES["7"]="Testing|src/RoslynMcpServer.Testing|2|350|Test discovery, coverage"
+MODULES["8"]="Metrics|src/RoslynMcpServer.Metrics|3|525|Code metrics, statistics"
+MODULES["9"]="Advanced|src/RoslynMcpServer.Advanced|13|2275|Batch queries, call hierarchy"
+
+get_module_field() {
+    local key="$1"
+    local field="$2"
+    local data="${MODULES[$key]}"
+    echo "$data" | cut -d'|' -f"$field"
+}
+
+show_menu() {
+    echo
+    echo -e "${CYAN}=== Select Tool Set ===${NC}"
+    echo
+    echo -e "${WHITE}  [1] Full          (42 tools, ~7,350 tokens) - All tools in one server${NC}"
+    echo
+    echo -e "${GRAY}  --- Modular Options (for token optimization) ---${NC}"
+    echo -e "${WHITE}  [2] Navigation    ( 6 tools, ~1,050 tokens) - Symbol search, references, file outline${NC}"
+    echo -e "${WHITE}  [3] Quality       ( 6 tools, ~1,050 tokens) - Code smells, complexity, naming${NC}"
+    echo -e "${WHITE}  [4] Security      ( 3 tools,   ~525 tokens) - Security issues, thread safety${NC}"
+    echo -e "${WHITE}  [5] Dependencies  ( 5 tools,   ~875 tokens) - Dependency analysis, packages${NC}"
+    echo -e "${WHITE}  [6] Refactoring   ( 4 tools,   ~700 tokens) - Rename, extract interface${NC}"
+    echo -e "${WHITE}  [7] Testing       ( 2 tools,   ~350 tokens) - Test discovery, coverage${NC}"
+    echo -e "${WHITE}  [8] Metrics       ( 3 tools,   ~525 tokens) - Code metrics, statistics${NC}"
+    echo -e "${WHITE}  [9] Advanced      (13 tools, ~2,275 tokens) - Batch queries, call hierarchy${NC}"
+    echo
+    echo -e "${YELLOW}  [A] All Modular   (Select multiple modules)${NC}"
+    echo -e "${RED}  [Q] Quit${NC}"
+    echo
+}
+
+show_config_example() {
+    local root_path="$1"
+    local scope="$2"
+    shift 2
+    local selected_modules=("$@")
+
+    echo
+    echo -e "${CYAN}=== Configuration Commands ===${NC}"
+    echo
+    echo -e "${YELLOW}To manually add these servers, run:${NC}"
+    echo
+
+    for mod in "${selected_modules[@]}"; do
+        local name=$(get_module_field "$mod" 1)
+        local path=$(get_module_field "$mod" 2)
+        local server_name="roslyn-$(echo "$name" | tr '[:upper:]' '[:lower:]')"
+        local project_path="$root_path/$path"
+
+        local scope_arg=""
+        if [ "$scope" != "local" ]; then
+            scope_arg="--scope $scope "
+        fi
+
+        echo -e "${GREEN}claude mcp add --transport stdio $server_name $scope_arg\\${NC}"
+        echo -e "${GREEN}    --env DOTNET_ENVIRONMENT=Production \\${NC}"
+        echo -e "${GREEN}    -- dotnet run --project \"$project_path\"${NC}"
+        echo
+    done
+}
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -33,7 +105,7 @@ Scopes:
   local   - Only in current directory (for testing)
 
 Examples:
-  ./setup-claude-cli.sh                    # User scope (default)
+  ./setup-claude-cli.sh                    # Interactive mode, user scope (default)
   ./setup-claude-cli.sh --scope project    # Project scope
   ./setup-claude-cli.sh --scope local      # Local scope
 EOF
@@ -58,78 +130,160 @@ echo
 
 # Get script directory and project path
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_PATH="$(cd "$SCRIPT_DIR/.." && pwd)/RoslynMcpServer"
+ROOT_PATH="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo -e "${GREEN}Project location: $PROJECT_PATH${NC}"
+echo -e "${GREEN}Project location: $ROOT_PATH${NC}"
 echo -e "${GREEN}Configuration scope: $SCOPE${NC}"
 echo
 
 # Check if Claude CLI is installed
 echo -e "${YELLOW}1. Checking Claude CLI installation...${NC}"
 if ! command -v claude &> /dev/null; then
-    echo -e "${RED}   ✗ Claude CLI not found.${NC}"
+    echo -e "${RED}   Claude CLI not found.${NC}"
     echo -e "${YELLOW}   Please install Claude CLI first:${NC}"
     echo -e "${YELLOW}   https://claude.ai/download${NC}"
     exit 1
 fi
-echo -e "${GREEN}   ✓ Claude CLI found${NC}"
+echo -e "${GREEN}   Claude CLI found${NC}"
 
 # Check .NET installation
 echo
 echo -e "${YELLOW}2. Checking .NET installation...${NC}"
 if ! command -v dotnet &> /dev/null; then
-    echo -e "${RED}   ✗ .NET SDK not found.${NC}"
+    echo -e "${RED}   .NET SDK not found.${NC}"
     echo -e "${YELLOW}   Please install .NET 10.0 SDK or later.${NC}"
     exit 1
 fi
 DOTNET_VERSION=$(dotnet --version)
-echo -e "${GREEN}   ✓ .NET SDK found: $DOTNET_VERSION${NC}"
+echo -e "${GREEN}   .NET SDK found: $DOTNET_VERSION${NC}"
+
+# Show menu and get selection
+SELECTED_MODULES=()
+
+while true; do
+    show_menu
+    read -p "Enter your choice: " selection
+
+    case "${selection^^}" in
+        Q)
+            echo -e "${YELLOW}Setup cancelled.${NC}"
+            exit 0
+            ;;
+        A)
+            echo
+            echo -e "${YELLOW}Select modules to install (comma-separated, e.g., 2,3,4):${NC}"
+            read -p "Modules: " multi_select
+            IFS=',' read -ra selections <<< "$multi_select"
+            for sel in "${selections[@]}"; do
+                sel=$(echo "$sel" | tr -d ' ')
+                if [[ -n "${MODULES[$sel]}" ]]; then
+                    SELECTED_MODULES+=("$sel")
+                fi
+            done
+            if [ ${#SELECTED_MODULES[@]} -eq 0 ]; then
+                echo -e "${RED}No valid modules selected.${NC}"
+                continue
+            fi
+            break
+            ;;
+        [1-9])
+            if [[ -n "${MODULES[$selection]}" ]]; then
+                SELECTED_MODULES+=("$selection")
+                break
+            else
+                echo -e "${RED}Invalid selection. Please try again.${NC}"
+                continue
+            fi
+            ;;
+        *)
+            echo -e "${RED}Invalid selection. Please try again.${NC}"
+            continue
+            ;;
+    esac
+done
+
+echo
+echo -e "${GREEN}Selected modules:${NC}"
+for mod in "${SELECTED_MODULES[@]}"; do
+    name=$(get_module_field "$mod" 1)
+    tools=$(get_module_field "$mod" 3)
+    tokens=$(get_module_field "$mod" 4)
+    echo -e "${WHITE}   - $name ($tools tools, ~$tokens tokens)${NC}"
+done
 
 # Build project
 echo
-echo -e "${YELLOW}3. Building RoslynCSMCP...${NC}"
-cd "$PROJECT_PATH"
-if ! dotnet build -c Release > /dev/null 2>&1; then
-    echo -e "${RED}   ✗ Build failed${NC}"
-    exit 1
-fi
-echo -e "${GREEN}   ✓ Build successful${NC}"
-cd "$SCRIPT_DIR"
+echo -e "${YELLOW}3. Building selected modules...${NC}"
 
-# Configure MCP server
+for mod in "${SELECTED_MODULES[@]}"; do
+    name=$(get_module_field "$mod" 1)
+    path=$(get_module_field "$mod" 2)
+    project_path="$ROOT_PATH/$path"
+
+    echo "   Building $name..."
+    if ! dotnet build "$project_path" -c Release --verbosity quiet > /dev/null 2>&1; then
+        echo -e "${RED}   Build failed for $name${NC}"
+        exit 1
+    fi
+done
+
+echo -e "${GREEN}   All modules built successfully${NC}"
+
+# Configure MCP servers
 echo
-echo -e "${YELLOW}4. Configuring MCP server...${NC}"
+echo -e "${YELLOW}4. Configuring MCP servers...${NC}"
 
-# Prepare scope argument
-SCOPE_ARG=""
-if [ "$SCOPE" != "local" ]; then
-    SCOPE_ARG="--scope $SCOPE"
-fi
+CONFIGURED_SERVERS=()
 
-# Add MCP server
-if ! claude mcp add --transport stdio roslyn $SCOPE_ARG \
-    --env DOTNET_ENVIRONMENT=Production \
-    --env LOG_LEVEL=Information \
-    -- dotnet run --project "$PROJECT_PATH"; then
-    echo -e "${RED}   ✗ Failed to configure MCP server${NC}"
+for mod in "${SELECTED_MODULES[@]}"; do
+    name=$(get_module_field "$mod" 1)
+    path=$(get_module_field "$mod" 2)
+    server_name="roslyn-$(echo "$name" | tr '[:upper:]' '[:lower:]')"
+    project_path="$ROOT_PATH/$path"
+
+    echo "   Adding $server_name..."
+
+    # Prepare scope argument
+    scope_arg=""
+    if [ "$SCOPE" != "local" ]; then
+        scope_arg="--scope $SCOPE"
+    fi
+
+    # Add MCP server
+    if claude mcp add --transport stdio "$server_name" $scope_arg \
+        --env DOTNET_ENVIRONMENT=Production \
+        -- dotnet run --project "$project_path" > /dev/null 2>&1; then
+        CONFIGURED_SERVERS+=("$server_name")
+    else
+        echo -e "${RED}   Failed to configure $server_name${NC}"
+    fi
+done
+
+if [ ${#CONFIGURED_SERVERS[@]} -eq 0 ]; then
+    echo -e "${RED}   No servers were configured successfully${NC}"
     exit 1
 fi
-echo -e "${GREEN}   ✓ MCP server configured successfully${NC}"
+
+echo -e "${GREEN}   MCP servers configured successfully${NC}"
 
 # Verify configuration
 echo
 echo -e "${YELLOW}5. Verifying configuration...${NC}"
-if claude mcp get roslyn > /dev/null 2>&1; then
-    echo -e "${GREEN}   ✓ Configuration verified${NC}"
-else
-    echo -e "${YELLOW}   ⚠ Configuration may not be active yet${NC}"
-fi
+for server_name in "${CONFIGURED_SERVERS[@]}"; do
+    if claude mcp get "$server_name" > /dev/null 2>&1; then
+        echo -e "${GREEN}   $server_name - OK${NC}"
+    else
+        echo -e "${YELLOW}   $server_name - may not be active yet${NC}"
+    fi
+done
+
+# Show config example
+show_config_example "$ROOT_PATH" "$SCOPE" "${SELECTED_MODULES[@]}"
 
 # Summary
-echo
 echo -e "${CYAN}=== Setup Complete ===${NC}"
 echo
-echo -e "${GREEN}✓ RoslynCSMCP is configured for Claude CLI!${NC}"
+echo -e "${GREEN}RoslynCSMCP is configured for Claude CLI!${NC}"
 echo
 echo -e "${YELLOW}Scope: $SCOPE${NC}"
 
@@ -146,6 +300,12 @@ case $SCOPE in
 esac
 
 echo
+echo -e "${YELLOW}Configured servers:${NC}"
+for server_name in "${CONFIGURED_SERVERS[@]}"; do
+    echo -e "${WHITE}   - $server_name${NC}"
+done
+
+echo
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Run 'claude' to start Claude CLI"
 echo "2. Use RoslynCSMCP tools to analyze C# code:"
@@ -154,6 +314,8 @@ echo "   > Find references to UserService in MySolution.sln"
 echo "   > Analyze dependencies for MySolution.sln"
 echo
 echo -e "${YELLOW}Verify configuration:${NC}"
-echo "  claude mcp list       # List all MCP servers"
-echo "  claude mcp get roslyn # Show RoslynCSMCP details"
+echo "  claude mcp list              # List all MCP servers"
+for server_name in "${CONFIGURED_SERVERS[@]}"; do
+    echo "  claude mcp get $server_name  # Show server details"
+done
 echo

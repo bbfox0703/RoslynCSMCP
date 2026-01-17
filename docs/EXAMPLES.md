@@ -1823,8 +1823,8 @@ Many parameters have sensible defaults - only specify when you need to override.
 
 ## Additional Resources
 
-- **Tool Reference**: See `TOOLS_REFERENCE.md` for complete API documentation
-- **Architecture**: See `ARCHITECTURE.md` for implementation details
+- **Tool Reference**: See `FEATURES.md` for complete API documentation
+- **Testing**: See `TESTING.md` for testing guide
 - **Setup**: See main `README.md` for installation instructions
 
 ---

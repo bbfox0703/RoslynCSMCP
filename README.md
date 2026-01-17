@@ -13,6 +13,7 @@ A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn
 - **Code Complexity Analysis** - Identify high-complexity methods using cyclomatic complexity metrics
 - **Performance Optimized** - Multi-level caching (Memory, Redis, File system) and incremental analysis for large codebases
 - **Security Hardened** - Input validation, path sanitization, and safe file operations
+- **Modular Architecture** - Load only the tools you need to minimize token overhead (350-2,275 tokens per module vs 7,350 for full)
 - ...and more!
 
 ## What is RoslynCSMCP?
@@ -39,6 +40,66 @@ RoslynCSMCP is a **specialized application** built on top of Microsoft's MCP SDK
 5. **Claude Native**: Designed specifically for Claude Desktop and Claude CLI workflows
 
 **Bottom Line**: Microsoft provides the foundation (SDK), RoslynCSMCP provides the complete, ready-to-use C# code analysis solution.
+
+---
+
+## 🧩 Modular Architecture (NEW)
+
+RoslynCSMCP now supports **modular MCP servers** for optimized token usage. Instead of loading all 42 tools (~7,350 tokens), you can load only the modules you need.
+
+### Available Modules
+
+| Module | Tools | Tokens | Description |
+|--------|-------|--------|-------------|
+| **Full** | 42 | ~7,350 | Complete toolset (backward compatible) |
+| **Navigation** | 6 | ~1,050 | Symbol search, references, file outline |
+| **Quality** | 6 | ~1,050 | Code smells, complexity, naming conventions |
+| **Security** | 3 | ~525 | Security issues, thread safety, exception handling |
+| **Dependencies** | 5 | ~875 | Dependency analysis, packages, DI container |
+| **Refactoring** | 4 | ~700 | Rename, extract interface, change impact |
+| **Testing** | 2 | ~350 | Test discovery, coverage analysis |
+| **Metrics** | 3 | ~525 | Code metrics, file statistics, documentation |
+| **Advanced** | 13 | ~2,275 | Batch queries, cross-solution, call hierarchy |
+
+### Quick Start - Modular Configuration
+
+**Claude Desktop** (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "roslyn-nav": {
+      "command": "dotnet",
+      "args": ["run", "--project", "D:/RoslynCSMCP/src/RoslynMcpServer.Navigation"]
+    },
+    "roslyn-quality": {
+      "command": "dotnet",
+      "args": ["run", "--project", "D:/RoslynCSMCP/src/RoslynMcpServer.Quality"]
+    }
+  }
+}
+```
+
+**Claude CLI**:
+```bash
+# Add Navigation module
+claude mcp add roslyn-nav --scope user -- dotnet run --project /path/to/RoslynCSMCP/src/RoslynMcpServer.Navigation
+
+# Add Quality module
+claude mcp add roslyn-quality --scope user -- dotnet run --project /path/to/RoslynCSMCP/src/RoslynMcpServer.Quality
+```
+
+### Module Selection Guide
+
+| Use Case | Recommended Modules | Token Savings |
+|----------|---------------------|---------------|
+| Code navigation only | Navigation | 86% |
+| Code review | Navigation + Quality | 71% |
+| Security audit | Security | 93% |
+| Full analysis | Full (or all modules) | 0% |
+
+> 💡 **Tip**: Start with Navigation module. Add more modules as needed.
+
+---
 
 ## Prerequisites
 
@@ -363,7 +424,9 @@ Identify complex methods in src/Services/*.cs with threshold 10
 
 ## Available MCP Tools
 
-The server exposes **34 MCP tools** for comprehensive C# code analysis:
+The server exposes **42 MCP tools** for comprehensive C# code analysis, organized into 8 modules:
+
+> 💡 **Modular Loading**: Each module can be loaded independently. See [Modular Architecture](#-modular-architecture-new) for configuration.
 
 ### Core Analysis Tools
 
@@ -547,7 +610,7 @@ The server exposes **34 MCP tools** for comprehensive C# code analysis:
 33. **AnalyzeNamingConventions** - Check naming convention compliance
 34. **AnalyzeAPIChanges** - Track API changes between versions
 
-📚 **[Complete Usage Examples](docs/USAGE_EXAMPLES.md)** - Comprehensive guide with 100+ examples organized by feature category
+📚 **[Complete Usage Examples](docs/EXAMPLES.md)** - Comprehensive guide with 100+ examples organized by feature category
 
 ## Development and Testing
 
@@ -584,23 +647,33 @@ dotnet publish -c Release -o ./publish
 
 ## Architecture
 
-The server features a modular, layered architecture:
+The server features a **modular, layered architecture** that supports both full and selective tool loading:
 
-- **MCP Server Layer** (`Program.cs`) - Handles MCP protocol communication via stdio transport
-- **Tools Layer** (`Tools/CodeNavigationTools.cs`) - Exposes 11 MCP tools with `[McpServerTool]` attributes
-- **Services Layer**:
-  - `SymbolSearchService` - Core symbol search and reference finding using Roslyn
-  - `CodeAnalysisService` - Solution loading and dependency analysis
-  - `TypeSignatureService` - Type signature extraction (Phase 1)
-  - `ProjectStructureService` - Project structure analysis (Phase 1)
-  - `CodeMetricsService` - Code statistics and complexity analysis (Phase 2)
-  - `DependencyGraphService` - Dependency visualization in multiple formats (Phase 2)
-  - `CallHierarchyService` - Call chain analysis (Phase 2)
-  - `BatchQueryService` - Batch query execution (Phase 2)
-  - `IncrementalAnalyzer` - File-level caching for performance
-  - `MultiLevelCacheManager` - 3-tier caching (Memory → Redis → File system)
-  - `SecurityValidator` - Input validation and path sanitization
-- **Models Layer** (`Models/SearchModels.cs`) - DTOs for all tool results
+```
+RoslynCSMCP.sln
+├── src/
+│   ├── RoslynMcpServer.Core/           # Shared library (services, models)
+│   ├── RoslynMcpServer.Navigation/     # Navigation MCP (6 tools)
+│   ├── RoslynMcpServer.Quality/        # Quality MCP (6 tools)
+│   ├── RoslynMcpServer.Security/       # Security MCP (3 tools)
+│   ├── RoslynMcpServer.Dependencies/   # Dependencies MCP (5 tools)
+│   ├── RoslynMcpServer.Refactoring/    # Refactoring MCP (4 tools)
+│   ├── RoslynMcpServer.Testing/        # Testing MCP (2 tools)
+│   ├── RoslynMcpServer.Metrics/        # Metrics MCP (3 tools)
+│   └── RoslynMcpServer.Advanced/       # Advanced MCP (13 tools)
+├── RoslynMcpServer/                    # Full version (42 tools)
+└── RoslynMcpServer.Tests/              # Unit & integration tests
+```
+
+### Layer Structure
+
+- **MCP Server Layer** (`Program.cs` in each module) - Handles MCP protocol communication via stdio transport
+- **Tools Layer** (`Tools/*.cs`) - Exposes MCP tools with `[McpServerTool]` attributes
+- **Core Library** (`RoslynMcpServer.Core/`):
+  - **Services**: All analysis services (SymbolSearchService, CodeAnalysisService, etc.)
+  - **Models**: DTOs for all tool results
+  - **Configuration**: Tool profile configuration
+  - **Utilities**: SecurityValidator, DiagnosticLogger, CacheManager
 - **Roslyn Integration** - MSBuildWorkspace for loading .sln files and performing semantic analysis
 
 ### Key Features
@@ -746,24 +819,12 @@ In Production mode (default), only warnings and errors are logged to:
 
 ## Documentation
 
-**📚 Full Documentation Index**: See [docs/README.md](docs/README.md) for complete documentation catalog
-
-### Getting Started
-- **[CLAUDE.md](CLAUDE.md)** - Development guide and architecture documentation for Claude Code
-- **[TESTING_GUIDE.md](docs/TESTING_GUIDE.md)** - Complete testing guide (Desktop & CLI setup, MCP connection tests)
-- **[CLAUDE_CLI_INTEGRATION.md](docs/CLAUDE_CLI_INTEGRATION.md)** - Claude CLI integration guide
-- **[SOLUTION_STRUCTURE.md](docs/SOLUTION_STRUCTURE.md)** - Project structure and organization
-
-### Configuration & Features
-- **[LOGGING_CONFIGURATION.md](docs/LOGGING_CONFIGURATION.md)** - Serilog logging configuration (Production vs Development)
-- **[TOKEN_OPTIMIZATION.md](docs/TOKEN_OPTIMIZATION.md)** - ⭐ Token optimization guide (40-80% savings across 6 tools)
-- **[USAGE_EXAMPLES.md](docs/USAGE_EXAMPLES.md)** - ⭐ Comprehensive usage guide with 100+ examples for all 34 tools
-- **[TOOLS_REFERENCE.md](docs/TOOLS_REFERENCE.md)** - Complete API reference for all 34 tools
-- **[MCP_TOOL_SELECTION.md](docs/MCP_TOOL_SELECTION.md)** - How Claude selects and uses RoslynCSMCP tools
-- **[DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)** - Docker deployment guide
-
-### Historical Documentation
-- **[docs/archive/](docs/archive/)** - Archived implementation progress, evaluations, and historical documents
+| Document | Description |
+|----------|-------------|
+| **[CLAUDE.md](CLAUDE.md)** | Development guide and architecture for Claude Code |
+| **[docs/FEATURES.md](docs/FEATURES.md)** | Complete API reference for all 42 tools |
+| **[docs/EXAMPLES.md](docs/EXAMPLES.md)** | Comprehensive usage guide with 100+ examples |
+| **[docs/TESTING.md](docs/TESTING.md)** | Testing guide (Desktop & CLI setup, MCP tests) |
 
 ## License
 

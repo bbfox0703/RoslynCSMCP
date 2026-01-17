@@ -42,31 +42,53 @@ The server requires MSBuild to be registered before any Roslyn workspace operati
 
 ## Architecture
 
+### Modular Project Structure
+
+The codebase follows a **modular architecture** for optimized token usage:
+
+```
+RoslynCSMCP.sln
+├── src/
+│   ├── RoslynMcpServer.Core/           # Shared library (Class Library)
+│   │   ├── Services/                    # All analysis services
+│   │   ├── Models/                      # Data models
+│   │   └── Configuration/               # Tool profile config
+│   │
+│   ├── RoslynMcpServer.Navigation/     # Navigation MCP (6 tools, ~1,050 tokens)
+│   ├── RoslynMcpServer.Quality/        # Quality MCP (6 tools, ~1,050 tokens)
+│   ├── RoslynMcpServer.Security/       # Security MCP (3 tools, ~525 tokens)
+│   ├── RoslynMcpServer.Dependencies/   # Dependencies MCP (5 tools, ~875 tokens)
+│   ├── RoslynMcpServer.Refactoring/    # Refactoring MCP (4 tools, ~700 tokens)
+│   ├── RoslynMcpServer.Testing/        # Testing MCP (2 tools, ~350 tokens)
+│   ├── RoslynMcpServer.Metrics/        # Metrics MCP (3 tools, ~525 tokens)
+│   └── RoslynMcpServer.Advanced/       # Advanced MCP (13 tools, ~2,275 tokens)
+│
+├── RoslynMcpServer/                    # Full version (42 tools, ~7,350 tokens)
+└── RoslynMcpServer.Tests/              # Unit & integration tests
+```
+
 ### Layer Structure
 
-The codebase follows a layered architecture:
-
-1. **MCP Server Layer** (Program.cs)
+1. **MCP Server Layer** (`Program.cs` in each module)
    - Handles MCP protocol communication via stdio transport
-   - Registers all services with dependency injection
+   - Registers required services with dependency injection
    - Configures logging to stderr (required for MCP protocol)
 
-2. **Tools Layer** (Tools/CodeNavigationTools.cs)
+2. **Tools Layer** (`Tools/*.cs` in each module)
    - Exposes MCP tools decorated with `[McpServerTool]` attributes
-   - Five main tools: SearchSymbols, FindReferences, GetSymbolInfo, AnalyzeDependencies, AnalyzeCodeComplexity
+   - Module-specific tools (e.g., NavigationTools.cs, QualityTools.cs)
    - All tool methods are static and receive IServiceProvider for dependency access
    - Tools handle validation, error handling, and result formatting
 
-3. **Services Layer**
-   - **SymbolSearchService**: Core symbol search and reference finding using Roslyn's SymbolFinder
-   - **IncrementalAnalyzer**: Provides file-level caching for incremental analysis
-   - **MultiLevelCacheManager**: Three-tier caching (L1: Memory, L2: Redis/optional, L3: File system)
-   - **SecurityValidator**: Input validation and path sanitization
-   - **DiagnosticLogger**: Operation timing and logging
+3. **Core Library** (`src/RoslynMcpServer.Core/`)
+   - **Services**: All analysis services (SymbolSearchService, CodeAnalysisService, etc.)
+   - **Models**: Data transfer objects for all tool results
+   - **Configuration**: Tool profile configuration
+   - **Utilities**: SecurityValidator, DiagnosticLogger, CacheManager
 
-4. **Models Layer** (Models/SearchModels.cs)
+4. **Models** (`Core/Models/SearchModels.cs`)
    - Data transfer objects for all tool results
-   - Includes: SymbolSearchResult, ReferenceResult, SymbolInfo, DependencyAnalysis, ComplexityResult
+   - Includes: SymbolSearchResult, ReferenceResult, SymbolInfo, DependencyAnalysis, etc.
 
 ### Key Architectural Patterns
 
@@ -124,13 +146,43 @@ The codebase follows a layered architecture:
 
 ### Adding New MCP Tools
 
-1. Add a static method to CodeNavigationTools.cs
-2. Decorate with `[McpServerTool]` and `Description` attributes
-3. Add `Description` attributes to all parameters
-4. Include `IServiceProvider? serviceProvider = null` as the last parameter
-5. Use SecurityValidator for path/input validation
-6. Wrap in try-catch with appropriate error logging
-7. Return formatted strings (markdown supported)
+**For Modular MCP Servers** (recommended):
+
+1. **Choose the appropriate module** based on tool category:
+   - Navigation: Symbol search, references, file outline
+   - Quality: Code smells, complexity, naming conventions
+   - Security: Security issues, thread safety, exception handling
+   - Dependencies: Dependency analysis, package analysis, DI container
+   - Refactoring: Rename, extract interface, change impact
+   - Testing: Test discovery, coverage analysis
+   - Metrics: Code metrics, file statistics, documentation coverage
+   - Advanced: Batch queries, call hierarchy, performance issues
+
+2. **Add the tool to the module's Tools file** (e.g., `NavigationTools.cs`):
+   ```csharp
+   [McpServerTool, Description("Tool description")]
+   public static async Task<string> MyNewTool(
+       [Description("Parameter description")] string param1,
+       IServiceProvider? serviceProvider = null)
+   {
+       // Implementation
+   }
+   ```
+
+3. **If adding a new service**, add it to `RoslynMcpServer.Core/Services/` and register it in the module's `Program.cs`.
+
+**For Full Version** (RoslynMcpServer):
+
+1. Add the method to the appropriate tools file in `RoslynMcpServer/Tools/`
+2. Follow the same patterns as modular tools
+
+**Tool Implementation Guidelines**:
+- Decorate with `[McpServerTool]` and `[Description]` attributes
+- Add `[Description]` attributes to all parameters
+- Include `IServiceProvider? serviceProvider = null` as the last parameter
+- Use SecurityValidator for path/input validation
+- Wrap in try-catch with appropriate error logging
+- Return formatted strings (markdown supported)
 
 ### Logging Requirements
 
@@ -200,7 +252,42 @@ MCP server configuration is added to Claude Desktop config:
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
-The server runs via `dotnet run --project /path/to/RoslynMcpServer` with environment variables:
+### Modular Configuration (Recommended)
+
+Choose only the modules you need to minimize token usage:
+
+```json
+{
+  "mcpServers": {
+    "roslyn-nav": {
+      "command": "dotnet",
+      "args": ["run", "--project", "D:/RoslynCSMCP/src/RoslynMcpServer.Navigation"]
+    },
+    "roslyn-quality": {
+      "command": "dotnet",
+      "args": ["run", "--project", "D:/RoslynCSMCP/src/RoslynMcpServer.Quality"]
+    }
+  }
+}
+```
+
+### Full Version Configuration
+
+For all 42 tools in a single server:
+
+```json
+{
+  "mcpServers": {
+    "roslyn": {
+      "command": "dotnet",
+      "args": ["run", "--project", "D:/RoslynCSMCP/RoslynMcpServer"]
+    }
+  }
+}
+```
+
+### Environment Variables
+
 - `DOTNET_ENVIRONMENT`: Production (default) or Development
 - `LOG_LEVEL`: Information (deprecated, now using Serilog configuration)
 

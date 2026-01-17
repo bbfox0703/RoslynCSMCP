@@ -490,9 +490,8 @@ RoslynMcpServer.Tests/
 
 ## Related Documentation
 
-- `TEST_IMPLEMENTATION_SUMMARY.md` - Current test status and known issues
-- `TEST_CASES_EVALUATION.md` - Comprehensive test case catalog
-- `SOLUTION_STRUCTURE.md` - Solution file organization
+- `FEATURES.md` - Complete tool reference
+- `EXAMPLES.md` - Usage examples for each tool
 - `README.md` - General project setup
 
 ## Summary

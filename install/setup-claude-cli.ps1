@@ -7,6 +7,67 @@ param(
     [switch]$Help
 )
 
+# Module definitions
+$modules = @{
+    "1" = @{ Name = "Full"; Path = "RoslynMcpServer"; Tools = 42; Tokens = 7350; Description = "All tools in one server" }
+    "2" = @{ Name = "Navigation"; Path = "src/RoslynMcpServer.Navigation"; Tools = 6; Tokens = 1050; Description = "Symbol search, references, file outline" }
+    "3" = @{ Name = "Quality"; Path = "src/RoslynMcpServer.Quality"; Tools = 6; Tokens = 1050; Description = "Code smells, complexity, naming" }
+    "4" = @{ Name = "Security"; Path = "src/RoslynMcpServer.Security"; Tools = 3; Tokens = 525; Description = "Security issues, thread safety" }
+    "5" = @{ Name = "Dependencies"; Path = "src/RoslynMcpServer.Dependencies"; Tools = 5; Tokens = 875; Description = "Dependency analysis, packages" }
+    "6" = @{ Name = "Refactoring"; Path = "src/RoslynMcpServer.Refactoring"; Tools = 4; Tokens = 700; Description = "Rename, extract interface" }
+    "7" = @{ Name = "Testing"; Path = "src/RoslynMcpServer.Testing"; Tools = 2; Tokens = 350; Description = "Test discovery, coverage" }
+    "8" = @{ Name = "Metrics"; Path = "src/RoslynMcpServer.Metrics"; Tools = 3; Tokens = 525; Description = "Code metrics, statistics" }
+    "9" = @{ Name = "Advanced"; Path = "src/RoslynMcpServer.Advanced"; Tools = 13; Tokens = 2275; Description = "Batch queries, call hierarchy" }
+}
+
+function Show-Menu {
+    Write-Host
+    Write-Host "=== Select Tool Set ===" -ForegroundColor Cyan
+    Write-Host
+    Write-Host "  [1] Full          (42 tools, ~7,350 tokens) - All tools in one server" -ForegroundColor White
+    Write-Host
+    Write-Host "  --- Modular Options (for token optimization) ---" -ForegroundColor Gray
+    Write-Host "  [2] Navigation    ( 6 tools, ~1,050 tokens) - Symbol search, references, file outline" -ForegroundColor White
+    Write-Host "  [3] Quality       ( 6 tools, ~1,050 tokens) - Code smells, complexity, naming" -ForegroundColor White
+    Write-Host "  [4] Security      ( 3 tools,   ~525 tokens) - Security issues, thread safety" -ForegroundColor White
+    Write-Host "  [5] Dependencies  ( 5 tools,   ~875 tokens) - Dependency analysis, packages" -ForegroundColor White
+    Write-Host "  [6] Refactoring   ( 4 tools,   ~700 tokens) - Rename, extract interface" -ForegroundColor White
+    Write-Host "  [7] Testing       ( 2 tools,   ~350 tokens) - Test discovery, coverage" -ForegroundColor White
+    Write-Host "  [8] Metrics       ( 3 tools,   ~525 tokens) - Code metrics, statistics" -ForegroundColor White
+    Write-Host "  [9] Advanced      (13 tools, ~2,275 tokens) - Batch queries, call hierarchy" -ForegroundColor White
+    Write-Host
+    Write-Host "  [A] All Modular   (Select multiple modules)" -ForegroundColor Yellow
+    Write-Host "  [Q] Quit" -ForegroundColor Red
+    Write-Host
+}
+
+function Show-ConfigExample {
+    param(
+        [array]$SelectedModules,
+        [string]$RootPath,
+        [string]$Scope
+    )
+
+    Write-Host
+    Write-Host "=== Configuration Commands ===" -ForegroundColor Cyan
+    Write-Host
+    Write-Host "To manually add these servers, run:" -ForegroundColor Yellow
+    Write-Host
+
+    foreach ($mod in $SelectedModules) {
+        $module = $modules[$mod]
+        $serverName = "roslyn-$($module.Name.ToLower())"
+        $projectPath = Join-Path $RootPath $module.Path
+
+        $scopeArg = if ($Scope -ne "local") { "--scope $Scope " } else { "" }
+
+        Write-Host "claude mcp add --transport stdio $serverName $scopeArg\" -ForegroundColor Green
+        Write-Host "    --env DOTNET_ENVIRONMENT=Production \" -ForegroundColor Green
+        Write-Host "    -- dotnet run --project `"$projectPath`"" -ForegroundColor Green
+        Write-Host
+    }
+}
+
 if ($Help) {
     Write-Host @"
 RoslynCSMCP Setup Script for Claude CLI
@@ -19,7 +80,7 @@ Scopes:
   local   - Only in current directory (for testing)
 
 Examples:
-  .\setup-claude-cli.ps1                    # User scope (default)
+  .\setup-claude-cli.ps1                    # Interactive mode, user scope (default)
   .\setup-claude-cli.ps1 -Scope project     # Project scope
   .\setup-claude-cli.ps1 -Scope local       # Local scope
 "@
@@ -31,9 +92,9 @@ Write-Host
 
 # Get script directory and project path
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$projectPath = Join-Path (Split-Path -Parent $scriptDir) "RoslynMcpServer"
+$rootPath = Split-Path -Parent $scriptDir
 
-Write-Host "Project location: $projectPath" -ForegroundColor Green
+Write-Host "Project location: $rootPath" -ForegroundColor Green
 Write-Host "Configuration scope: $Scope" -ForegroundColor Green
 Write-Host
 
@@ -44,9 +105,9 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Claude CLI not responding"
     }
-    Write-Host "   ✓ Claude CLI found" -ForegroundColor Green
+    Write-Host "   Claude CLI found" -ForegroundColor Green
 } catch {
-    Write-Host "   ✗ Claude CLI not found." -ForegroundColor Red
+    Write-Host "   Claude CLI not found." -ForegroundColor Red
     Write-Host "   Please install Claude CLI first:" -ForegroundColor Yellow
     Write-Host "   https://claude.ai/download" -ForegroundColor Yellow
     exit 1
@@ -57,80 +118,148 @@ Write-Host
 Write-Host "2. Checking .NET installation..." -ForegroundColor Yellow
 try {
     $dotnetVersion = dotnet --version
-    Write-Host "   ✓ .NET SDK found: $dotnetVersion" -ForegroundColor Green
+    Write-Host "   .NET SDK found: $dotnetVersion" -ForegroundColor Green
 } catch {
-    Write-Host "   ✗ .NET SDK not found. Please install .NET 10.0 SDK or later." -ForegroundColor Red
+    Write-Host "   .NET SDK not found. Please install .NET 10.0 SDK or later." -ForegroundColor Red
     exit 1
+}
+
+# Show menu and get selection
+$selectedModules = @()
+
+while ($true) {
+    Show-Menu
+    $selection = Read-Host "Enter your choice"
+
+    switch ($selection.ToUpper()) {
+        "Q" {
+            Write-Host "Setup cancelled." -ForegroundColor Yellow
+            exit 0
+        }
+        "A" {
+            Write-Host
+            Write-Host "Select modules to install (comma-separated, e.g., 2,3,4):" -ForegroundColor Yellow
+            $multiSelect = Read-Host "Modules"
+            $selectedModules = $multiSelect -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $modules.ContainsKey($_) }
+            if ($selectedModules.Count -eq 0) {
+                Write-Host "No valid modules selected." -ForegroundColor Red
+                continue
+            }
+            break
+        }
+        default {
+            if ($modules.ContainsKey($selection)) {
+                $selectedModules = @($selection)
+                break
+            } else {
+                Write-Host "Invalid selection. Please try again." -ForegroundColor Red
+                continue
+            }
+        }
+    }
+    break
+}
+
+Write-Host
+Write-Host "Selected modules:" -ForegroundColor Green
+foreach ($mod in $selectedModules) {
+    $module = $modules[$mod]
+    Write-Host "   - $($module.Name) ($($module.Tools) tools, ~$($module.Tokens) tokens)" -ForegroundColor White
 }
 
 # Build project
 Write-Host
-Write-Host "3. Building RoslynCSMCP..." -ForegroundColor Yellow
-Push-Location $projectPath
-try {
-    dotnet build -c Release | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Build failed"
+Write-Host "3. Building selected modules..." -ForegroundColor Yellow
+
+foreach ($mod in $selectedModules) {
+    $module = $modules[$mod]
+    $projectPath = Join-Path $rootPath $module.Path
+
+    Write-Host "   Building $($module.Name)..."
+    Push-Location $rootPath
+    try {
+        dotnet build $projectPath -c Release --verbosity quiet 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "   Build failed for $($module.Name)" -ForegroundColor Red
+            Pop-Location
+            exit 1
+        }
+    } finally {
+        Pop-Location
     }
-    Write-Host "   ✓ Build successful" -ForegroundColor Green
-} catch {
-    Write-Host "   ✗ Build failed" -ForegroundColor Red
-    Pop-Location
-    exit 1
-} finally {
-    Pop-Location
 }
 
-# Configure MCP server
+Write-Host "   All modules built successfully" -ForegroundColor Green
+
+# Configure MCP servers
 Write-Host
-Write-Host "4. Configuring MCP server..." -ForegroundColor Yellow
+Write-Host "4. Configuring MCP servers..." -ForegroundColor Yellow
 
-# Prepare command based on scope
-$scopeArg = if ($Scope -ne "local") { "--scope", $Scope } else { @() }
+$configuredServers = @()
 
-# Add MCP server
-$addArgs = @(
-    "mcp", "add",
-    "--transport", "stdio",
-    "roslyn"
-) + $scopeArg + @(
-    "--env", "DOTNET_ENVIRONMENT=Production",
-    "--env", "LOG_LEVEL=Information",
-    "--",
-    "dotnet", "run", "--project", $projectPath
-)
+foreach ($mod in $selectedModules) {
+    $module = $modules[$mod]
+    $serverName = "roslyn-$($module.Name.ToLower())"
+    $projectPath = Join-Path $rootPath $module.Path
 
-try {
-    & claude $addArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "MCP server configuration failed"
+    Write-Host "   Adding $serverName..."
+
+    # Prepare command based on scope
+    $scopeArg = if ($Scope -ne "local") { @("--scope", $Scope) } else { @() }
+
+    # Add MCP server
+    $addArgs = @(
+        "mcp", "add",
+        "--transport", "stdio",
+        $serverName
+    ) + $scopeArg + @(
+        "--env", "DOTNET_ENVIRONMENT=Production",
+        "--",
+        "dotnet", "run", "--project", $projectPath
+    )
+
+    try {
+        & claude $addArgs 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "   Failed to configure $serverName" -ForegroundColor Red
+        } else {
+            $configuredServers += $serverName
+        }
+    } catch {
+        Write-Host "   Failed to configure $serverName : $($_.Exception.Message)" -ForegroundColor Red
     }
-    Write-Host "   ✓ MCP server configured successfully" -ForegroundColor Green
-} catch {
-    Write-Host "   ✗ Failed to configure MCP server" -ForegroundColor Red
-    Write-Host "   Error: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+if ($configuredServers.Count -eq 0) {
+    Write-Host "   No servers were configured successfully" -ForegroundColor Red
     exit 1
 }
+
+Write-Host "   MCP servers configured successfully" -ForegroundColor Green
 
 # Verify configuration
 Write-Host
 Write-Host "5. Verifying configuration..." -ForegroundColor Yellow
-try {
-    $serverInfo = claude mcp get roslyn 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "   ✓ Configuration verified" -ForegroundColor Green
-    } else {
-        Write-Host "   ⚠ Configuration may not be active yet" -ForegroundColor Yellow
+foreach ($serverName in $configuredServers) {
+    try {
+        $serverInfo = claude mcp get $serverName 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "   $serverName - OK" -ForegroundColor Green
+        } else {
+            Write-Host "   $serverName - may not be active yet" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "   $serverName - could not verify" -ForegroundColor Yellow
     }
-} catch {
-    Write-Host "   ⚠ Could not verify configuration" -ForegroundColor Yellow
 }
 
+# Show config example
+Show-ConfigExample -SelectedModules $selectedModules -RootPath $rootPath -Scope $Scope
+
 # Summary
-Write-Host
 Write-Host "=== Setup Complete ===" -ForegroundColor Cyan
 Write-Host
-Write-Host "✓ RoslynCSMCP is configured for Claude CLI!" -ForegroundColor Green
+Write-Host "RoslynCSMCP is configured for Claude CLI!" -ForegroundColor Green
 Write-Host
 Write-Host "Scope: $Scope" -ForegroundColor Yellow
 
@@ -147,6 +276,12 @@ switch ($Scope) {
 }
 
 Write-Host
+Write-Host "Configured servers:" -ForegroundColor Yellow
+foreach ($serverName in $configuredServers) {
+    Write-Host "   - $serverName" -ForegroundColor White
+}
+
+Write-Host
 Write-Host "Next steps:" -ForegroundColor Yellow
 Write-Host "1. Run 'claude' to start Claude CLI"
 Write-Host "2. Use RoslynCSMCP tools to analyze C# code:"
@@ -155,6 +290,8 @@ Write-Host "   > Find references to UserService in MySolution.sln"
 Write-Host "   > Analyze dependencies for MySolution.sln"
 Write-Host
 Write-Host "Verify configuration:" -ForegroundColor Yellow
-Write-Host "  claude mcp list      # List all MCP servers"
-Write-Host "  claude mcp get roslyn # Show RoslynCSMCP details"
+Write-Host "  claude mcp list              # List all MCP servers"
+foreach ($serverName in $configuredServers) {
+    Write-Host "  claude mcp get $serverName  # Show server details"
+}
 Write-Host

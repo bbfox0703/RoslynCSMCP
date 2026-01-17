@@ -685,8 +685,8 @@ Use AnalyzeAPIChanges tool with:
 
 ## 🔗 Related Documentation
 
-- [Usage Examples](PHASE4_USAGE_EXAMPLES.md) - Detailed examples for each tool
-- [NEW_TOOLS_PROPOSAL.md](NEW_TOOLS_PROPOSAL.md) - Upcoming features and tools
+- [Usage Examples](EXAMPLES.md) - Detailed examples for each tool
+- [Testing Guide](TESTING.md) - How to test RoslynCSMCP
 - [CLAUDE.md](../CLAUDE.md) - Development guidelines for contributors
 
 ---

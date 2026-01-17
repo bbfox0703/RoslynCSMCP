@@ -46,9 +46,21 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Project References -->
+    <!-- Core Library -->
     <ProjectReference Include="..\src\RoslynMcpServer.Core\RoslynMcpServer.Core.csproj" />
+
+    <!-- Full Version (42 tools) -->
     <ProjectReference Include="..\RoslynMcpServer\RoslynMcpServer.csproj" />
+
+    <!-- Modular MCP Servers -->
+    <ProjectReference Include="..\src\RoslynMcpServer.Navigation\RoslynMcpServer.Navigation.csproj" />
+    <ProjectReference Include="..\src\RoslynMcpServer.Quality\RoslynMcpServer.Quality.csproj" />
+    <ProjectReference Include="..\src\RoslynMcpServer.Security\RoslynMcpServer.Security.csproj" />
+    <ProjectReference Include="..\src\RoslynMcpServer.Dependencies\RoslynMcpServer.Dependencies.csproj" />
+    <ProjectReference Include="..\src\RoslynMcpServer.Refactoring\RoslynMcpServer.Refactoring.csproj" />
+    <ProjectReference Include="..\src\RoslynMcpServer.Testing\RoslynMcpServer.Testing.csproj" />
+    <ProjectReference Include="..\src\RoslynMcpServer.Metrics\RoslynMcpServer.Metrics.csproj" />
+    <ProjectReference Include="..\src\RoslynMcpServer.Advanced\RoslynMcpServer.Advanced.csproj" />
   </ItemGroup>
 
 </Project>
