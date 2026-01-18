@@ -4,6 +4,8 @@
 
 A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn compiler platform to provide Vibe-coding tools like **Claude Desktop** and **Claude CLI** with powerful code analysis and navigation capabilities for C# codebases.
 
+Notice: most codes after forked from original repository was completed by Claude code. 
+
 ## Features
 
 - **Wildcard Symbol Search** - Find classes, methods, and properties using pattern matching (`*Service`, `Get*User`, etc.)
