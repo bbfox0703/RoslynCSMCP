@@ -83,6 +83,7 @@ class Program
             builder.Services.AddSingleton<IncrementalAnalyzer>();
             builder.Services.AddSingleton<IPersistentCache, FilePersistentCache>();
             builder.Services.AddSingleton<MultiLevelCacheManager>();
+            builder.Services.AddSingleton<McpErrorHandler>();  // MCP error handling service
             builder.Services.AddMemoryCache();
 
             // Configure MCP server with Navigation tools only

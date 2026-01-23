@@ -27,14 +27,27 @@ public class NavigationTools
         [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
         IServiceProvider? serviceProvider = null)
     {
+        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
+
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            var logger = serviceProvider?.GetService<ILogger<NavigationTools>>();
-
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+            // Validate pattern parameter
+            if (string.IsNullOrWhiteSpace(pattern))
             {
-                return "Error: Invalid solution path provided.";
+                return McpError.InvalidParams("pattern", "Search pattern cannot be empty").ToToolResponse();
+            }
+
+            var validator = serviceProvider?.GetService<SecurityValidator>();
+
+            // Validate solution path with MCP error handling
+            if (validator != null && errorHandler != null)
+            {
+                var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+                if (pathError != null) return pathError;
+            }
+            else if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+            {
+                return McpError.InvalidPath(solutionPath, "Path validation failed").ToToolResponse();
             }
 
             var sanitizedPattern = validator?.SanitizeSearchPattern(pattern) ?? pattern;
@@ -43,12 +56,13 @@ public class NavigationTools
             var paginationRequest = new PaginationRequest { PageSize = pageSize, Cursor = cursor };
             paginationRequest.Validate();
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
             var searchService = serviceProvider?.GetService<SymbolSearchService>();
             if (searchService == null)
             {
-                return "Error: Symbol search service not available.";
+                return McpError.ServiceUnavailable("SymbolSearchService").ToToolResponse();
             }
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
 
             var results = await searchService.SearchSymbolsAsync(
                 sanitizedPattern, solutionPath, symbolTypes, ignoreCase);
@@ -62,21 +76,23 @@ public class NavigationTools
         }
         catch (OperationCanceledException)
         {
-            return "Error: Search operation timed out. The codebase may be too large or complex.";
+            return McpError.OperationTimeout("SearchSymbols", TimeSpan.FromMinutes(5)).ToToolResponse();
         }
-        catch (FileNotFoundException)
+        catch (FileNotFoundException ex)
         {
-            return "Error: Solution file not found. Please check the path and try again.";
+            return McpError.SolutionNotFound(ex.FileName ?? solutionPath).ToToolResponse();
         }
         catch (UnauthorizedAccessException)
         {
-            return "Error: Access denied. Please check file permissions.";
+            return McpError.AccessDenied(solutionPath, "Please check file permissions").ToToolResponse();
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<NavigationTools>>();
-            logger?.LogError(ex, "Unexpected error during symbol search");
-            return "Error: An unexpected error occurred during the search operation.";
+            if (errorHandler != null)
+            {
+                return errorHandler.HandleException(ex, "SearchSymbols");
+            }
+            return McpError.FromException(ex).ToToolResponse();
         }
     }
 
@@ -91,12 +107,27 @@ public class NavigationTools
         [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
         IServiceProvider? serviceProvider = null)
     {
+        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
+
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+            // Validate symbol name
+            if (string.IsNullOrWhiteSpace(symbolName))
             {
-                return "Error: Invalid solution path provided.";
+                return McpError.InvalidParams("symbolName", "Symbol name cannot be empty").ToToolResponse();
+            }
+
+            var validator = serviceProvider?.GetService<SecurityValidator>();
+
+            // Validate solution path with MCP error handling
+            if (validator != null && errorHandler != null)
+            {
+                var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+                if (pathError != null) return pathError;
+            }
+            else if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+            {
+                return McpError.InvalidPath(solutionPath, "Path validation failed").ToToolResponse();
             }
 
             // Validate pagination parameters
@@ -106,10 +137,16 @@ public class NavigationTools
             var searchService = serviceProvider?.GetService<SymbolSearchService>();
             if (searchService == null)
             {
-                return "Error: Symbol search service not available.";
+                return McpError.ServiceUnavailable("SymbolSearchService").ToToolResponse();
             }
 
             var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
+
+            // Check if symbol was found
+            if (!results.Any())
+            {
+                return McpError.SymbolNotFound(symbolName, solutionPath).ToToolResponse();
+            }
 
             // Apply pagination
             var queryHash = paginationRequest.ComputeQueryHash(symbolName, solutionPath, detailLevel, includeDefinition.ToString());
@@ -124,11 +161,21 @@ public class NavigationTools
                 _ => FormatReferencesLocationsPaginated(paginatedResults)
             };
         }
+        catch (OperationCanceledException)
+        {
+            return McpError.OperationTimeout("FindReferences").ToToolResponse();
+        }
+        catch (FileNotFoundException ex)
+        {
+            return McpError.SolutionNotFound(ex.FileName ?? solutionPath).ToToolResponse();
+        }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<NavigationTools>>();
-            logger?.LogError(ex, "Error finding references for symbol: {SymbolName}", symbolName);
-            return "Error: An unexpected error occurred while finding references.";
+            if (errorHandler != null)
+            {
+                return errorHandler.HandleException(ex, "FindReferences");
+            }
+            return McpError.FromException(ex).ToToolResponse();
         }
     }
 
@@ -148,12 +195,27 @@ public class NavigationTools
         [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
         IServiceProvider? serviceProvider = null)
     {
+        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
+
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+            // Validate symbol name
+            if (string.IsNullOrWhiteSpace(symbolName))
             {
-                return "Error: Invalid solution path provided.";
+                return McpError.InvalidParams("symbolName", "Symbol name cannot be empty").ToToolResponse();
+            }
+
+            var validator = serviceProvider?.GetService<SecurityValidator>();
+
+            // Validate solution path with MCP error handling
+            if (validator != null && errorHandler != null)
+            {
+                var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+                if (pathError != null) return pathError;
+            }
+            else if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+            {
+                return McpError.InvalidPath(solutionPath, "Path validation failed").ToToolResponse();
             }
 
             // Validate pagination parameters
@@ -219,11 +281,21 @@ public class NavigationTools
                 _ => FormatReferencesLocationsPaginated(paginatedResults)
             };
         }
+        catch (OperationCanceledException)
+        {
+            return McpError.OperationTimeout("FindReferencesFiltered").ToToolResponse();
+        }
+        catch (FileNotFoundException ex)
+        {
+            return McpError.SolutionNotFound(ex.FileName ?? solutionPath).ToToolResponse();
+        }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<NavigationTools>>();
-            logger?.LogError(ex, "Error finding filtered references for symbol: {SymbolName}", symbolName);
-            return "Error: An unexpected error occurred while finding references.";
+            if (errorHandler != null)
+            {
+                return errorHandler.HandleException(ex, "FindReferencesFiltered");
+            }
+            return McpError.FromException(ex).ToToolResponse();
         }
     }
 
@@ -235,6 +307,7 @@ public class NavigationTools
         string detailLevel = "basic",
         IServiceProvider? serviceProvider = null)
     {
+        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
         try
         {
             var validator = serviceProvider?.GetService<SecurityValidator>();
