@@ -6,6 +6,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 RoslynCSMCP is a C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn compiler platform to provide Claude Desktop with code analysis and navigation capabilities for C# codebases. It exposes tools for symbol search, reference tracking, dependency analysis, and code complexity analysis.
 
+## MCP Specification Compliance
+
+This server implements the [MCP Specification (2025-11-25)](https://modelcontextprotocol.io/specification) with the following features:
+
+| Feature | Status | Implementation |
+|---------|--------|----------------|
+| JSON-RPC 2.0 Transport | ✅ | stdio via `WithStdioServerTransport()` |
+| Tool Registration | ✅ | `[McpServerTool]` + `[Description]` attributes |
+| Cursor-based Pagination | ✅ | `PaginatedResult<T>`, `PaginationCursor` |
+| JSON-RPC Error Codes | ✅ | `McpError`, `McpErrorCodes` |
+| Request Cancellation | ✅ | `CancellationManager`, `CancellableOperation` |
+| OAuth 2.0 + PKCE | ✅ | `OAuthAuthenticationService` (optional) |
+| Resource Indicators (RFC 8707) | ✅ | `resource` parameter in OAuth |
+| Cross-platform Paths | ✅ | Windows + Unix path validation |
+
 ## Build & Development Commands
 
 ### Building the Project
@@ -86,9 +101,16 @@ RoslynCSMCP.sln
    - **Configuration**: Tool profile configuration
    - **Utilities**: SecurityValidator, DiagnosticLogger, CacheManager
 
-4. **Models** (`Core/Models/SearchModels.cs`)
-   - Data transfer objects for all tool results
-   - Includes: SymbolSearchResult, ReferenceResult, SymbolInfo, DependencyAnalysis, etc.
+4. **Models** (`Core/Models/`)
+   - `SearchModels.cs` - SymbolSearchResult, ReferenceResult, SymbolInfo, etc.
+   - `PaginationModels.cs` - PaginatedResult<T>, PaginationCursor, PaginationRequest
+   - `McpErrorModels.cs` - McpError, McpErrorCodes, McpResult<T>, McpException
+
+5. **Authentication** (`Core/Authentication/`)
+   - `OAuthConfiguration.cs` - OAuth 2.0 settings and validation
+   - `OAuthTokenManager.cs` - Token acquisition, refresh, and validation
+   - `OAuthAuthenticationService.cs` - Authorization flow management
+   - `TokenStorage.cs` - Secure token storage (DPAPI/AES)
 
 ### Key Architectural Patterns
 
@@ -103,11 +125,15 @@ RoslynCSMCP.sln
 - L3 (File system): Cold data, 7-day expiry
 - Cache keys are based on solution path and search parameters
 
-**Security Model**
+**Security Model** (`Core/Services/SecurityValidator.cs`)
 - SecurityValidator enforces:
-  - Path traversal prevention (blocks ".." and "~")
+  - Path traversal prevention (blocks "..", "~", null bytes, URL-encoded sequences)
   - Allowed file extensions (.sln, .csproj only)
-  - Safe path regex validation (Windows paths)
+  - Cross-platform path validation:
+    - Windows: `^[a-zA-Z]:[\\/][^<>:|?*]+$`
+    - Unix/macOS: `^/[^<>:|?*\x00]+$`
+  - Platform detection via `OperatingSystem.IsWindows()`
+  - WSL compatibility (accepts both formats on Windows)
   - Search pattern sanitization
 
 **Concurrency & Performance**
@@ -122,13 +148,15 @@ RoslynCSMCP.sln
 - Converts wildcard patterns (* and ?) to regex
 - Filters symbols by kind (class, interface, method, property, field, event)
 - Calculates relevance scores (exact match > prefix match > accessibility)
-- Returns top 20 results per category
+- Supports cursor-based pagination via `pageSize` and `cursor` parameters
+- Uses `CancellationContext` for cancellable operations
 
 **FindReferences**
 - Uses Roslyn's SymbolFinder.FindReferencesAsync
 - Distinguishes definitions from references by comparing source spans
 - Provides 5-line context around each reference
 - Deduplicates by DocumentPath:LineNumber
+- Supports cursor-based pagination with query hash validation
 
 **AnalyzeCodeComplexity**
 - Calculates cyclomatic complexity for methods
@@ -181,8 +209,60 @@ RoslynCSMCP.sln
 - Add `[Description]` attributes to all parameters
 - Include `IServiceProvider? serviceProvider = null` as the last parameter
 - Use SecurityValidator for path/input validation
-- Wrap in try-catch with appropriate error logging
+- Use `McpError` for standardized error responses
+- Use `CancellationContext` for cancellable long-running operations
+- Add `pageSize` and `cursor` parameters for paginated results
 - Return formatted strings (markdown supported)
+
+**Example Tool with Full MCP Support**:
+```csharp
+[McpServerTool, Description("Search for symbols with pagination and cancellation")]
+public static async Task<string> SearchSymbols(
+    [Description("Search pattern")] string pattern,
+    [Description("Solution path")] string solutionPath,
+    [Description("Page size (default: 20, max: 100)")] int pageSize = 20,
+    [Description("Pagination cursor")] string? cursor = null,
+    IServiceProvider? serviceProvider = null)
+{
+    var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
+    using var ctx = CancellationContext.Create(serviceProvider, "SearchSymbols");
+
+    try
+    {
+        // Validate parameters
+        if (string.IsNullOrWhiteSpace(pattern))
+            return McpError.InvalidParams("pattern", "Cannot be empty").ToToolResponse();
+
+        var validator = serviceProvider?.GetService<SecurityValidator>();
+        var pathError = validator?.ValidateSolutionPath(solutionPath, errorHandler);
+        if (pathError != null) return pathError;
+
+        // Check cancellation
+        ctx.Token.ThrowIfCancellationRequested();
+
+        // Execute operation
+        var results = await DoSearchAsync(pattern, solutionPath);
+
+        // Apply pagination
+        var paginated = PaginatedResult<Result>.FromCursor(results, cursor, pageSize);
+
+        ctx.Complete();
+        return FormatResults(paginated);
+    }
+    catch (OperationCanceledException) when (ctx.Token.IsCancellationRequested)
+    {
+        return ctx.IsCancelled
+            ? McpError.Create(McpErrorCodes.OperationCancelled, "Cancelled").ToToolResponse()
+            : McpError.OperationTimeout("SearchSymbols").ToToolResponse();
+    }
+    catch (Exception ex)
+    {
+        ctx.Fail(ex.Message);
+        return errorHandler?.HandleException(ex, "SearchSymbols")
+            ?? McpError.FromException(ex).ToToolResponse();
+    }
+}
+```
 
 ### Logging Requirements
 
@@ -333,3 +413,119 @@ When debugging or developing RoslynCSMCP:
    # Linux/macOS (bash)
    tail -f /tmp/RoslynCSMCP/logs/debug-$(date +%Y%m%d).log
    ```
+
+## MCP Protocol Features
+
+### JSON-RPC Error Handling
+
+The server uses standardized JSON-RPC 2.0 error codes (`Core/Models/McpErrorModels.cs`):
+
+| Code | Constant | Description |
+|------|----------|-------------|
+| -32700 | `ParseError` | Invalid JSON |
+| -32600 | `InvalidRequest` | Invalid request object |
+| -32601 | `MethodNotFound` | Method not found |
+| -32602 | `InvalidParams` | Invalid parameters |
+| -32603 | `InternalError` | Internal error |
+| -32001 | `SolutionNotFound` | Solution file not found |
+| -32002 | `InvalidPath` | Path validation failed |
+| -32003 | `SymbolNotFound` | Symbol not found |
+| -32004 | `OperationTimeout` | Operation timed out |
+| -32005 | `AccessDenied` | Access denied |
+| -32006 | `ServiceUnavailable` | Service unavailable |
+| -32010 | `OperationCancelled` | Cancelled by client |
+
+**Error Response Format**:
+```
+Error [-32003]: Symbol not found: MyClass
+Reason: No matching symbol in solution
+Path: C:\Projects\MySolution.sln
+```
+
+### Cursor-based Pagination
+
+Tools support pagination via `pageSize` and `cursor` parameters (`Core/Models/PaginationModels.cs`):
+
+```csharp
+// First request
+SearchSymbols(pattern: "*Service", solutionPath: "...", pageSize: 20)
+
+// Response includes nextCursor
+// Showing 20 of 150 total items (Page 1/8)
+// nextCursor: eyJPZmZzZXQiOjIwLC...
+
+// Next page request
+SearchSymbols(pattern: "*Service", solutionPath: "...", cursor: "eyJPZmZzZXQiOjIwLC...")
+```
+
+**Cursor Features**:
+- Base64-encoded JSON containing offset and query hash
+- 24-hour expiration
+- Query hash validation prevents cursor reuse with different parameters
+
+### Request Cancellation
+
+Operations support cancellation via `CancellationManager` (`Core/Services/CancellationManager.cs`):
+
+- Tracks in-progress requests with unique IDs
+- Supports MCP `notifications/cancelled` pattern
+- Automatic timeout (default: 5 minutes)
+- Proper cleanup of stale entries
+
+**Request States**: `Running` → `Completed` | `Cancelled` | `Failed`
+
+### OAuth 2.0 Authentication (Optional)
+
+For remote deployments, OAuth 2.0 is available (`Core/Authentication/`):
+
+**Configuration** (`appsettings.json`):
+```json
+{
+  "OAuth": {
+    "Enabled": true,
+    "Issuer": "https://auth.example.com",
+    "AuthorizationEndpoint": "https://auth.example.com/authorize",
+    "TokenEndpoint": "https://auth.example.com/token",
+    "ClientId": "roslyn-mcp-server",
+    "ResourceIdentifier": "mcp://roslyn-mcp-server",
+    "Scopes": ["mcp.read", "mcp.write"],
+    "Pkce": {
+      "Required": true,
+      "CodeChallengeMethod": "S256"
+    }
+  }
+}
+```
+
+**Features**:
+- OAuth 2.1 Authorization Code Flow
+- PKCE (Proof Key for Code Exchange) - mandatory per MCP spec
+- Resource Indicators (RFC 8707)
+- Protected Resource Metadata (RFC 9728)
+- Secure token storage (DPAPI on Windows, AES on other platforms)
+- Automatic token refresh
+
+**Token Storage Options**:
+- `InMemoryTokenStorage` - Development/testing
+- `EncryptedFileTokenStorage` - Production (default)
+- `EnvironmentTokenStorage` - Container environments
+
+## Registered Services
+
+Services registered in `Program.cs` for each module:
+
+```csharp
+// Core services
+builder.Services.AddSingleton<CodeAnalysisService>();
+builder.Services.AddSingleton<SymbolSearchService>();
+builder.Services.AddSingleton<SecurityValidator>();
+
+// MCP protocol services
+builder.Services.AddSingleton<McpErrorHandler>();        // Error handling
+builder.Services.AddSingleton<CancellationManager>();    // Cancellation
+builder.Services.AddSingleton<CancellableOperation>();   // Cancellable ops
+
+// Caching
+builder.Services.AddSingleton<MultiLevelCacheManager>();
+builder.Services.AddMemoryCache();
+```
