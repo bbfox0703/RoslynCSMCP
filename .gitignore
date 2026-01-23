@@ -431,6 +431,9 @@ FodyWeavers.xsd
 .claude/
 nul
 
+# Anthropic / Claude Code agents metadata
+.agents/
+
 # repos specified
 
 # Docker local directories
