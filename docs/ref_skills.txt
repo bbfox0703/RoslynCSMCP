@@ -1,0 +1,6 @@
+# Windows npm install:
+# winget install Volta.Volta
+# volta install node@24
+
+npx skills add https://github.com/anthropics/skills --skill skill-creator
+npx skills add https://github.com/anthropics/skills --skill mcp-builder

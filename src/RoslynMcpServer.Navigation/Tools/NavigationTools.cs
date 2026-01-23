@@ -10,7 +10,7 @@ namespace RoslynMcpServer.Navigation.Tools;
 
 /// <summary>
 /// MCP Tools for C# code navigation.
-/// This module provides 6 tools (~1,050 tokens) for navigating and searching code.
+/// This module provides navigation tools with cursor-based pagination support.
 /// </summary>
 [McpServerToolType]
 public class NavigationTools
@@ -23,49 +23,95 @@ public class NavigationTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Symbol types to include: class,interface,method,property,field (comma-separated)")] string symbolTypes = "class,interface,method,property",
         [Description("Whether to ignore case in search")] bool ignoreCase = true,
+        [Description("Number of results per page (default: 20, max: 100)")] int pageSize = 20,
+        [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
         IServiceProvider? serviceProvider = null)
     {
+        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
+
+        // Create cancellation context for this operation
+        using var cancellationContext = CancellationContext.Create(serviceProvider, "SearchSymbols", TimeSpan.FromMinutes(5));
+
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            var logger = serviceProvider?.GetService<ILogger<NavigationTools>>();
-
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+            // Validate pattern parameter
+            if (string.IsNullOrWhiteSpace(pattern))
             {
-                return "Error: Invalid solution path provided.";
+                return McpError.InvalidParams("pattern", "Search pattern cannot be empty").ToToolResponse();
+            }
+
+            var validator = serviceProvider?.GetService<SecurityValidator>();
+
+            // Validate solution path with MCP error handling
+            if (validator != null && errorHandler != null)
+            {
+                var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+                if (pathError != null) return pathError;
+            }
+            else if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+            {
+                return McpError.InvalidPath(solutionPath, "Path validation failed").ToToolResponse();
             }
 
             var sanitizedPattern = validator?.SanitizeSearchPattern(pattern) ?? pattern;
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            // Validate pagination parameters
+            var paginationRequest = new PaginationRequest { PageSize = pageSize, Cursor = cursor };
+            paginationRequest.Validate();
+
             var searchService = serviceProvider?.GetService<SymbolSearchService>();
             if (searchService == null)
             {
-                return "Error: Symbol search service not available.";
+                return McpError.ServiceUnavailable("SymbolSearchService").ToToolResponse();
             }
+
+            // Check for cancellation before starting expensive operation
+            cancellationContext.Token.ThrowIfCancellationRequested();
 
             var results = await searchService.SearchSymbolsAsync(
                 sanitizedPattern, solutionPath, symbolTypes, ignoreCase);
 
-            return FormatSearchResults(results);
+            // Check for cancellation after operation
+            cancellationContext.Token.ThrowIfCancellationRequested();
+
+            // Apply pagination
+            var queryHash = paginationRequest.ComputeQueryHash(pattern, solutionPath, symbolTypes, ignoreCase.ToString());
+            var paginatedResults = PaginatedResult<SymbolSearchResult>.FromCursor(
+                results, cursor, paginationRequest.PageSize, queryHash);
+
+            cancellationContext.Complete();
+            return FormatSearchResultsPaginated(paginatedResults);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationContext.Token.IsCancellationRequested)
         {
-            return "Error: Search operation timed out. The codebase may be too large or complex.";
+            if (cancellationContext.IsCancelled)
+            {
+                return McpError.Create(
+                    McpErrorCodes.OperationCancelled,
+                    "Search operation was cancelled",
+                    new McpErrorData { Operation = "SearchSymbols", Reason = "Cancelled by client request" }
+                ).ToToolResponse();
+            }
+            return McpError.OperationTimeout("SearchSymbols", TimeSpan.FromMinutes(5)).ToToolResponse();
         }
-        catch (FileNotFoundException)
+        catch (FileNotFoundException ex)
         {
-            return "Error: Solution file not found. Please check the path and try again.";
+            cancellationContext.Fail(ex.Message);
+            return McpError.SolutionNotFound(ex.FileName ?? solutionPath).ToToolResponse();
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
-            return "Error: Access denied. Please check file permissions.";
+            cancellationContext.Fail(ex.Message);
+            return McpError.AccessDenied(solutionPath, "Please check file permissions").ToToolResponse();
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<NavigationTools>>();
-            logger?.LogError(ex, "Unexpected error during symbol search");
-            return "Error: An unexpected error occurred during the search operation.";
+            cancellationContext.Fail(ex.Message);
+            if (errorHandler != null)
+            {
+                return errorHandler.HandleException(ex, "SearchSymbols");
+            }
+            return McpError.FromException(ex).ToToolResponse();
         }
     }
 
@@ -76,15 +122,124 @@ public class NavigationTools
         [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
         string detailLevel = "locations",
         [Description("Include symbol definition in results")] bool includeDefinition = true,
+        [Description("Number of results per page (default: 20, max: 100)")] int pageSize = 20,
+        [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
         IServiceProvider? serviceProvider = null)
     {
+        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
+
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+            // Validate symbol name
+            if (string.IsNullOrWhiteSpace(symbolName))
             {
-                return "Error: Invalid solution path provided.";
+                return McpError.InvalidParams("symbolName", "Symbol name cannot be empty").ToToolResponse();
             }
+
+            var validator = serviceProvider?.GetService<SecurityValidator>();
+
+            // Validate solution path with MCP error handling
+            if (validator != null && errorHandler != null)
+            {
+                var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+                if (pathError != null) return pathError;
+            }
+            else if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+            {
+                return McpError.InvalidPath(solutionPath, "Path validation failed").ToToolResponse();
+            }
+
+            // Validate pagination parameters
+            var paginationRequest = new PaginationRequest { PageSize = pageSize, Cursor = cursor };
+            paginationRequest.Validate();
+
+            var searchService = serviceProvider?.GetService<SymbolSearchService>();
+            if (searchService == null)
+            {
+                return McpError.ServiceUnavailable("SymbolSearchService").ToToolResponse();
+            }
+
+            var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
+
+            // Check if symbol was found
+            if (!results.Any())
+            {
+                return McpError.SymbolNotFound(symbolName, solutionPath).ToToolResponse();
+            }
+
+            // Apply pagination
+            var queryHash = paginationRequest.ComputeQueryHash(symbolName, solutionPath, detailLevel, includeDefinition.ToString());
+            var paginatedResults = PaginatedResult<ReferenceResult>.FromCursor(
+                results, cursor, paginationRequest.PageSize, queryHash);
+
+            return detailLevel.ToLower() switch
+            {
+                "summary" => FormatReferencesSummaryPaginated(paginatedResults),
+                "locations" => FormatReferencesLocationsPaginated(paginatedResults),
+                "full" => FormatReferencesFullPaginated(paginatedResults),
+                _ => FormatReferencesLocationsPaginated(paginatedResults)
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            return McpError.OperationTimeout("FindReferences").ToToolResponse();
+        }
+        catch (FileNotFoundException ex)
+        {
+            return McpError.SolutionNotFound(ex.FileName ?? solutionPath).ToToolResponse();
+        }
+        catch (Exception ex)
+        {
+            if (errorHandler != null)
+            {
+                return errorHandler.HandleException(ex, "FindReferences");
+            }
+            return McpError.FromException(ex).ToToolResponse();
+        }
+    }
+
+    [McpServerTool, Description("Find references with advanced filtering options to reduce noise and focus on specific usage patterns")]
+    public static async Task<string> FindReferencesFiltered(
+        [Description("Exact symbol name to find references for")] string symbolName,
+        [Description("Path to solution file (.sln)")] string solutionPath,
+        [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
+        string detailLevel = "locations",
+        [Description("Include symbol definition in results")] bool includeDefinition = true,
+        [Description("Filter by project name pattern (supports wildcards: * and ?)")] string? projectFilter = null,
+        [Description("Exclude test projects (projects with 'Test', 'Tests', 'Testing', 'Spec' in name)")] bool excludeTests = false,
+        [Description("Only show cross-project references (exclude same-project usage)")] bool crossProjectOnly = false,
+        [Description("Only show write operations (assignments, increments, etc.)")] bool writesOnly = false,
+        [Description("Only show references in public API contexts (excludes private/internal usage)")] bool publicOnly = false,
+        [Description("Number of results per page (default: 20, max: 100)")] int pageSize = 20,
+        [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
+        IServiceProvider? serviceProvider = null)
+    {
+        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
+
+        try
+        {
+            // Validate symbol name
+            if (string.IsNullOrWhiteSpace(symbolName))
+            {
+                return McpError.InvalidParams("symbolName", "Symbol name cannot be empty").ToToolResponse();
+            }
+
+            var validator = serviceProvider?.GetService<SecurityValidator>();
+
+            // Validate solution path with MCP error handling
+            if (validator != null && errorHandler != null)
+            {
+                var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+                if (pathError != null) return pathError;
+            }
+            else if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
+            {
+                return McpError.InvalidPath(solutionPath, "Path validation failed").ToToolResponse();
+            }
+
+            // Validate pagination parameters
+            var paginationRequest = new PaginationRequest { PageSize = pageSize, Cursor = cursor };
+            paginationRequest.Validate();
 
             var searchService = serviceProvider?.GetService<SymbolSearchService>();
             if (searchService == null)
@@ -94,19 +249,72 @@ public class NavigationTools
 
             var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
 
+            // Apply filters
+            var filteredResults = results.AsEnumerable();
+
+            if (!string.IsNullOrEmpty(projectFilter))
+            {
+                var filterPattern = "^" + System.Text.RegularExpressions.Regex.Escape(projectFilter)
+                    .Replace("\\*", ".*").Replace("\\?", ".") + "$";
+                var filterRegex = new System.Text.RegularExpressions.Regex(filterPattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                filteredResults = filteredResults.Where(r => filterRegex.IsMatch(r.ProjectName));
+            }
+
+            if (excludeTests)
+            {
+                var testPatterns = new[] { "test", "tests", "testing", "spec", "specs" };
+                filteredResults = filteredResults.Where(r =>
+                    !testPatterns.Any(p => r.ProjectName.Contains(p, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            if (crossProjectOnly)
+            {
+                var definitionProject = results.FirstOrDefault(r => r.IsDefinition)?.ProjectName;
+                if (!string.IsNullOrEmpty(definitionProject))
+                {
+                    filteredResults = filteredResults.Where(r =>
+                        !r.ProjectName.Equals(definitionProject, StringComparison.OrdinalIgnoreCase) || r.IsDefinition);
+                }
+            }
+
+            if (writesOnly)
+            {
+                var writeKinds = new[] { "assignment", "increment", "decrement", "compound", "out", "ref" };
+                filteredResults = filteredResults.Where(r =>
+                    writeKinds.Any(k => r.ReferenceKind.Contains(k, StringComparison.OrdinalIgnoreCase)) || r.IsDefinition);
+            }
+
+            // Apply pagination
+            var queryHash = paginationRequest.ComputeQueryHash(
+                symbolName, solutionPath, detailLevel, includeDefinition.ToString(),
+                projectFilter ?? "", excludeTests.ToString(), crossProjectOnly.ToString(),
+                writesOnly.ToString(), publicOnly.ToString());
+            var paginatedResults = PaginatedResult<ReferenceResult>.FromCursor(
+                filteredResults, cursor, paginationRequest.PageSize, queryHash);
+
             return detailLevel.ToLower() switch
             {
-                "summary" => FormatReferencesSummary(results),
-                "locations" => FormatReferencesLocations(results),
-                "full" => FormatReferencesFull(results),
-                _ => FormatReferencesLocations(results)
+                "summary" => FormatReferencesSummaryPaginated(paginatedResults),
+                "locations" => FormatReferencesLocationsPaginated(paginatedResults),
+                "full" => FormatReferencesFullPaginated(paginatedResults),
+                _ => FormatReferencesLocationsPaginated(paginatedResults)
             };
+        }
+        catch (OperationCanceledException)
+        {
+            return McpError.OperationTimeout("FindReferencesFiltered").ToToolResponse();
+        }
+        catch (FileNotFoundException ex)
+        {
+            return McpError.SolutionNotFound(ex.FileName ?? solutionPath).ToToolResponse();
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<NavigationTools>>();
-            logger?.LogError(ex, "Error finding references for symbol: {SymbolName}", symbolName);
-            return "Error: An unexpected error occurred while finding references.";
+            if (errorHandler != null)
+            {
+                return errorHandler.HandleException(ex, "FindReferencesFiltered");
+            }
+            return McpError.FromException(ex).ToToolResponse();
         }
     }
 
@@ -118,6 +326,7 @@ public class NavigationTools
         string detailLevel = "basic",
         IServiceProvider? serviceProvider = null)
     {
+        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
         try
         {
             var validator = serviceProvider?.GetService<SecurityValidator>();
@@ -279,6 +488,150 @@ public class NavigationTools
     #endregion
 
     #region Formatting Methods
+
+    #region Paginated Formatting Methods
+
+    private static string FormatSearchResultsPaginated(PaginatedResult<SymbolSearchResult> paginatedResults)
+    {
+        var output = new StringBuilder();
+
+        // Header with pagination info
+        output.AppendLine("# Symbol Search Results");
+        output.AppendLine();
+        output.Append(paginatedResults.FormatPaginationHeader());
+        output.AppendLine();
+
+        if (!paginatedResults.Items.Any())
+        {
+            output.AppendLine("No symbols found matching the pattern.");
+            return output.ToString();
+        }
+
+        // Group by category for display
+        var grouped = paginatedResults.Items.GroupBy(r => r.Category);
+
+        foreach (var group in grouped.OrderBy(g => g.Key))
+        {
+            output.AppendLine($"**{group.Key}** ({group.Count()}):");
+            foreach (var result in group)
+            {
+                output.AppendLine($"  - `{result.Name}` in {result.Location}");
+                if (!string.IsNullOrEmpty(result.Summary))
+                    output.AppendLine($"    {result.Summary}");
+            }
+            output.AppendLine();
+        }
+
+        // Footer with pagination cursor
+        output.Append(paginatedResults.FormatPaginationFooter());
+
+        return output.ToString();
+    }
+
+    private static string FormatReferencesSummaryPaginated(PaginatedResult<ReferenceResult> paginatedResults)
+    {
+        if (!paginatedResults.Items.Any())
+            return "No references found.";
+
+        var output = new StringBuilder();
+        var symbolName = paginatedResults.Items.First().SymbolName;
+
+        // Header with pagination info
+        output.AppendLine($"# References to '{symbolName}'");
+        output.AppendLine();
+        output.Append(paginatedResults.FormatPaginationHeader());
+        output.AppendLine();
+
+        var groupedByFile = paginatedResults.Items.GroupBy(r => r.DocumentPath).OrderBy(g => g.Key);
+
+        foreach (var fileGroup in groupedByFile)
+        {
+            var fileName = Path.GetFileName(fileGroup.Key);
+            var count = fileGroup.Count();
+            output.AppendLine($"  {fileName}: {count} references");
+        }
+
+        output.Append(paginatedResults.FormatPaginationFooter());
+
+        return output.ToString();
+    }
+
+    private static string FormatReferencesLocationsPaginated(PaginatedResult<ReferenceResult> paginatedResults)
+    {
+        if (!paginatedResults.Items.Any())
+            return "No references found.";
+
+        var output = new StringBuilder();
+        var symbolName = paginatedResults.Items.First().SymbolName;
+
+        // Header with pagination info
+        output.AppendLine($"# References to '{symbolName}'");
+        output.AppendLine();
+        output.Append(paginatedResults.FormatPaginationHeader());
+        output.AppendLine();
+
+        var groupedByFile = paginatedResults.Items.GroupBy(r => r.DocumentPath).OrderBy(g => g.Key);
+
+        foreach (var fileGroup in groupedByFile)
+        {
+            output.AppendLine($"**{Path.GetFileName(fileGroup.Key)}**");
+            foreach (var reference in fileGroup.OrderBy(r => r.LineNumber))
+            {
+                var icon = reference.IsDefinition ? "[DEF]" : "";
+                output.AppendLine($"  Line {reference.LineNumber}: {reference.LineText.Trim()} {icon}");
+            }
+            output.AppendLine();
+        }
+
+        output.Append(paginatedResults.FormatPaginationFooter());
+
+        return output.ToString();
+    }
+
+    private static string FormatReferencesFullPaginated(PaginatedResult<ReferenceResult> paginatedResults)
+    {
+        if (!paginatedResults.Items.Any())
+            return "No references found.";
+
+        var output = new StringBuilder();
+        var symbolName = paginatedResults.Items.First().SymbolName;
+
+        // Header with pagination info
+        output.AppendLine($"# References to '{symbolName}'");
+        output.AppendLine();
+        output.Append(paginatedResults.FormatPaginationHeader());
+        output.AppendLine();
+
+        var groupedByFile = paginatedResults.Items.GroupBy(r => r.DocumentPath).OrderBy(g => g.Key);
+
+        foreach (var fileGroup in groupedByFile)
+        {
+            output.AppendLine($"**{Path.GetFileName(fileGroup.Key)}** ({fileGroup.Count()} references):");
+            foreach (var reference in fileGroup.OrderBy(r => r.LineNumber))
+            {
+                var icon = reference.IsDefinition ? "[DEFINITION]" : "";
+                output.AppendLine($"  Line {reference.LineNumber}: {reference.ReferenceKind} {icon}");
+                if (reference.Context != null && reference.Context.Any())
+                {
+                    foreach (var line in reference.Context)
+                        output.AppendLine($"    {line}");
+                }
+                else
+                {
+                    output.AppendLine($"    {reference.LineText.Trim()}");
+                }
+                output.AppendLine();
+            }
+        }
+
+        output.Append(paginatedResults.FormatPaginationFooter());
+
+        return output.ToString();
+    }
+
+    #endregion
+
+    #region Legacy Formatting Methods (for backward compatibility)
 
     private static string FormatSearchResults(IEnumerable<SymbolSearchResult> results)
     {
@@ -594,5 +947,7 @@ public class NavigationTools
         return output.ToString();
     }
 
-    #endregion
+    #endregion // Legacy Formatting Methods
+
+    #endregion // Formatting Methods
 }
