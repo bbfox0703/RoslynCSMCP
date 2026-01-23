@@ -140,7 +140,9 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<IncrementalAnalyzer>();
                 builder.Services.AddSingleton<IPersistentCache, FilePersistentCache>();
                 builder.Services.AddSingleton<MultiLevelCacheManager>();
-                builder.Services.AddSingleton<McpErrorHandler>();  // MCP JSON-RPC error handling
+                builder.Services.AddSingleton<McpErrorHandler>();        // MCP JSON-RPC error handling
+                builder.Services.AddSingleton<CancellationManager>();    // Request cancellation tracking
+                builder.Services.AddSingleton<CancellableOperation>();   // Cancellable operation helper
                 builder.Services.AddMemoryCache();
 
                 // Register HeartbeatService as a background service

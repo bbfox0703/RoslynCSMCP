@@ -29,6 +29,9 @@ public class NavigationTools
     {
         var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
 
+        // Create cancellation context for this operation
+        using var cancellationContext = CancellationContext.Create(serviceProvider, "SearchSymbols", TimeSpan.FromMinutes(5));
+
         try
         {
             // Validate pattern parameter
@@ -62,32 +65,48 @@ public class NavigationTools
                 return McpError.ServiceUnavailable("SymbolSearchService").ToToolResponse();
             }
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            // Check for cancellation before starting expensive operation
+            cancellationContext.Token.ThrowIfCancellationRequested();
 
             var results = await searchService.SearchSymbolsAsync(
                 sanitizedPattern, solutionPath, symbolTypes, ignoreCase);
+
+            // Check for cancellation after operation
+            cancellationContext.Token.ThrowIfCancellationRequested();
 
             // Apply pagination
             var queryHash = paginationRequest.ComputeQueryHash(pattern, solutionPath, symbolTypes, ignoreCase.ToString());
             var paginatedResults = PaginatedResult<SymbolSearchResult>.FromCursor(
                 results, cursor, paginationRequest.PageSize, queryHash);
 
+            cancellationContext.Complete();
             return FormatSearchResultsPaginated(paginatedResults);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationContext.Token.IsCancellationRequested)
         {
+            if (cancellationContext.IsCancelled)
+            {
+                return McpError.Create(
+                    McpErrorCodes.OperationCancelled,
+                    "Search operation was cancelled",
+                    new McpErrorData { Operation = "SearchSymbols", Reason = "Cancelled by client request" }
+                ).ToToolResponse();
+            }
             return McpError.OperationTimeout("SearchSymbols", TimeSpan.FromMinutes(5)).ToToolResponse();
         }
         catch (FileNotFoundException ex)
         {
+            cancellationContext.Fail(ex.Message);
             return McpError.SolutionNotFound(ex.FileName ?? solutionPath).ToToolResponse();
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
+            cancellationContext.Fail(ex.Message);
             return McpError.AccessDenied(solutionPath, "Please check file permissions").ToToolResponse();
         }
         catch (Exception ex)
         {
+            cancellationContext.Fail(ex.Message);
             if (errorHandler != null)
             {
                 return errorHandler.HandleException(ex, "SearchSymbols");
