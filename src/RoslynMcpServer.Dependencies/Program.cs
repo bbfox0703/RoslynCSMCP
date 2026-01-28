@@ -70,6 +70,9 @@ class Program
             builder.Services.AddSingleton<IncrementalAnalyzer>();
             builder.Services.AddSingleton<IPersistentCache, FilePersistentCache>();
             builder.Services.AddSingleton<MultiLevelCacheManager>();
+            builder.Services.AddSingleton<McpErrorHandler>();        // MCP error handling service
+            builder.Services.AddSingleton<CancellationManager>();    // Request cancellation tracking
+            builder.Services.AddSingleton<CancellableOperation>();   // Cancellable operation helper
             builder.Services.AddMemoryCache();
 
             builder.Services
