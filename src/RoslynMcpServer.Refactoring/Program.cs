@@ -63,6 +63,7 @@ class Program
             builder.Services.AddSingleton<CodeAnalysisService>();
             builder.Services.AddSingleton<Phase1AnalysisService>();
             builder.Services.AddSingleton<Phase2AnalysisService>();
+            builder.Services.AddSingleton<SymbolSearchService>();
             builder.Services.AddSingleton<ChangeImpactAnalyzer>();
             builder.Services.AddSingleton<SecurityValidator>();
             builder.Services.AddSingleton<DiagnosticLogger>();

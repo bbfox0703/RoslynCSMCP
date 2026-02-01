@@ -92,7 +92,7 @@ public class RefactoringTools
                 return "Error: Change impact analyzer service not available.";
             }
 
-            var results = await analyzer.AnalyzeChangeImpactAsync(solutionPath, symbolName, maxDepth);
+            var results = await analyzer.AnalyzeChangeImpactAsync(symbolName, solutionPath, maxDepth);
 
             return format.ToLowerInvariant() switch
             {
