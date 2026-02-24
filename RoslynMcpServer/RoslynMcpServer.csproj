@@ -32,8 +32,8 @@
   <ItemGroup>
     <!-- MCP Server SDK -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
-    <PackageReference Include="ModelContextProtocol" Version="0.5.0-preview.1" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
+    <PackageReference Include="ModelContextProtocol" Version="1.0.0-rc.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.3" />
 
     <!-- Roslyn packages -->
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.0.0" />
@@ -50,8 +50,8 @@
     <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.0" />
 
     <!-- Additional utilities -->
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.3" />
 
     <!-- NuGet API for package analysis -->
     <PackageReference Include="NuGet.Protocol" Version="6.11.0" ExcludeAssets="runtime" PrivateAssets="all">
