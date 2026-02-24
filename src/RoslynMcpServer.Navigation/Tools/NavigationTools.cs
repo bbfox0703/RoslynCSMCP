@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using RoslynMcpServer.Core.Models;
@@ -25,93 +24,56 @@ public class NavigationTools
         [Description("Whether to ignore case in search")] bool ignoreCase = true,
         [Description("Number of results per page (default: 20, max: 100)")] int pageSize = 20,
         [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
-        IServiceProvider? serviceProvider = null)
+        SymbolSearchService searchService = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!,
+        CancellationToken cancellationToken = default)
     {
-        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
-
-        // Create cancellation context for this operation
-        using var cancellationContext = CancellationContext.Create(serviceProvider, "SearchSymbols", TimeSpan.FromMinutes(5));
-
         try
         {
-            // Validate pattern parameter
             if (string.IsNullOrWhiteSpace(pattern))
-            {
                 return McpError.InvalidParams("pattern", "Search pattern cannot be empty").ToToolResponse();
-            }
 
-            var validator = serviceProvider?.GetService<SecurityValidator>();
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
-            // Validate solution path with MCP error handling
-            if (validator != null && errorHandler != null)
-            {
-                var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
-                if (pathError != null) return pathError;
-            }
-            else if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return McpError.InvalidPath(solutionPath, "Path validation failed").ToToolResponse();
-            }
+            var sanitizedPattern = validator.SanitizeSearchPattern(pattern);
 
-            var sanitizedPattern = validator?.SanitizeSearchPattern(pattern) ?? pattern;
-
-            // Validate pagination parameters
             var paginationRequest = new PaginationRequest { PageSize = pageSize, Cursor = cursor };
             paginationRequest.Validate();
 
-            var searchService = serviceProvider?.GetService<SymbolSearchService>();
-            if (searchService == null)
-            {
-                return McpError.ServiceUnavailable("SymbolSearchService").ToToolResponse();
-            }
-
-            // Check for cancellation before starting expensive operation
-            cancellationContext.Token.ThrowIfCancellationRequested();
+            cancellationToken.ThrowIfCancellationRequested();
 
             var results = await searchService.SearchSymbolsAsync(
                 sanitizedPattern, solutionPath, symbolTypes, ignoreCase);
 
-            // Check for cancellation after operation
-            cancellationContext.Token.ThrowIfCancellationRequested();
+            cancellationToken.ThrowIfCancellationRequested();
 
-            // Apply pagination
             var queryHash = paginationRequest.ComputeQueryHash(pattern, solutionPath, symbolTypes, ignoreCase.ToString());
             var paginatedResults = PaginatedResult<SymbolSearchResult>.FromCursor(
                 results, cursor, paginationRequest.PageSize, queryHash);
 
-            cancellationContext.Complete();
             return FormatSearchResultsPaginated(paginatedResults);
         }
-        catch (OperationCanceledException) when (cancellationContext.Token.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            if (cancellationContext.IsCancelled)
-            {
-                return McpError.Create(
-                    McpErrorCodes.OperationCancelled,
-                    "Search operation was cancelled",
-                    new McpErrorData { Operation = "SearchSymbols", Reason = "Cancelled by client request" }
-                ).ToToolResponse();
-            }
-            return McpError.OperationTimeout("SearchSymbols", TimeSpan.FromMinutes(5)).ToToolResponse();
+            return McpError.Create(
+                McpErrorCodes.OperationCancelled,
+                "Search operation was cancelled",
+                new McpErrorData { Operation = "SearchSymbols", Reason = "Cancelled by client request" }
+            ).ToToolResponse();
         }
         catch (FileNotFoundException ex)
         {
-            cancellationContext.Fail(ex.Message);
             return McpError.SolutionNotFound(ex.FileName ?? solutionPath).ToToolResponse();
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            cancellationContext.Fail(ex.Message);
             return McpError.AccessDenied(solutionPath, "Please check file permissions").ToToolResponse();
         }
         catch (Exception ex)
         {
-            cancellationContext.Fail(ex.Message);
-            if (errorHandler != null)
-            {
-                return errorHandler.HandleException(ex, "SearchSymbols");
-            }
-            return McpError.FromException(ex).ToToolResponse();
+            return errorHandler.HandleException(ex, "SearchSymbols");
         }
     }
 
@@ -124,50 +86,29 @@ public class NavigationTools
         [Description("Include symbol definition in results")] bool includeDefinition = true,
         [Description("Number of results per page (default: 20, max: 100)")] int pageSize = 20,
         [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
-        IServiceProvider? serviceProvider = null)
+        SymbolSearchService searchService = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!,
+        CancellationToken cancellationToken = default)
     {
-        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
-
         try
         {
-            // Validate symbol name
             if (string.IsNullOrWhiteSpace(symbolName))
-            {
                 return McpError.InvalidParams("symbolName", "Symbol name cannot be empty").ToToolResponse();
-            }
 
-            var validator = serviceProvider?.GetService<SecurityValidator>();
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
-            // Validate solution path with MCP error handling
-            if (validator != null && errorHandler != null)
-            {
-                var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
-                if (pathError != null) return pathError;
-            }
-            else if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return McpError.InvalidPath(solutionPath, "Path validation failed").ToToolResponse();
-            }
-
-            // Validate pagination parameters
             var paginationRequest = new PaginationRequest { PageSize = pageSize, Cursor = cursor };
             paginationRequest.Validate();
 
-            var searchService = serviceProvider?.GetService<SymbolSearchService>();
-            if (searchService == null)
-            {
-                return McpError.ServiceUnavailable("SymbolSearchService").ToToolResponse();
-            }
+            cancellationToken.ThrowIfCancellationRequested();
 
             var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
 
-            // Check if symbol was found
             if (!results.Any())
-            {
                 return McpError.SymbolNotFound(symbolName, solutionPath).ToToolResponse();
-            }
 
-            // Apply pagination
             var queryHash = paginationRequest.ComputeQueryHash(symbolName, solutionPath, detailLevel, includeDefinition.ToString());
             var paginatedResults = PaginatedResult<ReferenceResult>.FromCursor(
                 results, cursor, paginationRequest.PageSize, queryHash);
@@ -182,7 +123,11 @@ public class NavigationTools
         }
         catch (OperationCanceledException)
         {
-            return McpError.OperationTimeout("FindReferences").ToToolResponse();
+            return McpError.Create(
+                McpErrorCodes.OperationCancelled,
+                "FindReferences operation was cancelled",
+                new McpErrorData { Operation = "FindReferences", Reason = "Cancelled by client request" }
+            ).ToToolResponse();
         }
         catch (FileNotFoundException ex)
         {
@@ -190,11 +135,7 @@ public class NavigationTools
         }
         catch (Exception ex)
         {
-            if (errorHandler != null)
-            {
-                return errorHandler.HandleException(ex, "FindReferences");
-            }
-            return McpError.FromException(ex).ToToolResponse();
+            return errorHandler.HandleException(ex, "FindReferences");
         }
     }
 
@@ -212,40 +153,23 @@ public class NavigationTools
         [Description("Only show references in public API contexts (excludes private/internal usage)")] bool publicOnly = false,
         [Description("Number of results per page (default: 20, max: 100)")] int pageSize = 20,
         [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
-        IServiceProvider? serviceProvider = null)
+        SymbolSearchService searchService = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!,
+        CancellationToken cancellationToken = default)
     {
-        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
-
         try
         {
-            // Validate symbol name
             if (string.IsNullOrWhiteSpace(symbolName))
-            {
                 return McpError.InvalidParams("symbolName", "Symbol name cannot be empty").ToToolResponse();
-            }
 
-            var validator = serviceProvider?.GetService<SecurityValidator>();
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
-            // Validate solution path with MCP error handling
-            if (validator != null && errorHandler != null)
-            {
-                var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
-                if (pathError != null) return pathError;
-            }
-            else if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return McpError.InvalidPath(solutionPath, "Path validation failed").ToToolResponse();
-            }
-
-            // Validate pagination parameters
             var paginationRequest = new PaginationRequest { PageSize = pageSize, Cursor = cursor };
             paginationRequest.Validate();
 
-            var searchService = serviceProvider?.GetService<SymbolSearchService>();
-            if (searchService == null)
-            {
-                return "Error: Symbol search service not available.";
-            }
+            cancellationToken.ThrowIfCancellationRequested();
 
             var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
 
@@ -284,7 +208,6 @@ public class NavigationTools
                     writeKinds.Any(k => r.ReferenceKind.Contains(k, StringComparison.OrdinalIgnoreCase)) || r.IsDefinition);
             }
 
-            // Apply pagination
             var queryHash = paginationRequest.ComputeQueryHash(
                 symbolName, solutionPath, detailLevel, includeDefinition.ToString(),
                 projectFilter ?? "", excludeTests.ToString(), crossProjectOnly.ToString(),
@@ -302,7 +225,11 @@ public class NavigationTools
         }
         catch (OperationCanceledException)
         {
-            return McpError.OperationTimeout("FindReferencesFiltered").ToToolResponse();
+            return McpError.Create(
+                McpErrorCodes.OperationCancelled,
+                "FindReferencesFiltered operation was cancelled",
+                new McpErrorData { Operation = "FindReferencesFiltered", Reason = "Cancelled by client request" }
+            ).ToToolResponse();
         }
         catch (FileNotFoundException ex)
         {
@@ -310,11 +237,7 @@ public class NavigationTools
         }
         catch (Exception ex)
         {
-            if (errorHandler != null)
-            {
-                return errorHandler.HandleException(ex, "FindReferencesFiltered");
-            }
-            return McpError.FromException(ex).ToToolResponse();
+            return errorHandler.HandleException(ex, "FindReferencesFiltered");
         }
     }
 
@@ -324,22 +247,16 @@ public class NavigationTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Detail level: summary (minimal), basic (balanced), full (comprehensive). Default: basic")]
         string detailLevel = "basic",
-        IServiceProvider? serviceProvider = null)
+        SymbolSearchService searchService = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!,
+        ILogger<NavigationTools> logger = null!,
+        CancellationToken cancellationToken = default)
     {
-        var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var searchService = serviceProvider?.GetService<SymbolSearchService>();
-            if (searchService == null)
-            {
-                return "Error: Symbol search service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var info = await searchService.GetSymbolInfoAsync(symbolName, solutionPath);
 
@@ -353,9 +270,8 @@ public class NavigationTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<NavigationTools>>();
-            logger?.LogError(ex, "Error getting symbol info for: {SymbolName}", symbolName);
-            return "Error: An unexpected error occurred while getting symbol information.";
+            logger.LogError(ex, "Error getting symbol info for: {SymbolName}", symbolName);
+            return errorHandler.HandleException(ex, "GetSymbolInfo");
         }
     }
 
@@ -365,21 +281,16 @@ public class NavigationTools
         [Description("Include member signatures (default: false)")] bool includeMembers = false,
         [Description("Filter by namespace pattern (optional, e.g., 'MyProject.Services')")] string? namespaceFilter = null,
         [Description("Include only public types (default: true)")] bool publicOnly = true,
-        IServiceProvider? serviceProvider = null)
+        ProjectStructureService structureService = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!,
+        ILogger<NavigationTools> logger = null!,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var structureService = serviceProvider?.GetService<ProjectStructureService>();
-            if (structureService == null)
-            {
-                return "Error: Project structure service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             return await structureService.GetStructureAsync(
                 solutionPath,
@@ -389,9 +300,8 @@ public class NavigationTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<NavigationTools>>();
-            logger?.LogError(ex, "Error getting project structure");
-            return $"Error: An unexpected error occurred while getting project structure: {ex.Message}";
+            logger.LogError(ex, "Error getting project structure");
+            return errorHandler.HandleException(ex, "GetProjectStructure");
         }
     }
 
@@ -403,25 +313,18 @@ public class NavigationTools
         [Description("Maximum members to show per type (default: 10, 0=show all)")] int maxMembers = 10,
         [Description("Include member details (default: true)")] bool includeMembers = true,
         [Description("Include documentation comments (default: true)")] bool includeDocumentation = true,
-        IServiceProvider? serviceProvider = null)
+        FileAnalysisService fileAnalysisService = null!,
+        McpErrorHandler errorHandler = null!,
+        ILogger<NavigationTools> logger = null!,
+        CancellationToken cancellationToken = default)
     {
         try
         {
             if (!File.Exists(filePath))
-            {
-                return "Error: File not found.";
-            }
+                return McpError.InvalidParams("filePath", "File not found").ToToolResponse();
 
             if (!filePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Error: File must be a C# source file (.cs)";
-            }
-
-            var fileAnalysisService = serviceProvider?.GetService<FileAnalysisService>();
-            if (fileAnalysisService == null)
-            {
-                return "Error: File analysis service not available.";
-            }
+                return McpError.InvalidParams("filePath", "File must be a C# source file (.cs)").ToToolResponse();
 
             var outline = await fileAnalysisService.GetFileOutlineAsync(filePath);
 
@@ -435,9 +338,8 @@ public class NavigationTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<NavigationTools>>();
-            logger?.LogError(ex, "Error getting file outline for: {FilePath}", filePath);
-            return $"Error: An unexpected error occurred while getting file outline: {ex.Message}";
+            logger.LogError(ex, "Error getting file outline for: {FilePath}", filePath);
+            return errorHandler.HandleException(ex, "GetFileOutline");
         }
     }
 
@@ -448,21 +350,16 @@ public class NavigationTools
         [Description("Output format: summary (names only), normal (balanced), detailed (comprehensive). Default: normal")]
         string format = "normal",
         [Description("Include abstract implementations (default: false)")] bool includeAbstractImplementations = false,
-        IServiceProvider? serviceProvider = null)
+        SymbolSearchService searchService = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!,
+        ILogger<NavigationTools> logger = null!,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var searchService = serviceProvider?.GetService<SymbolSearchService>();
-            if (searchService == null)
-            {
-                return "Error: Symbol search service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var results = await searchService.FindImplementationsAsync(
                 typeName,
@@ -479,9 +376,8 @@ public class NavigationTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<NavigationTools>>();
-            logger?.LogError(ex, "Error finding implementations for: {TypeName}", typeName);
-            return $"Error: An unexpected error occurred while finding implementations: {ex.Message}";
+            logger.LogError(ex, "Error finding implementations for: {TypeName}", typeName);
+            return errorHandler.HandleException(ex, "FindImplementations");
         }
     }
 
