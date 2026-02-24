@@ -24,8 +24,8 @@
 
   <ItemGroup>
     <!-- MCP Server SDK -->
-    <PackageReference Include="ModelContextProtocol" Version="0.5.0-preview.1" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
+    <PackageReference Include="ModelContextProtocol" Version="1.0.0-rc.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.3" />
 
     <!-- MSBuild Locator (required for each MCP server) -->
     <PackageReference Include="Microsoft.Build.Locator" Version="1.11.2" />
@@ -37,7 +37,7 @@
     <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.0" />
 
     <!-- Caching -->
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.3" />
   </ItemGroup>
 
 </Project>

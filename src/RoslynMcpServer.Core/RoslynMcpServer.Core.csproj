@@ -22,14 +22,14 @@
 
     <!-- Logging -->
     <PackageReference Include="Serilog" Version="4.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
 
     <!-- Caching -->
-    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.3" />
 
     <!-- DI -->
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.3" />
 
     <!-- OAuth 2.0 / JWT Authentication -->
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.0" />
