@@ -1,6 +1,4 @@
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using RoslynMcpServer.Core.Models;
 using RoslynMcpServer.Core.Services;
@@ -22,21 +20,14 @@ public class QualityTools
     public static async Task<string> AnalyzeCodeComplexity(
         [Description("Path to solution file")] string solutionPath,
         [Description("Complexity threshold (1-10)")] int threshold = 5,
-        IServiceProvider? serviceProvider = null)
+        CodeAnalysisService analysisService = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var analysisService = serviceProvider?.GetService<CodeAnalysisService>();
-            if (analysisService == null)
-            {
-                return "Error: Code analysis service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var solution = await analysisService.GetSolutionAsync(solutionPath);
             var complexityResults = new List<ComplexityResult>();
@@ -75,9 +66,7 @@ public class QualityTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<QualityTools>>();
-            logger?.LogError(ex, "Error analyzing code complexity");
-            return "Error: An unexpected error occurred during complexity analysis.";
+            return errorHandler.HandleException(ex, "AnalyzeCodeComplexity");
         }
     }
 
@@ -89,16 +78,11 @@ public class QualityTools
         [Description("Comma-separated smell types: LongMethod, LargeClass, LongParameterList, FeatureEnvy, DataClumps, PrimitiveObsession, SwitchStatements, SpeculativeGenerality, MessageChains, MiddleMan. Default: all")]
         string smellTypes = "all",
         [Description("Severity filter: High, Medium, Low, All (default: All)")] string severity = "All",
-        IServiceProvider? serviceProvider = null)
+        Phase1AnalysisService phase1Service = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var phase1Service = serviceProvider?.GetService<Phase1AnalysisService>();
-            if (phase1Service == null)
-            {
-                return "Error: Phase1AnalysisService not available.";
-            }
-
             var smellTypeArray = smellTypes.Equals("all", StringComparison.OrdinalIgnoreCase)
                 ? new[] { "LongMethod", "LargeClass", "LongParameterList", "FeatureEnvy", "DataClumps", "PrimitiveObsession", "SwitchStatements", "SpeculativeGenerality", "MessageChains", "MiddleMan" }
                 : smellTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -109,9 +93,7 @@ public class QualityTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<QualityTools>>();
-            logger?.LogError(ex, "Error finding code smells");
-            return $"Error: An unexpected error occurred while finding code smells: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindCodeSmells");
         }
     }
 
@@ -123,21 +105,14 @@ public class QualityTools
         [Description("Scope: private (private members only), internal (internal members only), public (public members only), all (all members). Default: all")]
         string scope = "all",
         [Description("Include test projects in analysis (default: false)")] bool includeTests = false,
-        IServiceProvider? serviceProvider = null)
+        UnusedCodeAnalyzer analyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var analyzer = serviceProvider?.GetService<UnusedCodeAnalyzer>();
-            if (analyzer == null)
-            {
-                return "Error: Unused code analyzer service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var results = await analyzer.AnalyzeUnusedCodeAsync(solutionPath, scope, includeTests);
 
@@ -150,9 +125,7 @@ public class QualityTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<QualityTools>>();
-            logger?.LogError(ex, "Error finding unused code");
-            return $"Error: An unexpected error occurred while finding unused code: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindUnusedCode");
         }
     }
 
@@ -163,21 +136,14 @@ public class QualityTools
         string format = "normal",
         [Description("Minimum lines to consider duplicate (default: 5)")] int minLines = 5,
         [Description("Similarity threshold percentage 70-100 (default: 90)")] int similarity = 90,
-        IServiceProvider? serviceProvider = null)
+        DuplicateCodeAnalyzer analyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var analyzer = serviceProvider?.GetService<DuplicateCodeAnalyzer>();
-            if (analyzer == null)
-            {
-                return "Error: Duplicate code analyzer service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var results = await analyzer.AnalyzeDuplicateCodeAsync(solutionPath, minLines, similarity);
 
@@ -190,9 +156,7 @@ public class QualityTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<QualityTools>>();
-            logger?.LogError(ex, "Error finding duplicate code");
-            return $"Error: An unexpected error occurred while finding duplicate code: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindDuplicateCode");
         }
     }
 
@@ -204,16 +168,11 @@ public class QualityTools
         [Description("Include string literals (default: true)")] bool includeStrings = true,
         [Description("Include numeric literals (default: true)")] bool includeNumbers = true,
         [Description("Minimum string length to consider (default: 3)")] int minStringLength = 3,
-        IServiceProvider? serviceProvider = null)
+        Phase1AnalysisService phase1Service = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var phase1Service = serviceProvider?.GetService<Phase1AnalysisService>();
-            if (phase1Service == null)
-            {
-                return "Error: Phase1AnalysisService not available.";
-            }
-
             var results = await phase1Service.FindMagicNumbersAsync(
                 solutionPath,
                 includeStrings,
@@ -224,9 +183,7 @@ public class QualityTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<QualityTools>>();
-            logger?.LogError(ex, "Error finding magic numbers");
-            return $"Error: An unexpected error occurred while finding magic numbers: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindMagicNumbers");
         }
     }
 
@@ -239,21 +196,14 @@ public class QualityTools
         string? violationTypes = null,
         [Description("Analysis scope: all, public, internal. Default: all")]
         string scope = "all",
-        IServiceProvider? serviceProvider = null)
+        NamingConventionAnalyzer analyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var analyzer = serviceProvider?.GetService<NamingConventionAnalyzer>();
-            if (analyzer == null)
-            {
-                return "Error: Naming convention analyzer service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             string[]? violationTypesArray = null;
             if (!string.IsNullOrWhiteSpace(violationTypes))
@@ -272,9 +222,7 @@ public class QualityTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<QualityTools>>();
-            logger?.LogError(ex, "Error analyzing naming conventions");
-            return $"Error: An unexpected error occurred while analyzing naming conventions: {ex.Message}";
+            return errorHandler.HandleException(ex, "AnalyzeNamingConventions");
         }
     }
 

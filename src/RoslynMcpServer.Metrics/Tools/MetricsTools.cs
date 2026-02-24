@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using RoslynMcpServer.Core.Models;
 using RoslynMcpServer.Core.Services;
@@ -20,21 +18,14 @@ public class MetricsTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
         string format = "normal",
-        IServiceProvider? serviceProvider = null)
+        CodeMetricsService metricsService = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var metricsService = serviceProvider?.GetService<CodeMetricsService>();
-            if (metricsService == null)
-            {
-                return "Error: Code metrics service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             // GetMetricsAsync returns formatted string directly
             var groupBy = format.ToLowerInvariant() == "detailed" ? "namespace" : "project";
@@ -42,9 +33,7 @@ public class MetricsTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<MetricsTools>>();
-            logger?.LogError(ex, "Error getting code metrics");
-            return $"Error: An unexpected error occurred while getting code metrics: {ex.Message}";
+            return errorHandler.HandleException(ex, "GetCodeMetrics");
         }
     }
 
@@ -53,25 +42,16 @@ public class MetricsTools
         [Description("Path to C# source file (.cs)")] string filePath,
         [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
         string format = "normal",
-        IServiceProvider? serviceProvider = null)
+        FileStatisticsAnalyzer analyzer = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
             if (!File.Exists(filePath))
-            {
-                return "Error: File not found.";
-            }
+                return errorHandler.ValidationError("filePath", "File not found");
 
             if (!filePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Error: File must be a C# source file (.cs)";
-            }
-
-            var analyzer = serviceProvider?.GetService<FileStatisticsAnalyzer>();
-            if (analyzer == null)
-            {
-                return "Error: File statistics analyzer service not available.";
-            }
+                return errorHandler.ValidationError("filePath", "File must be a C# source file (.cs)");
 
             var results = await analyzer.AnalyzeFileStatisticsAsync(filePath);
 
@@ -84,9 +64,7 @@ public class MetricsTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<MetricsTools>>();
-            logger?.LogError(ex, "Error getting file statistics");
-            return $"Error: An unexpected error occurred while getting file statistics: {ex.Message}";
+            return errorHandler.HandleException(ex, "GetFileStatistics");
         }
     }
 
@@ -97,21 +75,14 @@ public class MetricsTools
         string format = "normal",
         [Description("Scope filter: public (public only), all (all symbols). Default: public")]
         string scope = "public",
-        IServiceProvider? serviceProvider = null)
+        DocumentationAnalyzer analyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var analyzer = serviceProvider?.GetService<DocumentationAnalyzer>();
-            if (analyzer == null)
-            {
-                return "Error: Documentation analyzer service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var results = await analyzer.AnalyzeDocumentationCoverageAsync(solutionPath, scope);
 
@@ -124,21 +95,11 @@ public class MetricsTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<MetricsTools>>();
-            logger?.LogError(ex, "Error analyzing documentation coverage");
-            return $"Error: An unexpected error occurred while analyzing documentation coverage: {ex.Message}";
+            return errorHandler.HandleException(ex, "AnalyzeDocumentationCoverage");
         }
     }
 
     #region Formatting Methods
-
-    private static string FormatCodeMetrics(object metrics, string format)
-    {
-        var output = new StringBuilder();
-        output.AppendLine("# Solution Code Metrics");
-        output.AppendLine("(Detailed metrics from CodeMetricsService)");
-        return output.ToString();
-    }
 
     private static string FormatFileStatisticsSummary(FileStatisticsResults results)
     {

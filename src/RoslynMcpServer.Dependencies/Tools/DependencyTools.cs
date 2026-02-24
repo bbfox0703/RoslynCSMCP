@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using RoslynMcpServer.Core.Models;
 using RoslynMcpServer.Core.Services;
@@ -20,30 +18,21 @@ public class DependencyTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
-        IServiceProvider? serviceProvider = null)
+        CodeAnalysisService analysisService = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var analysisService = serviceProvider?.GetService<CodeAnalysisService>();
-            if (analysisService == null)
-            {
-                return "Error: Code analysis service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var results = await analysisService.AnalyzeDependenciesAsync(solutionPath);
             return FormatDependencyAnalysis(results, format);
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<DependencyTools>>();
-            logger?.LogError(ex, "Error analyzing dependencies");
-            return $"Error: An unexpected error occurred while analyzing dependencies: {ex.Message}";
+            return errorHandler.HandleException(ex, "AnalyzeDependencies");
         }
     }
 
@@ -53,29 +42,20 @@ public class DependencyTools
         [Description("Output format: text (hierarchical text), mermaid (diagram), json (structured). Default: text")]
         string format = "text",
         [Description("Include package dependencies (default: false)")] bool includePackages = false,
-        IServiceProvider? serviceProvider = null)
+        DependencyGraphService graphService = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var graphService = serviceProvider?.GetService<DependencyGraphService>();
-            if (graphService == null)
-            {
-                return "Error: Dependency graph service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             return await graphService.GetDependencyGraphAsync(solutionPath, format, includePackages);
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<DependencyTools>>();
-            logger?.LogError(ex, "Error getting dependency graph");
-            return $"Error: An unexpected error occurred while getting dependency graph: {ex.Message}";
+            return errorHandler.HandleException(ex, "GetDependencyGraph");
         }
     }
 
@@ -86,21 +66,14 @@ public class DependencyTools
         string format = "normal",
         [Description("Include NuGet package analysis (default: true)")] bool includeNuGetPackages = true,
         [Description("Include project reference analysis (default: true)")] bool includeProjectReferences = true,
-        IServiceProvider? serviceProvider = null)
+        UnusedDependencyAnalyzer analyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var analyzer = serviceProvider?.GetService<UnusedDependencyAnalyzer>();
-            if (analyzer == null)
-            {
-                return "Error: Unused dependency analyzer service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var results = await analyzer.AnalyzeUnusedDependenciesAsync(solutionPath, includeNuGetPackages, includeProjectReferences);
 
@@ -113,9 +86,7 @@ public class DependencyTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<DependencyTools>>();
-            logger?.LogError(ex, "Error finding unused dependencies");
-            return $"Error: An unexpected error occurred while finding unused dependencies: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindUnusedDependencies");
         }
     }
 
@@ -126,21 +97,14 @@ public class DependencyTools
         string format = "normal",
         [Description("Check for available updates (default: true)")] bool checkUpdates = true,
         [Description("Check for version conflicts (default: true)")] bool checkConflicts = true,
-        IServiceProvider? serviceProvider = null)
+        PackageAnalysisService analyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var analyzer = serviceProvider?.GetService<PackageAnalysisService>();
-            if (analyzer == null)
-            {
-                return "Error: Package analysis service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var results = await analyzer.AnalyzePackagesAsync(solutionPath, checkUpdates, checkConflicts);
 
@@ -153,9 +117,7 @@ public class DependencyTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<DependencyTools>>();
-            logger?.LogError(ex, "Error analyzing packages");
-            return $"Error: An unexpected error occurred while analyzing packages: {ex.Message}";
+            return errorHandler.HandleException(ex, "AnalyzePackages");
         }
     }
 
@@ -164,21 +126,14 @@ public class DependencyTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
-        IServiceProvider? serviceProvider = null)
+        Phase2AnalysisService analyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var analyzer = serviceProvider?.GetService<Phase2AnalysisService>();
-            if (analyzer == null)
-            {
-                return "Error: Phase2 analysis service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var results = await analyzer.AnalyzeDIContainerAsync(solutionPath);
 
@@ -191,9 +146,7 @@ public class DependencyTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<DependencyTools>>();
-            logger?.LogError(ex, "Error analyzing DI container");
-            return $"Error: An unexpected error occurred while analyzing DI container: {ex.Message}";
+            return errorHandler.HandleException(ex, "AnalyzeDIContainer");
         }
     }
 

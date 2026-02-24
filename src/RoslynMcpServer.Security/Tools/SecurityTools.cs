@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using RoslynMcpServer.Core.Models;
 using RoslynMcpServer.Core.Services;
@@ -23,21 +21,14 @@ public class SecurityTools
         [Description("Categories to check (comma-separated): sql-injection, secrets, crypto, path-traversal, deserialization, all. Default: all")]
         string categories = "all",
         [Description("Minimum severity: Critical, High, Medium, Low. Default: Low")] string minSeverity = "Low",
-        IServiceProvider? serviceProvider = null)
+        SecurityIssueAnalyzer analyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var analyzer = serviceProvider?.GetService<SecurityIssueAnalyzer>();
-            if (analyzer == null)
-            {
-                return "Error: Security issue analyzer service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var categoryArray = categories.Equals("all", StringComparison.OrdinalIgnoreCase)
                 ? new[] { "sql-injection", "secrets", "crypto", "path-traversal", "deserialization" }
@@ -54,9 +45,7 @@ public class SecurityTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<SecurityTools>>();
-            logger?.LogError(ex, "Error finding security issues");
-            return $"Error: An unexpected error occurred while finding security issues: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindSecurityIssues");
         }
     }
 
@@ -67,23 +56,15 @@ public class SecurityTools
         string format = "normal",
         [Description("Issue types to check (comma-separated): MutableStatic, UnsynchronizedAccess, UnsafeCollection, DoubleCheckLocking, all. Default: all")]
         string issueTypes = "all",
-        IServiceProvider? serviceProvider = null)
+        Phase2AnalysisService analyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
-            var analyzer = serviceProvider?.GetService<Phase2AnalysisService>();
-            if (analyzer == null)
-            {
-                return "Error: Phase2 analysis service not available.";
-            }
-
-            // Parse issue types to determine which checks to run
             var checkStaticFields = issueTypes.Contains("MutableStatic", StringComparison.OrdinalIgnoreCase) ||
                                    issueTypes.Equals("all", StringComparison.OrdinalIgnoreCase);
             var checkSharedState = issueTypes.Contains("UnsynchronizedAccess", StringComparison.OrdinalIgnoreCase) ||
@@ -103,9 +84,7 @@ public class SecurityTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<SecurityTools>>();
-            logger?.LogError(ex, "Error finding thread safety issues");
-            return $"Error: An unexpected error occurred while finding thread safety issues: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindThreadSafetyIssues");
         }
     }
 
@@ -116,23 +95,15 @@ public class SecurityTools
         string format = "normal",
         [Description("Issue types to check (comma-separated): EmptyCatch, SwallowedException, GenericCatch, MissingUsing, all. Default: all")]
         string issueTypes = "all",
-        IServiceProvider? serviceProvider = null)
+        Phase2AnalysisService analyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
-            var analyzer = serviceProvider?.GetService<Phase2AnalysisService>();
-            if (analyzer == null)
-            {
-                return "Error: Phase2 analysis service not available.";
-            }
-
-            // Parse issue types to determine which checks to run
             var checkEmptyCatch = issueTypes.Contains("EmptyCatch", StringComparison.OrdinalIgnoreCase) ||
                                  issueTypes.Equals("all", StringComparison.OrdinalIgnoreCase);
             var checkSwallowedExceptions = issueTypes.Contains("SwallowedException", StringComparison.OrdinalIgnoreCase) ||
@@ -152,9 +123,7 @@ public class SecurityTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<SecurityTools>>();
-            logger?.LogError(ex, "Error analyzing exception handling");
-            return $"Error: An unexpected error occurred while analyzing exception handling: {ex.Message}";
+            return errorHandler.HandleException(ex, "AnalyzeExceptionHandling");
         }
     }
 

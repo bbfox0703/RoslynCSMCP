@@ -23,11 +23,15 @@
 [McpServerTool, Description("Tool description")]
 public static async Task<string> MyNewTool(
     [Description("Parameter description")] string param1,
-    IServiceProvider? serviceProvider = null)
+    MyRequiredService myService = null!,
+    SecurityValidator validator = null!,
+    McpErrorHandler errorHandler = null!)
 {
     // Implementation
 }
 ```
+
+> **SDK 1.0.0-rc.1 要求**：使用直接 DI 注入模式，以 `= null!` 作為預設值（由 DI 容器填入）。不再使用 `IServiceProvider?` 或 `GetService<T>()` 的舊模式。
 
 2. If adding a new service, place it in `RoslynMcpServer.Core/Services/` and register it in the module's `Program.cs`.
 
@@ -39,7 +43,8 @@ Add the method to the appropriate tools file in `RoslynMcpServer/Tools/`.
 
 - [ ] Decorate with `[McpServerTool]` and `[Description]` attributes
 - [ ] Add `[Description]` to all parameters
-- [ ] Include `IServiceProvider? serviceProvider = null` as last parameter
+- [ ] Inject services directly as parameters with `= null!` (SDK 1.0.0-rc.1 direct DI pattern)
+- [ ] Add `McpErrorHandler errorHandler = null!` as last injected parameter
 - [ ] Use `SecurityValidator` for path/input validation
 - [ ] Use `McpError` for standardized error responses
 - [ ] Use `CancellationContext` for long-running operations
@@ -55,39 +60,36 @@ public static async Task<string> SearchSymbols(
     [Description("Solution path")] string solutionPath,
     [Description("Page size (default: 20, max: 100)")] int pageSize = 20,
     [Description("Pagination cursor")] string? cursor = null,
-    IServiceProvider? serviceProvider = null)
+    MySearchService searchService = null!,
+    SecurityValidator validator = null!,
+    McpErrorHandler errorHandler = null!,
+    CancellationToken cancellationToken = default)
 {
-    var errorHandler = serviceProvider?.GetService<McpErrorHandler>();
-    using var ctx = CancellationContext.Create(serviceProvider, "SearchSymbols");
-
     try
     {
         if (string.IsNullOrWhiteSpace(pattern))
             return McpError.InvalidParams("pattern", "Cannot be empty").ToToolResponse();
 
-        var validator = serviceProvider?.GetService<SecurityValidator>();
-        var pathError = validator?.ValidateSolutionPath(solutionPath, errorHandler);
+        var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
         if (pathError != null) return pathError;
 
-        ctx.Token.ThrowIfCancellationRequested();
+        cancellationToken.ThrowIfCancellationRequested();
 
-        var results = await DoSearchAsync(pattern, solutionPath);
-        var paginated = PaginatedResult<Result>.FromCursor(results, cursor, pageSize);
+        var results = await searchService.SearchAsync(pattern, solutionPath);
+        var paginationRequest = new PaginationRequest { PageSize = pageSize, Cursor = cursor };
+        paginationRequest.Validate();
+        var queryHash = paginationRequest.ComputeQueryHash(pattern, solutionPath);
+        var paginated = PaginatedResult<Result>.FromCursor(results, cursor, paginationRequest.PageSize, queryHash);
 
-        ctx.Complete();
         return FormatResults(paginated);
     }
-    catch (OperationCanceledException) when (ctx.Token.IsCancellationRequested)
+    catch (OperationCanceledException)
     {
-        return ctx.IsCancelled
-            ? McpError.Create(McpErrorCodes.OperationCancelled, "Cancelled").ToToolResponse()
-            : McpError.OperationTimeout("SearchSymbols").ToToolResponse();
+        return McpError.Create(McpErrorCodes.OperationCancelled, "Cancelled").ToToolResponse();
     }
     catch (Exception ex)
     {
-        ctx.Fail(ex.Message);
-        return errorHandler?.HandleException(ex, "SearchSymbols")
-            ?? McpError.FromException(ex).ToToolResponse();
+        return errorHandler.HandleException(ex, "SearchSymbols");
     }
 }
 ```
