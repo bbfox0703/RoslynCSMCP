@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using RoslynMcpServer.Core.Models;
 using RoslynMcpServer.Core.Services;
@@ -21,24 +19,17 @@ public class RefactoringTools
         [Description("New name for the symbol")] string newName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Preview only (true) or execute rename (false). Default: true")] bool previewOnly = true,
-        IServiceProvider? serviceProvider = null)
+        Phase1AnalysisService phase1Service = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var phase1Service = serviceProvider?.GetService<Phase1AnalysisService>();
-            if (phase1Service == null)
-            {
-                return "Error: Phase1AnalysisService not available.";
-            }
-
             var results = await phase1Service.RenameSymbolAsync(solutionPath, symbolName, newName, previewOnly);
             return FormatRenameResults(results);
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<RefactoringTools>>();
-            logger?.LogError(ex, "Error renaming symbol");
-            return $"Error: An unexpected error occurred while renaming symbol: {ex.Message}";
+            return errorHandler.HandleException(ex, "RenameSymbolSafely");
         }
     }
 
@@ -48,24 +39,17 @@ public class RefactoringTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Interface name to generate (default: I{ClassName})")] string? interfaceName = null,
         [Description("Target namespace for the interface (default: same as class)")] string? targetNamespace = null,
-        IServiceProvider? serviceProvider = null)
+        Phase2AnalysisService phase2Service = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var phase2Service = serviceProvider?.GetService<Phase2AnalysisService>();
-            if (phase2Service == null)
-            {
-                return "Error: Phase2AnalysisService not available.";
-            }
-
             var results = await phase2Service.ExtractInterfaceAsync(solutionPath, className, interfaceName, targetNamespace);
             return FormatInterfaceExtractionResults(results);
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<RefactoringTools>>();
-            logger?.LogError(ex, "Error extracting interface");
-            return $"Error: An unexpected error occurred while extracting interface: {ex.Message}";
+            return errorHandler.HandleException(ex, "ExtractInterface");
         }
     }
 
@@ -76,21 +60,14 @@ public class RefactoringTools
         [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
         string format = "normal",
         [Description("Maximum depth for indirect reference analysis (default: 3)")] int maxDepth = 3,
-        IServiceProvider? serviceProvider = null)
+        ChangeImpactAnalyzer analyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var analyzer = serviceProvider?.GetService<ChangeImpactAnalyzer>();
-            if (analyzer == null)
-            {
-                return "Error: Change impact analyzer service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var results = await analyzer.AnalyzeChangeImpactAsync(symbolName, solutionPath, maxDepth);
 
@@ -103,9 +80,7 @@ public class RefactoringTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<RefactoringTools>>();
-            logger?.LogError(ex, "Error analyzing change impact");
-            return $"Error: An unexpected error occurred while analyzing change impact: {ex.Message}";
+            return errorHandler.HandleException(ex, "GetChangeImpact");
         }
     }
 
@@ -115,24 +90,17 @@ public class RefactoringTools
         [Description("JSON string defining layers and rules")] string layerDefinitionsJson,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (with recommendations). Default: normal")]
         string format = "normal",
-        IServiceProvider? serviceProvider = null)
+        Phase1AnalysisService phase1Service = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var phase1Service = serviceProvider?.GetService<Phase1AnalysisService>();
-            if (phase1Service == null)
-            {
-                return "Error: Phase1AnalysisService not available.";
-            }
-
             var results = await phase1Service.AnalyzeLayerViolationsAsync(solutionPath, layerDefinitionsJson);
             return FormatLayerViolationResults(results, format);
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<RefactoringTools>>();
-            logger?.LogError(ex, "Error analyzing layer violations");
-            return $"Error: An unexpected error occurred while analyzing layer violations: {ex.Message}";
+            return errorHandler.HandleException(ex, "AnalyzeLayerViolations");
         }
     }
 

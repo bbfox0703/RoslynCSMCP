@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using RoslynMcpServer.Core.Models;
 using RoslynMcpServer.Core.Services;
@@ -19,19 +17,16 @@ public class AdvancedTools
     public static async Task<string> BatchQuery(
         [Description("JSON array of queries to execute")] string queriesJson,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        IServiceProvider? serviceProvider = null)
+        BatchQueryService batchService = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var batchService = serviceProvider?.GetService<BatchQueryService>();
-            if (batchService == null)
-                return "Error: Batch query service not available.";
-
             return await batchService.ExecuteBatchAsync(queriesJson);
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "BatchQuery");
         }
     }
 
@@ -45,14 +40,11 @@ public class AdvancedTools
         [Description("Cross-project references only (default: false)")] bool crossProjectOnly = false,
         [Description("Writes only (default: false)")] bool writesOnly = false,
         [Description("Filter by project name pattern (optional)")] string? projectFilter = null,
-        IServiceProvider? serviceProvider = null)
+        SymbolSearchService searchService = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var searchService = serviceProvider?.GetService<SymbolSearchService>();
-            if (searchService == null)
-                return "Error: Symbol search service not available.";
-
             var results = await searchService.FindReferencesFilteredAsync(
                 symbolName, solutionPath, includeDefinition, publicOnly, excludeTests, crossProjectOnly, writesOnly, projectFilter);
 
@@ -60,7 +52,7 @@ public class AdvancedTools
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindReferencesFiltered");
         }
     }
 
@@ -68,18 +60,14 @@ public class AdvancedTools
     public static async Task<string> FindReferencesAcrossSolutions(
         [Description("Symbol name to find references for")] string symbolName,
         [Description("Comma-separated paths to solution files")] string solutionPaths,
-        IServiceProvider? serviceProvider = null)
+        SymbolSearchService searchService = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var searchService = serviceProvider?.GetService<SymbolSearchService>();
-            if (searchService == null)
-                return "Error: Symbol search service not available.";
-
             var paths = solutionPaths.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var results = await searchService.FindReferencesAcrossSolutionsAsync(symbolName, paths, includeDefinition: true);
 
-            // Convert result to dictionary format for FormatCrossReferences, group by project
             var groupedResults = results
                 .GroupBy(r => r.ProjectName)
                 .ToDictionary(g => g.Key, g => g.ToList());
@@ -88,7 +76,7 @@ public class AdvancedTools
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindReferencesAcrossSolutions");
         }
     }
 
@@ -97,20 +85,17 @@ public class AdvancedTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Minimum severity: Error, Warning, Info. Default: Warning")] string minSeverity = "Warning",
         [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
-        IServiceProvider? serviceProvider = null)
+        DiagnosticsService diagnosticsService = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var diagnosticsService = serviceProvider?.GetService<DiagnosticsService>();
-            if (diagnosticsService == null)
-                return "Error: Diagnostics service not available.";
-
             var results = await diagnosticsService.GetCompilationErrorsAsync(solutionPath, minSeverity);
             return FormatCompilationErrors(results, format);
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "GetCompilationErrors");
         }
     }
 
@@ -120,19 +105,16 @@ public class AdvancedTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Direction: callers, callees, both. Default: both")] string direction = "both",
         [Description("Maximum depth (default: 3)")] int maxDepth = 3,
-        IServiceProvider? serviceProvider = null)
+        CallHierarchyService callService = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var callService = serviceProvider?.GetService<CallHierarchyService>();
-            if (callService == null)
-                return "Error: Call hierarchy service not available.";
-
             return await callService.GetCallHierarchyAsync(solutionPath, methodName, direction, maxDepth);
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "GetCallHierarchy");
         }
     }
 
@@ -141,20 +123,17 @@ public class AdvancedTools
         [Description("Type name to analyze")] string typeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: text, mermaid, json. Default: text")] string format = "text",
-        IServiceProvider? serviceProvider = null)
+        SymbolSearchService searchService = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var searchService = serviceProvider?.GetService<SymbolSearchService>();
-            if (searchService == null)
-                return "Error: Symbol search service not available.";
-
             var results = await searchService.GetClassHierarchyAsync(typeName, solutionPath);
             return FormatClassHierarchy(results, format);
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "GetClassHierarchy");
         }
     }
 
@@ -163,19 +142,16 @@ public class AdvancedTools
         [Description("Type name to get signature for")] string typeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Include private members (default: false)")] bool includePrivate = false,
-        IServiceProvider? serviceProvider = null)
+        TypeSignatureService signatureService = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var signatureService = serviceProvider?.GetService<TypeSignatureService>();
-            if (signatureService == null)
-                return "Error: Type signature service not available.";
-
             return await signatureService.GetTypeSignatureAsync(solutionPath, typeName, includePrivate);
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "GetTypeSignature");
         }
     }
 
@@ -184,20 +160,17 @@ public class AdvancedTools
         [Description("Attribute name (e.g., 'Obsolete', 'Serializable')")] string attributeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
-        IServiceProvider? serviceProvider = null)
+        AttributeSearchService searchService = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var searchService = serviceProvider?.GetService<AttributeSearchService>();
-            if (searchService == null)
-                return "Error: Attribute search service not available.";
-
             var results = await searchService.FindAttributeUsagesAsync(solutionPath, attributeName);
             return FormatAttributeUsages(results, attributeName, format);
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindAttributeUsages");
         }
     }
 
@@ -205,20 +178,17 @@ public class AdvancedTools
     public static async Task<string> FindDeprecatedAPIs(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
-        IServiceProvider? serviceProvider = null)
+        DeprecatedAPIAnalyzer analyzer = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var analyzer = serviceProvider?.GetService<DeprecatedAPIAnalyzer>();
-            if (analyzer == null)
-                return "Error: Deprecated API analyzer service not available.";
-
             var results = await analyzer.AnalyzeDeprecatedAPIsAsync(solutionPath);
             return FormatDeprecatedAPIs(results, format);
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindDeprecatedAPIs");
         }
     }
 
@@ -227,14 +197,11 @@ public class AdvancedTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
         [Description("Comment types to find: TODO, FIXME, HACK, NOTE, BUG, all. Default: all")] string types = "all",
-        IServiceProvider? serviceProvider = null)
+        TODOCommentAnalyzer analyzer = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var analyzer = serviceProvider?.GetService<TODOCommentAnalyzer>();
-            if (analyzer == null)
-                return "Error: TODO comment analyzer service not available.";
-
             var typeArray = types.Equals("all", StringComparison.OrdinalIgnoreCase)
                 ? null
                 : types.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -244,7 +211,7 @@ public class AdvancedTools
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindTODOComments");
         }
     }
 
@@ -253,20 +220,17 @@ public class AdvancedTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Minimum lines to consider large (default: 500)")] int minLines = 500,
         [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
-        IServiceProvider? serviceProvider = null)
+        LargeFileAnalyzer analyzer = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var analyzer = serviceProvider?.GetService<LargeFileAnalyzer>();
-            if (analyzer == null)
-                return "Error: Large file analyzer service not available.";
-
             var results = await analyzer.AnalyzeLargeFilesAsync(solutionPath, minLines);
             return FormatLargeFiles(results, format);
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindLargeFiles");
         }
     }
 
@@ -275,21 +239,18 @@ public class AdvancedTools
         [Description("Path to old version solution file")] string oldSolutionPath,
         [Description("Path to new version solution file")] string newSolutionPath,
         [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
-        IServiceProvider? serviceProvider = null)
+        APIChangeAnalyzer analyzer = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var analyzer = serviceProvider?.GetService<APIChangeAnalyzer>();
-            if (analyzer == null)
-                return "Error: API change analyzer service not available.";
-
             var results = await analyzer.AnalyzeAPIChangesAsync(
                 oldSolutionPath, newSolutionPath, "Old", "New", false);
             return FormatAPIChanges(results, format);
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "AnalyzeAPIChanges");
         }
     }
 
@@ -298,14 +259,11 @@ public class AdvancedTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
         [Description("Issue types to check (comma-separated): BoxingInLoop, StringConcatInLoop, LinqInLoop, all. Default: all")] string issueTypes = "all",
-        IServiceProvider? serviceProvider = null)
+        PerformanceIssueAnalyzer analyzer = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var analyzer = serviceProvider?.GetService<PerformanceIssueAnalyzer>();
-            if (analyzer == null)
-                return "Error: Performance issue analyzer service not available.";
-
             var issueTypeArray = issueTypes.Equals("all", StringComparison.OrdinalIgnoreCase)
                 ? null
                 : issueTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -315,7 +273,7 @@ public class AdvancedTools
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindPerformanceIssues");
         }
     }
 

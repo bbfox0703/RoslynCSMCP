@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using RoslynMcpServer.Core.Models;
 using RoslynMcpServer.Core.Services;
@@ -21,21 +19,14 @@ public class TestingTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
-        IServiceProvider? serviceProvider = null)
+        TestDiscoveryService discoveryService = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var discoveryService = serviceProvider?.GetService<TestDiscoveryService>();
-            if (discoveryService == null)
-            {
-                return "Error: Test discovery service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var results = await discoveryService.FindTestsForTypeAsync(solutionPath, typeName);
 
@@ -48,9 +39,7 @@ public class TestingTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<TestingTools>>();
-            logger?.LogError(ex, "Error finding tests for type");
-            return $"Error: An unexpected error occurred while finding tests: {ex.Message}";
+            return errorHandler.HandleException(ex, "FindTestsForType");
         }
     }
 
@@ -61,21 +50,14 @@ public class TestingTools
         string format = "normal",
         [Description("Scope filter: public (public only), all (all types). Default: public")] string scope = "public",
         [Description("Group by: project, namespace. Default: project")] string groupBy = "project",
-        IServiceProvider? serviceProvider = null)
+        TestCoverageAnalyzer coverageAnalyzer = null!,
+        SecurityValidator validator = null!,
+        McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var validator = serviceProvider?.GetService<SecurityValidator>();
-            if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
-            {
-                return "Error: Invalid solution path provided.";
-            }
-
-            var coverageAnalyzer = serviceProvider?.GetService<TestCoverageAnalyzer>();
-            if (coverageAnalyzer == null)
-            {
-                return "Error: Test coverage analyzer service not available.";
-            }
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
 
             var results = await coverageAnalyzer.AnalyzeTestCoverageAsync(solutionPath, scope, groupBy);
 
@@ -88,9 +70,7 @@ public class TestingTools
         }
         catch (Exception ex)
         {
-            var logger = serviceProvider?.GetService<ILogger<TestingTools>>();
-            logger?.LogError(ex, "Error analyzing test coverage");
-            return $"Error: An unexpected error occurred while analyzing test coverage: {ex.Message}";
+            return errorHandler.HandleException(ex, "GetTestCoverage");
         }
     }
 
