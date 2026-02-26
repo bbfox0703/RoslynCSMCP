@@ -132,6 +132,7 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<ChangeImpactAnalyzer>();
                 builder.Services.AddSingleton<PerformanceIssueAnalyzer>();
                 builder.Services.AddSingleton<IntegrityPatternAnalyzer>();
+                builder.Services.AddSingleton<IpcPatternAnalyzer>();
                 builder.Services.AddSingleton<AotCompatibilityAnalyzer>();
                 builder.Services.AddSingleton<PInvokeCompatibilityAnalyzer>();
                 builder.Services.AddSingleton<UnsafeCodeAnalyzer>();
