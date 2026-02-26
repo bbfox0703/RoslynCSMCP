@@ -133,6 +133,8 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<PerformanceIssueAnalyzer>();
                 builder.Services.AddSingleton<AotCompatibilityAnalyzer>();
                 builder.Services.AddSingleton<PInvokeCompatibilityAnalyzer>();
+                builder.Services.AddSingleton<UnsafeCodeAnalyzer>();
+                builder.Services.AddSingleton<SourceGeneratorOpportunityAnalyzer>();
                 builder.Services.AddSingleton<NamingConventionAnalyzer>();
                 builder.Services.AddSingleton<APIChangeAnalyzer>();
                 builder.Services.AddSingleton<Phase1AnalysisService>();  // Phase 1 Tools
