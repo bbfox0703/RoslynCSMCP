@@ -138,6 +138,7 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<UnsafeCodeAnalyzer>();
                 builder.Services.AddSingleton<MemoryAllocationAnalyzer>();
                 builder.Services.AddSingleton<ConcurrencyPatternAnalyzer>();
+                builder.Services.AddSingleton<MagicNumberAnalyzer>();
                 builder.Services.AddSingleton<SourceGeneratorOpportunityAnalyzer>();
                 builder.Services.AddSingleton<NamingConventionAnalyzer>();
                 builder.Services.AddSingleton<APIChangeAnalyzer>();

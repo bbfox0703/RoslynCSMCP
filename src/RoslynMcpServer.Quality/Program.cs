@@ -31,7 +31,7 @@ class Program
         try
         {
             Log.Information("Starting RoslynMcpServer.Quality...");
-            Log.Information("This MCP server provides 7 quality analysis tools (~1,225 tokens)");
+            Log.Information("This MCP server provides 8 quality analysis tools (~1,400 tokens)");
 
             if (!MSBuildLocator.IsRegistered)
             {
@@ -77,6 +77,7 @@ class Program
             builder.Services.AddSingleton<DuplicateCodeAnalyzer>();
             builder.Services.AddSingleton<NamingConventionAnalyzer>();
             builder.Services.AddSingleton<ConcurrencyPatternAnalyzer>();
+            builder.Services.AddSingleton<MagicNumberAnalyzer>();
             builder.Services.AddSingleton<SecurityValidator>();
             builder.Services.AddSingleton<DiagnosticLogger>();
             builder.Services.AddSingleton<IncrementalAnalyzer>();
@@ -96,7 +97,7 @@ class Program
 
             var logger = host.Services.GetRequiredService<ILogger<Program>>();
             logger.LogInformation("RoslynMcpServer.Quality started successfully");
-            logger.LogInformation("Available tools: AnalyzeCodeComplexity, FindCodeSmells, FindUnusedCode, FindDuplicateCode, FindMagicNumbers, AnalyzeNamingConventions, AnalyzeConcurrencyPatterns");
+            logger.LogInformation("Available tools: AnalyzeCodeComplexity, FindCodeSmells, FindUnusedCode, FindDuplicateCode, FindMagicNumbers, AnalyzeNamingConventions, AnalyzeConcurrencyPatterns, AnalyzeMagicNumbers");
 
             await host.RunAsync();
         }
