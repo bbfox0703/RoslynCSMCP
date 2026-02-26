@@ -45,14 +45,15 @@ RoslynCSMCP.sln
 ├── src/
 │   ├── RoslynMcpServer.Core/           # Shared library (services, models, auth)
 │   ├── RoslynMcpServer.Navigation/     # Navigation MCP   (6 tools,  ~1,050 tokens)
-│   ├── RoslynMcpServer.Quality/        # Quality MCP      (6 tools,  ~1,050 tokens)
+│   ├── RoslynMcpServer.Quality/        # Quality MCP      (8 tools,  ~1,400 tokens)
 │   ├── RoslynMcpServer.Security/       # Security MCP     (3 tools,    ~525 tokens)
 │   ├── RoslynMcpServer.Dependencies/   # Dependencies MCP (5 tools,    ~875 tokens)
-│   ├── RoslynMcpServer.Refactoring/    # Refactoring MCP  (4 tools,    ~700 tokens)
+│   ├── RoslynMcpServer.Refactoring/    # Refactoring MCP  (5 tools,    ~875 tokens)
 │   ├── RoslynMcpServer.Testing/        # Testing MCP      (2 tools,    ~350 tokens)
-│   ├── RoslynMcpServer.Metrics/        # Metrics MCP      (3 tools,    ~525 tokens)
-│   └── RoslynMcpServer.Advanced/       # Advanced MCP    (13 tools,  ~2,275 tokens)
-├── RoslynMcpServer/                    # Full version     (42 tools,  ~7,350 tokens)
+│   ├── RoslynMcpServer.Metrics/        # Metrics MCP      (4 tools,    ~700 tokens)
+│   ├── RoslynMcpServer.Advanced/       # Advanced MCP    (15 tools,  ~2,625 tokens)
+│   └── RoslynMcpServer.Interop/        # Interop MCP      (3 tools,    ~525 tokens)
+├── RoslynMcpServer/                    # Full version     (51 tools,  ~8,925 tokens)
 └── RoslynMcpServer.Tests/              # Unit & integration tests
 ```
 

@@ -47,21 +47,22 @@ RoslynCSMCP is a **specialized application** built on top of Microsoft's MCP SDK
 
 ## 🧩 Modular Architecture (NEW)
 
-RoslynCSMCP now supports **modular MCP servers** for optimized token usage. Instead of loading all 42 tools (~7,350 tokens), you can load only the modules you need.
+RoslynCSMCP now supports **modular MCP servers** for optimized token usage. Instead of loading all 51 tools (~8,925 tokens), you can load only the modules you need.
 
 ### Available Modules
 
 | Module | Tools | Tokens | Description |
 |--------|-------|--------|-------------|
-| **Full** | 42 | ~7,350 | Complete toolset (backward compatible) |
+| **Full** | 51 | ~8,925 | Complete toolset (backward compatible) |
 | **Navigation** | 6 | ~1,050 | Symbol search, references, file outline |
-| **Quality** | 6 | ~1,050 | Code smells, complexity, naming conventions |
+| **Quality** | 8 | ~1,400 | Code smells, complexity, concurrency, magic numbers |
 | **Security** | 3 | ~525 | Security issues, thread safety, exception handling |
 | **Dependencies** | 5 | ~875 | Dependency analysis, packages, DI container |
-| **Refactoring** | 4 | ~700 | Rename, extract interface, change impact |
+| **Refactoring** | 5 | ~875 | Rename, extract interface, source generator opportunities |
 | **Testing** | 2 | ~350 | Test discovery, coverage analysis |
-| **Metrics** | 3 | ~525 | Code metrics, file statistics, documentation |
-| **Advanced** | 13 | ~2,275 | Batch queries, cross-solution, call hierarchy |
+| **Metrics** | 4 | ~700 | Code metrics, file statistics, memory allocation |
+| **Advanced** | 15 | ~2,625 | Batch queries, cross-solution, IPC/integrity patterns |
+| **Interop** | 3 | ~525 | AOT compatibility, P/Invoke migration, unsafe code |
 
 ### Quick Start - Modular Configuration
 
@@ -426,7 +427,7 @@ Identify complex methods in src/Services/*.cs with threshold 10
 
 ## Available MCP Tools
 
-The server exposes **42 MCP tools** for comprehensive C# code analysis, organized into 8 modules:
+The server exposes **51 MCP tools** for comprehensive C# code analysis, organized into 9 modules:
 
 > 💡 **Modular Loading**: Each module can be loaded independently. See [Modular Architecture](#-modular-architecture-new) for configuration.
 
@@ -612,6 +613,47 @@ The server exposes **42 MCP tools** for comprehensive C# code analysis, organize
 33. **AnalyzeNamingConventions** - Check naming convention compliance
 34. **AnalyzeAPIChanges** - Track API changes between versions
 
+### Interop & Modernization ⚡ **NEW**
+
+35. **AnalyzeAotCompatibility** - Detect AOT/trimming incompatibilities for .NET NativeAOT publishing
+    - Identifies reflection usage, `[DynamicallyAccessedMembers]` gaps, `[RequiresUnreferencedCode]` violations
+    - Checks `JsonSerializerContext`, `TypeDescriptor`, and runtime emit patterns
+
+36. **AnalyzePInvoke** - Audit P/Invoke and native interop for migration and safety
+    - Finds `[DllImport]` methods that should migrate to `[LibraryImport]` (AOT-compatible)
+    - Detects `Marshal.PtrToStringAuto`, missing `[MarshalAs]` on bool params, `SetLastError` gaps
+    - Reports `GCHandle`/`Marshal.AllocHGlobal` resource leaks and `IntPtr`/`UIntPtr` modernization opportunities
+
+37. **AnalyzeUnsafeCode** - Review unsafe pointer usage, fixed blocks, and stackalloc patterns
+    - Highlights unguarded pointer arithmetic and suspicious memory access patterns
+
+### Quality Analysis ⚡ **NEW**
+
+38. **AnalyzeConcurrencyPatterns** - Detect thread safety and async/await issues
+    - Finds `async void`, blocking `.Result`/`.Wait()`, missing `ConfigureAwait`, lock anti-patterns
+
+39. **AnalyzeMagicNumbers** - Detect hard-coded numeric literals that should be named constants
+    - Reports array index literals, arithmetic magic values, hard-coded capacities, comparison literals
+
+### Metrics & Memory ⚡ **NEW**
+
+40. **AnalyzeMemoryAllocation** - Find allocation hot spots and modernization opportunities
+    - Detects `ArrayPool` candidates, boxing via `ArrayList`/`Hashtable`, `Substring` → `Span` migrations
+    - Identifies `string +=` loops that should use `StringBuilder`
+
+### Advanced Patterns ⚡ **NEW**
+
+41. **AnalyzeIntegrityPatterns** - Audit integrity check and anti-tamper code patterns
+    - Identifies SHA/MD5 compute sentinels, XOR string obfuscation, hardcoded checksums, anti-debug patterns
+
+42. **AnalyzeIpcPatterns** - Review named pipe and StreamJsonRpc IPC patterns
+    - Finds missing error handling, synchronous pipe I/O in async methods, missing timeouts, hardcoded pipe names
+
+### Refactoring ⚡ **NEW**
+
+43. **FindSourceGeneratorOpportunities** - Identify boilerplate patterns suitable for source generators
+    - Detects repetitive `INotifyPropertyChanged`, builder patterns, and serialization boilerplate
+
 📚 **[Complete Usage Examples](docs/EXAMPLES.md)** - Comprehensive guide with 100+ examples organized by feature category
 
 ## Development and Testing
@@ -655,15 +697,16 @@ The server features a **modular, layered architecture** that supports both full 
 RoslynCSMCP.sln
 ├── src/
 │   ├── RoslynMcpServer.Core/           # Shared library (services, models)
-│   ├── RoslynMcpServer.Navigation/     # Navigation MCP (6 tools)
-│   ├── RoslynMcpServer.Quality/        # Quality MCP (6 tools)
-│   ├── RoslynMcpServer.Security/       # Security MCP (3 tools)
+│   ├── RoslynMcpServer.Navigation/     # Navigation MCP  (6 tools)
+│   ├── RoslynMcpServer.Quality/        # Quality MCP     (8 tools)
+│   ├── RoslynMcpServer.Security/       # Security MCP    (3 tools)
 │   ├── RoslynMcpServer.Dependencies/   # Dependencies MCP (5 tools)
-│   ├── RoslynMcpServer.Refactoring/    # Refactoring MCP (4 tools)
-│   ├── RoslynMcpServer.Testing/        # Testing MCP (2 tools)
-│   ├── RoslynMcpServer.Metrics/        # Metrics MCP (3 tools)
-│   └── RoslynMcpServer.Advanced/       # Advanced MCP (13 tools)
-├── RoslynMcpServer/                    # Full version (42 tools)
+│   ├── RoslynMcpServer.Refactoring/    # Refactoring MCP (5 tools)
+│   ├── RoslynMcpServer.Testing/        # Testing MCP     (2 tools)
+│   ├── RoslynMcpServer.Metrics/        # Metrics MCP     (4 tools)
+│   ├── RoslynMcpServer.Advanced/       # Advanced MCP    (15 tools)
+│   └── RoslynMcpServer.Interop/        # Interop MCP     (3 tools)
+├── RoslynMcpServer/                    # Full version    (51 tools)
 └── RoslynMcpServer.Tests/              # Unit & integration tests
 ```
 
