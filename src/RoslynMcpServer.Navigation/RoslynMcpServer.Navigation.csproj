@@ -24,7 +24,7 @@
 
   <ItemGroup>
     <!-- MCP Server SDK -->
-    <PackageReference Include="ModelContextProtocol" Version="1.0.0-rc.1" />
+    <PackageReference Include="ModelContextProtocol" Version="1.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.3" />
 
     <!-- MSBuild Locator (required for each MCP server) -->

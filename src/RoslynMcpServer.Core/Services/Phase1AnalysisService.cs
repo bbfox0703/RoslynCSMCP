@@ -852,7 +852,7 @@ namespace RoslynMcpServer.Core.Services
                     {
                         // Use Roslyn's Renamer to apply changes
                         var newSolution = await Microsoft.CodeAnalysis.Rename.Renamer.RenameSymbolAsync(
-                            solution, targetSymbol, newName, solution.Options);
+                            solution, targetSymbol, new Microsoft.CodeAnalysis.Rename.SymbolRenameOptions(), newName);
 
                         // Apply changes to workspace
                         if (workspace.TryApplyChanges(newSolution))
