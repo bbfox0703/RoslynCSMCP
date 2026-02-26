@@ -25,7 +25,7 @@ namespace RoslynMcpServer.Core.Services
                 var lineCount = lineSpan.EndLinePosition.Line - lineSpan.StartLinePosition.Line + 1;
 
                 // Thresholds: 50+ lines = High, 30-49 = Medium, 20-29 = Low
-                string severity = lineCount >= 50 ? "High" : lineCount >= 30 ? "Medium" : lineCount >= 20 ? "Low" : null;
+                string? severity = lineCount >= 50 ? "High" : lineCount >= 30 ? "Medium" : lineCount >= 20 ? "Low" : null;
 
                 if (severity != null)
                 {
@@ -84,7 +84,7 @@ namespace RoslynMcpServer.Core.Services
                 bool isLarge = lineCount >= 500 || memberCount >= 30;
                 bool isMedium = lineCount >= 300 || memberCount >= 20;
 
-                string severity = isLarge ? "High" : isMedium ? "Medium" : null;
+                string? severity = isLarge ? "High" : isMedium ? "Medium" : null;
 
                 if (severity != null)
                 {
@@ -133,7 +133,7 @@ namespace RoslynMcpServer.Core.Services
                 var paramCount = method.ParameterList.Parameters.Count;
 
                 // Thresholds: 6+ params = High, 5 = Medium, 4 = Low
-                string severity = paramCount >= 6 ? "High" : paramCount == 5 ? "Medium" : paramCount == 4 ? "Low" : null;
+                string? severity = paramCount >= 6 ? "High" : paramCount == 5 ? "Medium" : paramCount == 4 ? "Low" : null;
 
                 if (severity != null)
                 {
@@ -212,7 +212,7 @@ namespace RoslynMcpServer.Core.Services
                         SymbolKind = "Method",
                         Metrics = new Dictionary<string, object>
                         {
-                            ["PrimitiveType"] = mostCommonType.Key,
+                            ["PrimitiveType"] = mostCommonType.Key ?? "Unknown",
                             ["Count"] = mostCommonType.Count(),
                             ["TotalParameters"] = parameters.Count,
                             ["ContainingType"] = containingType?.Identifier.Text ?? "Unknown"
@@ -242,7 +242,7 @@ namespace RoslynMcpServer.Core.Services
                 var caseCount = switchStmt.Sections.Count;
 
                 // Thresholds: 8+ cases = High, 5-7 = Medium
-                string severity = caseCount >= 8 ? "High" : caseCount >= 5 ? "Medium" : null;
+                string? severity = caseCount >= 8 ? "High" : caseCount >= 5 ? "Medium" : null;
 
                 if (severity != null)
                 {

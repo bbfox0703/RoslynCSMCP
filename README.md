@@ -1,6 +1,6 @@
 # Roslyn CSharp MCP Server
 
-![.NET 10.0](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet) ![MCP 1.0.0-rc.1](https://img.shields.io/badge/MCP-1.0.0--rc.1-00A4EF) ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![.NET 10.0](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet) ![MCP 1.0.0](https://img.shields.io/badge/MCP-1.0.0-00A4EF) ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg) ![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-5B4FBF?logo=anthropic&logoColor=white)
 
 A C# MCP (Model Context Protocol) server that integrates with Microsoft's Roslyn compiler platform to provide Vibe-coding tools like **Claude Desktop** and **Claude CLI** with powerful code analysis and navigation capabilities for C# codebases.
 
