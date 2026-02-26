@@ -30,7 +30,7 @@ class Program
         try
         {
             Log.Information("Starting RoslynMcpServer.Advanced...");
-            Log.Information("This MCP server provides 13 advanced analysis tools (~2,275 tokens)");
+            Log.Information("This MCP server provides 15 advanced analysis tools (~2,625 tokens)");
 
             if (!MSBuildLocator.IsRegistered)
             {
@@ -71,6 +71,8 @@ class Program
             builder.Services.AddSingleton<LargeFileAnalyzer>();
             builder.Services.AddSingleton<APIChangeAnalyzer>();
             builder.Services.AddSingleton<PerformanceIssueAnalyzer>();
+            builder.Services.AddSingleton<IntegrityPatternAnalyzer>();
+            builder.Services.AddSingleton<IpcPatternAnalyzer>();
             builder.Services.AddSingleton<DiagnosticsService>();
             builder.Services.AddSingleton<SecurityValidator>();
             builder.Services.AddSingleton<DiagnosticLogger>();
@@ -91,7 +93,7 @@ class Program
 
             var logger = host.Services.GetRequiredService<ILogger<Program>>();
             logger.LogInformation("RoslynMcpServer.Advanced started successfully");
-            logger.LogInformation("Available tools: BatchQuery, FindReferencesFiltered, FindReferencesAcrossSolutions, GetCompilationErrors, GetCallHierarchy, GetClassHierarchy, GetTypeSignature, FindAttributeUsages, FindDeprecatedAPIs, FindTODOComments, FindLargeFiles, AnalyzeAPIChanges, FindPerformanceIssues");
+            logger.LogInformation("Available tools: BatchQuery, FindReferencesFiltered, FindReferencesAcrossSolutions, GetCompilationErrors, GetCallHierarchy, GetClassHierarchy, GetTypeSignature, FindAttributeUsages, FindDeprecatedAPIs, FindTODOComments, FindLargeFiles, AnalyzeAPIChanges, FindPerformanceIssues, AnalyzeIntegrityPatterns, AnalyzeIpcPatterns");
 
             await host.RunAsync();
         }

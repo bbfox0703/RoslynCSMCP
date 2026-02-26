@@ -30,7 +30,7 @@ class Program
         try
         {
             Log.Information("Starting RoslynMcpServer.Refactoring...");
-            Log.Information("This MCP server provides 4 refactoring tools (~700 tokens)");
+            Log.Information("This MCP server provides 5 refactoring/source-gen tools (~875 tokens)");
 
             if (!MSBuildLocator.IsRegistered)
             {
@@ -65,6 +65,7 @@ class Program
             builder.Services.AddSingleton<Phase2AnalysisService>();
             builder.Services.AddSingleton<SymbolSearchService>();
             builder.Services.AddSingleton<ChangeImpactAnalyzer>();
+            builder.Services.AddSingleton<SourceGeneratorOpportunityAnalyzer>();
             builder.Services.AddSingleton<SecurityValidator>();
             builder.Services.AddSingleton<DiagnosticLogger>();
             builder.Services.AddSingleton<IncrementalAnalyzer>();
@@ -84,7 +85,7 @@ class Program
 
             var logger = host.Services.GetRequiredService<ILogger<Program>>();
             logger.LogInformation("RoslynMcpServer.Refactoring started successfully");
-            logger.LogInformation("Available tools: RenameSymbolSafely, ExtractInterface, GetChangeImpact, AnalyzeLayerViolations");
+            logger.LogInformation("Available tools: RenameSymbolSafely, ExtractInterface, GetChangeImpact, AnalyzeLayerViolations, FindSourceGeneratorOpportunities");
 
             await host.RunAsync();
         }

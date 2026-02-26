@@ -1546,4 +1546,398 @@ namespace RoslynMcpServer.Core.Models
     }
 
     #endregion
+
+    #region AOT Compatibility Analysis
+
+    /// <summary>
+    /// Represents a single Native AOT or trimming compatibility issue.
+    /// </summary>
+    public class AotIssue
+    {
+        public string Category { get; set; } = string.Empty;     // Reflection|JsonSerialization|GeneratedRegex|TrimAnnotation
+        public string Severity { get; set; } = string.Empty;     // Critical|High|Medium|Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string SymbolName { get; set; } = string.Empty;   // API name (e.g. Type.GetType)
+        public string CodeSnippet { get; set; } = string.Empty;  // Max 100 chars
+        public string Recommendation { get; set; } = string.Empty;
+        public string FixExample { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Aggregated results from AnalyzeAotCompatibility.
+    /// </summary>
+    public class AotCompatibilityResults
+    {
+        public List<AotIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalIssues => Issues.Count;
+        public int CriticalIssues => Issues.Count(i => i.Severity == "Critical");
+        public int HighIssues => Issues.Count(i => i.Severity == "High");
+        public int MediumIssues => Issues.Count(i => i.Severity == "Medium");
+        public int LowIssues => Issues.Count(i => i.Severity == "Low");
+
+        public Dictionary<string, int> IssuesByCategory { get; set; } = new();
+        public Dictionary<string, int> IssuesByProject { get; set; } = new();
+    }
+
+    #endregion
+
+    #region PInvoke Compatibility Analysis
+
+    /// <summary>
+    /// Represents a single P/Invoke or native interop compatibility issue.
+    /// </summary>
+    public class PInvokeIssue
+    {
+        public string IssueType { get; set; } = string.Empty;   // DllImportMigration|MarshalUnsafety|MissingMarshalAs|SetLastError|CallingConvention|ResourceLeak|ModernizeTypes|MagicOffset|NativeLibrary
+        public string Severity { get; set; } = string.Empty;    // Critical|High|Medium|Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string SymbolName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string FixExample { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Aggregated results from AnalyzePInvoke.
+    /// </summary>
+    public class PInvokeAnalysisResults
+    {
+        public List<PInvokeIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalIssues => Issues.Count;
+        public int CriticalIssues => Issues.Count(i => i.Severity == "Critical");
+        public int HighIssues => Issues.Count(i => i.Severity == "High");
+        public int MediumIssues => Issues.Count(i => i.Severity == "Medium");
+        public int LowIssues => Issues.Count(i => i.Severity == "Low");
+
+        public Dictionary<string, int> IssuesByType { get; set; } = new();
+        public Dictionary<string, int> IssuesByProject { get; set; } = new();
+    }
+
+    #endregion
+
+    #region Source Generator Opportunity Analysis
+
+    /// <summary>
+    /// Represents a single source generator migration opportunity.
+    /// </summary>
+    public class SourceGeneratorOpportunity
+    {
+        public string Category { get; set; } = string.Empty;    // GeneratedRegex|JsonSerializable|ObservableProperty|RelayCommand|LoggerMessage
+        public string Severity { get; set; } = string.Empty;    // High|Medium|Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string SymbolName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string FixExample { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Aggregated results from FindSourceGeneratorOpportunities.
+    /// </summary>
+    public class SourceGeneratorAnalysisResults
+    {
+        public List<SourceGeneratorOpportunity> Opportunities { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalOpportunities => Opportunities.Count;
+        public int HighOpportunities => Opportunities.Count(o => o.Severity == "High");
+        public int MediumOpportunities => Opportunities.Count(o => o.Severity == "Medium");
+        public int LowOpportunities => Opportunities.Count(o => o.Severity == "Low");
+
+        public Dictionary<string, int> OpportunitiesByCategory { get; set; } = new();
+        public Dictionary<string, int> OpportunitiesByProject { get; set; } = new();
+    }
+
+    #endregion
+
+    #region Unsafe Code Analysis
+
+    /// <summary>
+    /// Represents a single unsafe code risk finding.
+    /// </summary>
+    public class UnsafeCodeIssue
+    {
+        public string IssueType { get; set; } = string.Empty;   // StackAllocSize|StackAllocNoSpan|StackAllocInLoop|PointerArithmetic|VoidPointerCast|CrossThreadPointer|OversizedFixed|UnsafeAsync
+        public string Severity { get; set; } = string.Empty;    // Critical|High|Medium|Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string SymbolName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string FixExample { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Aggregated results from AnalyzeUnsafeCode.
+    /// </summary>
+    public class UnsafeCodeAnalysisResults
+    {
+        public List<UnsafeCodeIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalIssues => Issues.Count;
+        public int CriticalIssues => Issues.Count(i => i.Severity == "Critical");
+        public int HighIssues => Issues.Count(i => i.Severity == "High");
+        public int MediumIssues => Issues.Count(i => i.Severity == "Medium");
+        public int LowIssues => Issues.Count(i => i.Severity == "Low");
+
+        public Dictionary<string, int> IssuesByType { get; set; } = new();
+        public Dictionary<string, int> IssuesByProject { get; set; } = new();
+    }
+
+    #endregion
+
+    #region Concurrency Pattern Analysis
+
+    /// <summary>
+    /// Represents a single concurrency anti-pattern finding.
+    /// </summary>
+    public class ConcurrencyIssue
+    {
+        public string IssueType { get; set; } = string.Empty;   // ConfigureAwait|TimerDispose|UnboundedConcurrency|MissingCancellationToken|CancellationNotPropagated|NonThreadSafeCollection|StaticFieldLock|AwaitInLock
+        public string Severity { get; set; } = string.Empty;    // Critical|High|Medium|Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string SymbolName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string FixExample { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Aggregated results from AnalyzeConcurrencyPatterns.
+    /// </summary>
+    public class ConcurrencyAnalysisResults
+    {
+        public List<ConcurrencyIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalIssues => Issues.Count;
+        public int CriticalIssues => Issues.Count(i => i.Severity == "Critical");
+        public int HighIssues => Issues.Count(i => i.Severity == "High");
+        public int MediumIssues => Issues.Count(i => i.Severity == "Medium");
+        public int LowIssues => Issues.Count(i => i.Severity == "Low");
+
+        public Dictionary<string, int> IssuesByType { get; set; } = new();
+        public Dictionary<string, int> IssuesByProject { get; set; } = new();
+    }
+
+    #endregion
+
+    #region Integrity Pattern Analysis
+
+    /// <summary>
+    /// Represents a single integrity verification or protection pattern finding.
+    /// </summary>
+    public class IntegrityPatternIssue
+    {
+        public string IssueType { get; set; } = string.Empty;   // Sha256Sentinel|XorStringProtection|HardcodedChecksum|AntiDebugPattern|SentinelMagicBytes
+        public string Severity { get; set; } = string.Empty;    // Critical|High|Medium|Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string SymbolName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Aggregated results from AnalyzeIntegrityPatterns.
+    /// </summary>
+    public class IntegrityAnalysisResults
+    {
+        public List<IntegrityPatternIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalIssues => Issues.Count;
+        public int CriticalIssues => Issues.Count(i => i.Severity == "Critical");
+        public int HighIssues => Issues.Count(i => i.Severity == "High");
+        public int MediumIssues => Issues.Count(i => i.Severity == "Medium");
+        public int LowIssues => Issues.Count(i => i.Severity == "Low");
+
+        public Dictionary<string, int> IssuesByType { get; set; } = new();
+        public Dictionary<string, int> IssuesByProject { get; set; } = new();
+    }
+
+    #endregion
+
+    #region Memory Allocation Analysis
+
+    /// <summary>
+    /// Represents a single memory allocation hotspot or inefficiency.
+    /// </summary>
+    public class MemoryAllocationIssue
+    {
+        public string IssueType { get; set; } = string.Empty;   // ArrayPoolOpportunity|Boxing|SubstringSpan|ReadOnlySpan|StringBuilderOpportunity
+        public string Severity { get; set; } = string.Empty;    // Critical|High|Medium|Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string SymbolName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string FixExample { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Aggregated results from AnalyzeMemoryAllocation.
+    /// </summary>
+    public class MemoryAllocationResults
+    {
+        public List<MemoryAllocationIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalIssues => Issues.Count;
+        public int CriticalIssues => Issues.Count(i => i.Severity == "Critical");
+        public int HighIssues => Issues.Count(i => i.Severity == "High");
+        public int MediumIssues => Issues.Count(i => i.Severity == "Medium");
+        public int LowIssues => Issues.Count(i => i.Severity == "Low");
+
+        public Dictionary<string, int> IssuesByType { get; set; } = new();
+        public Dictionary<string, int> IssuesByProject { get; set; } = new();
+    }
+
+    #endregion
+
+    #region Magic Number Analysis
+
+    /// <summary>
+    /// Represents a single magic number finding.
+    /// </summary>
+    public class MagicNumberIssue
+    {
+        public string IssueType { get; set; } = string.Empty;   // ArrayIndexLiteral|ArithmeticLiteral|HardcodedCapacity|ComparisonLiteral|ReturnLiteral
+        public string Severity { get; set; } = string.Empty;    // Critical|High|Medium|Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string SymbolName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public long LiteralValue { get; set; }
+    }
+
+    /// <summary>
+    /// Aggregated results from AnalyzeMagicNumbers (Roslyn-based deep analysis).
+    /// </summary>
+    public class MagicNumberAnalysisResults
+    {
+        public List<MagicNumberIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalIssues => Issues.Count;
+        public int CriticalIssues => Issues.Count(i => i.Severity == "Critical");
+        public int HighIssues => Issues.Count(i => i.Severity == "High");
+        public int MediumIssues => Issues.Count(i => i.Severity == "Medium");
+        public int LowIssues => Issues.Count(i => i.Severity == "Low");
+
+        public Dictionary<string, int> IssuesByType { get; set; } = new();
+        public Dictionary<string, int> IssuesByProject { get; set; } = new();
+    }
+
+    #endregion
+
+    #region IPC Pattern Analysis
+
+    /// <summary>
+    /// Represents a single IPC (Inter-Process Communication) pattern finding.
+    /// </summary>
+    public class IpcPatternIssue
+    {
+        public string IssueType { get; set; } = string.Empty;   // NamedPipeUsage|JsonRpcPattern|IpcErrorHandling|UnbufferedPipe|SynchronousPipeIo|MissingPipeTimeout|JsonRpcMissingErrorHandling|HardcodedPipeName
+        public string Severity { get; set; } = string.Empty;    // Critical|High|Medium|Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string SymbolName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string FixExample { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Aggregated results from AnalyzeIpcPatterns.
+    /// </summary>
+    public class IpcAnalysisResults
+    {
+        public List<IpcPatternIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalIssues => Issues.Count;
+        public int CriticalIssues => Issues.Count(i => i.Severity == "Critical");
+        public int HighIssues => Issues.Count(i => i.Severity == "High");
+        public int MediumIssues => Issues.Count(i => i.Severity == "Medium");
+        public int LowIssues => Issues.Count(i => i.Severity == "Low");
+
+        public Dictionary<string, int> IssuesByType { get; set; } = new();
+        public Dictionary<string, int> IssuesByProject { get; set; } = new();
+    }
+
+    #endregion
 }

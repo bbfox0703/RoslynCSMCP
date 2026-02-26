@@ -131,6 +131,15 @@ namespace RoslynMcpServer
                 builder.Services.AddSingleton<TestCoverageAnalyzer>();
                 builder.Services.AddSingleton<ChangeImpactAnalyzer>();
                 builder.Services.AddSingleton<PerformanceIssueAnalyzer>();
+                builder.Services.AddSingleton<IntegrityPatternAnalyzer>();
+                builder.Services.AddSingleton<IpcPatternAnalyzer>();
+                builder.Services.AddSingleton<AotCompatibilityAnalyzer>();
+                builder.Services.AddSingleton<PInvokeCompatibilityAnalyzer>();
+                builder.Services.AddSingleton<UnsafeCodeAnalyzer>();
+                builder.Services.AddSingleton<MemoryAllocationAnalyzer>();
+                builder.Services.AddSingleton<ConcurrencyPatternAnalyzer>();
+                builder.Services.AddSingleton<MagicNumberAnalyzer>();
+                builder.Services.AddSingleton<SourceGeneratorOpportunityAnalyzer>();
                 builder.Services.AddSingleton<NamingConventionAnalyzer>();
                 builder.Services.AddSingleton<APIChangeAnalyzer>();
                 builder.Services.AddSingleton<Phase1AnalysisService>();  // Phase 1 Tools

@@ -7,7 +7,7 @@ using RoslynMcpServer.Core.Services;
 using Serilog;
 using Serilog.Events;
 
-namespace RoslynMcpServer.Metrics;
+namespace RoslynMcpServer.Interop;
 
 class Program
 {
@@ -22,15 +22,15 @@ class Program
                 outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
                 standardErrorFromLevel: LogEventLevel.Verbose)
             .WriteTo.File(
-                path: Path.Combine(logDirectory, "metrics-startup-.log"),
+                path: Path.Combine(logDirectory, "interop-startup-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 7)
             .CreateBootstrapLogger();
 
         try
         {
-            Log.Information("Starting RoslynMcpServer.Metrics...");
-            Log.Information("This MCP server provides 4 metrics analysis tools (~700 tokens)");
+            Log.Information("Starting RoslynMcpServer.Interop...");
+            Log.Information("This MCP server provides Native AOT and interop compatibility analysis tools");
 
             if (!MSBuildLocator.IsRegistered)
             {
@@ -41,7 +41,7 @@ class Program
             var builder = Host.CreateApplicationBuilder(args);
 
             var environment = builder.Environment.EnvironmentName;
-            var logFileName = environment == "Development" ? "metrics-debug-.log" : "metrics-.log";
+            var logFileName = environment == "Development" ? "interop-debug-.log" : "interop-.log";
             var minLevel = environment == "Development" ? LogEventLevel.Verbose : LogEventLevel.Warning;
 
             builder.Services.AddSerilog((services, loggerConfiguration) =>
@@ -49,7 +49,7 @@ class Program
                 loggerConfiguration
                     .ReadFrom.Configuration(builder.Configuration)
                     .Enrich.FromLogContext()
-                    .Enrich.WithProperty("McpServer", "Metrics");
+                    .Enrich.WithProperty("McpServer", "Interop");
 
                 loggerConfiguration
                     .WriteTo.File(
@@ -59,12 +59,11 @@ class Program
                         restrictedToMinimumLevel: minLevel);
             });
 
-            // Register services needed for metrics tools
+            // Register services needed for interop / AOT tools
             builder.Services.AddSingleton<CodeAnalysisService>();
-            builder.Services.AddSingleton<CodeMetricsService>();
-            builder.Services.AddSingleton<FileStatisticsAnalyzer>();
-            builder.Services.AddSingleton<DocumentationAnalyzer>();
-            builder.Services.AddSingleton<MemoryAllocationAnalyzer>();
+            builder.Services.AddSingleton<AotCompatibilityAnalyzer>();
+            builder.Services.AddSingleton<PInvokeCompatibilityAnalyzer>();
+            builder.Services.AddSingleton<UnsafeCodeAnalyzer>();
             builder.Services.AddSingleton<SecurityValidator>();
             builder.Services.AddSingleton<DiagnosticLogger>();
             builder.Services.AddSingleton<IncrementalAnalyzer>();
@@ -83,8 +82,8 @@ class Program
             var host = builder.Build();
 
             var logger = host.Services.GetRequiredService<ILogger<Program>>();
-            logger.LogInformation("RoslynMcpServer.Metrics started successfully");
-            logger.LogInformation("Available tools: GetCodeMetrics, GetFileStatistics, AnalyzeDocumentationCoverage, AnalyzeMemoryAllocation");
+            logger.LogInformation("RoslynMcpServer.Interop started successfully");
+            logger.LogInformation("Available tools: AnalyzeAotCompatibility, AnalyzePInvoke, AnalyzeUnsafeCode");
 
             await host.RunAsync();
         }
