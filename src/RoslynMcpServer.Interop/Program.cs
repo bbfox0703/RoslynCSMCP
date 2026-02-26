@@ -62,6 +62,7 @@ class Program
             // Register services needed for interop / AOT tools
             builder.Services.AddSingleton<CodeAnalysisService>();
             builder.Services.AddSingleton<AotCompatibilityAnalyzer>();
+            builder.Services.AddSingleton<PInvokeCompatibilityAnalyzer>();
             builder.Services.AddSingleton<SecurityValidator>();
             builder.Services.AddSingleton<DiagnosticLogger>();
             builder.Services.AddSingleton<IncrementalAnalyzer>();
@@ -81,7 +82,7 @@ class Program
 
             var logger = host.Services.GetRequiredService<ILogger<Program>>();
             logger.LogInformation("RoslynMcpServer.Interop started successfully");
-            logger.LogInformation("Available tools: AnalyzeAotCompatibility");
+            logger.LogInformation("Available tools: AnalyzeAotCompatibility, AnalyzePInvoke");
 
             await host.RunAsync();
         }
