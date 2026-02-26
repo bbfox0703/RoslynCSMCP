@@ -1765,4 +1765,48 @@ namespace RoslynMcpServer.Core.Models
     }
 
     #endregion
+
+    #region Memory Allocation Analysis
+
+    /// <summary>
+    /// Represents a single memory allocation hotspot or inefficiency.
+    /// </summary>
+    public class MemoryAllocationIssue
+    {
+        public string IssueType { get; set; } = string.Empty;   // ArrayPoolOpportunity|Boxing|SubstringSpan|ReadOnlySpan|StringBuilderOpportunity
+        public string Severity { get; set; } = string.Empty;    // Critical|High|Medium|Low
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
+        public string SymbolName { get; set; } = string.Empty;
+        public string CodeSnippet { get; set; } = string.Empty;
+        public string Recommendation { get; set; } = string.Empty;
+        public string FixExample { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Aggregated results from AnalyzeMemoryAllocation.
+    /// </summary>
+    public class MemoryAllocationResults
+    {
+        public List<MemoryAllocationIssue> Issues { get; set; } = new();
+        public int AnalyzedProjects { get; set; }
+        public int AnalyzedFiles { get; set; }
+        public int FailedProjects { get; set; }
+        public List<OperationWarning> Warnings { get; set; } = new();
+
+        public int TotalIssues => Issues.Count;
+        public int CriticalIssues => Issues.Count(i => i.Severity == "Critical");
+        public int HighIssues => Issues.Count(i => i.Severity == "High");
+        public int MediumIssues => Issues.Count(i => i.Severity == "Medium");
+        public int LowIssues => Issues.Count(i => i.Severity == "Low");
+
+        public Dictionary<string, int> IssuesByType { get; set; } = new();
+        public Dictionary<string, int> IssuesByProject { get; set; } = new();
+    }
+
+    #endregion
 }

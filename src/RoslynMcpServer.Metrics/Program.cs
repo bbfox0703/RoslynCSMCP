@@ -30,7 +30,7 @@ class Program
         try
         {
             Log.Information("Starting RoslynMcpServer.Metrics...");
-            Log.Information("This MCP server provides 3 metrics analysis tools (~525 tokens)");
+            Log.Information("This MCP server provides 4 metrics analysis tools (~700 tokens)");
 
             if (!MSBuildLocator.IsRegistered)
             {
@@ -64,6 +64,7 @@ class Program
             builder.Services.AddSingleton<CodeMetricsService>();
             builder.Services.AddSingleton<FileStatisticsAnalyzer>();
             builder.Services.AddSingleton<DocumentationAnalyzer>();
+            builder.Services.AddSingleton<MemoryAllocationAnalyzer>();
             builder.Services.AddSingleton<SecurityValidator>();
             builder.Services.AddSingleton<DiagnosticLogger>();
             builder.Services.AddSingleton<IncrementalAnalyzer>();
@@ -83,7 +84,7 @@ class Program
 
             var logger = host.Services.GetRequiredService<ILogger<Program>>();
             logger.LogInformation("RoslynMcpServer.Metrics started successfully");
-            logger.LogInformation("Available tools: GetCodeMetrics, GetFileStatistics, AnalyzeDocumentationCoverage");
+            logger.LogInformation("Available tools: GetCodeMetrics, GetFileStatistics, AnalyzeDocumentationCoverage, AnalyzeMemoryAllocation");
 
             await host.RunAsync();
         }
