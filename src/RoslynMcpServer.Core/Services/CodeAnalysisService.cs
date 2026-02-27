@@ -1,6 +1,5 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using RoslynMcpServer.Core.Models;
 using System.Collections.Concurrent;
@@ -10,70 +9,44 @@ namespace RoslynMcpServer.Core.Services
     public class CodeAnalysisService : IDisposable
     {
         private readonly ILogger<CodeAnalysisService> _logger;
-        private readonly IMemoryCache _cache;
         private readonly ConcurrentDictionary<string, MSBuildWorkspace> _workspaces;
         private readonly SemaphoreSlim _workspaceLock;
 
-        public CodeAnalysisService(ILogger<CodeAnalysisService> logger, IMemoryCache cache)
+        public CodeAnalysisService(ILogger<CodeAnalysisService> logger)
         {
             _logger = logger;
-            _cache = cache;
             _workspaces = new ConcurrentDictionary<string, MSBuildWorkspace>();
             _workspaceLock = new SemaphoreSlim(1, 1);
         }
 
         public async Task<Solution> GetSolutionAsync(string solutionPath)
         {
-            var cacheKey = $"solution:{solutionPath}";
-
-            // Check cache first
-            if (_cache.TryGetValue(cacheKey, out Solution? cachedSolution) && cachedSolution != null)
-            {
-                _logger.LogDebug("Returning cached solution for {SolutionPath}", solutionPath);
-                return cachedSolution;
-            }
-
             await _workspaceLock.WaitAsync();
             try
             {
-                // Double-check after acquiring lock
-                if (_cache.TryGetValue(cacheKey, out cachedSolution) && cachedSolution != null)
-                {
-                    return cachedSolution;
-                }
-
                 _logger.LogInformation("Loading solution from {SolutionPath}", solutionPath);
 
-                // Create or reuse workspace
-                var workspace = _workspaces.GetOrAdd(solutionPath, _ =>
+                // Dispose previous workspace to ensure fresh file reads (no stale cache)
+                if (_workspaces.TryRemove(solutionPath, out var oldWorkspace))
                 {
-                    var ws = MSBuildWorkspace.Create();
+                    try { oldWorkspace.Dispose(); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Error disposing old workspace"); }
+                }
 
-                    // Handle workspace failures (Roslyn 5.0+ API)
-                    ws.RegisterWorkspaceFailedHandler(args =>
+                var workspace = MSBuildWorkspace.Create();
+
+                // Handle workspace failures (Roslyn 5.0+ API)
+                workspace.RegisterWorkspaceFailedHandler(args =>
+                {
+                    if (args.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
                     {
-                        if (args.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
-                        {
-                            _logger.LogWarning("Workspace failure: {Message}", args.Diagnostic.Message);
-                        }
-                    });
-
-                    return ws;
+                        _logger.LogWarning("Workspace failure: {Message}", args.Diagnostic.Message);
+                    }
                 });
 
-                // Load solution
+                _workspaces[solutionPath] = workspace;
+
                 var solution = await workspace.OpenSolutionAsync(solutionPath);
-
-                // Cache the solution for 5 minutes
-                var cacheOptions = new MemoryCacheEntryOptions()
-                    .SetAbsoluteExpiration(TimeSpan.FromMinutes(5))
-                    .SetSize(1)
-                    .RegisterPostEvictionCallback((key, value, reason, state) =>
-                    {
-                        _logger.LogDebug("Solution cache evicted for {Key}, reason: {Reason}", key, reason);
-                    });
-
-                _cache.Set(cacheKey, solution, cacheOptions);
 
                 _logger.LogInformation("Solution loaded successfully with {ProjectCount} projects", solution.Projects.Count());
 

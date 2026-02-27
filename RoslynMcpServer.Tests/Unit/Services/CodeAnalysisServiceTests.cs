@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Moq;
 using RoslynMcpServer.Core.Services;
@@ -9,20 +8,17 @@ namespace RoslynMcpServer.Tests.Unit.Services;
 public class CodeAnalysisServiceTests : IDisposable
 {
     private readonly Mock<ILogger<CodeAnalysisService>> _mockLogger;
-    private readonly IMemoryCache _memoryCache;
     private readonly CodeAnalysisService _service;
 
     public CodeAnalysisServiceTests()
     {
         _mockLogger = MockServiceProvider.CreateMockLogger<CodeAnalysisService>();
-        _memoryCache = MockServiceProvider.CreateMemoryCache();
-        _service = new CodeAnalysisService(_mockLogger.Object, _memoryCache);
+        _service = new CodeAnalysisService(_mockLogger.Object);
     }
 
     public void Dispose()
     {
         _service?.Dispose();
-        (_memoryCache as MemoryCache)?.Dispose();
     }
 
     #region Service Creation Tests
@@ -31,7 +27,7 @@ public class CodeAnalysisServiceTests : IDisposable
     public void Constructor_CreatesService()
     {
         // Arrange & Act
-        var service = new CodeAnalysisService(_mockLogger.Object, _memoryCache);
+        var service = new CodeAnalysisService(_mockLogger.Object);
 
         // Assert
         service.Should().NotBeNull();
