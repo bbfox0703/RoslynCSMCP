@@ -440,14 +440,16 @@ namespace RoslynMcpServer.Core.Services
             SyntaxNode? body = (SyntaxNode?)methodDecl.Body ?? methodDecl.ExpressionBody;
             if (body == null) return false;
 
-            // Quick text heuristic — avoid full semantic analysis per-method
+            // Quick text heuristic — avoid full semantic analysis per-method.
+            // Only match patterns that are genuinely AOT-unsafe:
+            // - "Type.GetType(" targets the static string-based lookup (NOT instance obj.GetType() which is AOT-safe)
+            // - ".GetValue(" and ".SetValue(" are excluded: JsonNode.GetValue<T>() and similar non-reflection APIs
+            //   produce too many false positives; the real reflection uses are caught by GetProperty/GetField below
             var text = body.ToString();
-            return text.Contains("GetType(") ||
+            return text.Contains("Type.GetType(") ||
                    text.Contains("Activator.") ||
                    text.Contains("Assembly.Load") ||
                    text.Contains(".Invoke(") ||
-                   text.Contains(".GetValue(") ||
-                   text.Contains(".SetValue(") ||
                    text.Contains("GetMethod(") ||
                    text.Contains("GetProperty(") ||
                    text.Contains("GetField(") ||

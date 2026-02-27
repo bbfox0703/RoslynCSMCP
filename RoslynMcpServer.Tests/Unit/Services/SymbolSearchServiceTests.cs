@@ -19,7 +19,7 @@ public class SymbolSearchServiceTests : IDisposable
         _mockLogger = MockServiceProvider.CreateMockLogger<SymbolSearchService>();
         _mockCodeAnalysisLogger = MockServiceProvider.CreateMockLogger<CodeAnalysisService>();
         _memoryCache = MockServiceProvider.CreateMemoryCache();
-        _codeAnalysisService = new CodeAnalysisService(_mockCodeAnalysisLogger.Object, _memoryCache);
+        _codeAnalysisService = new CodeAnalysisService(_mockCodeAnalysisLogger.Object);
         _service = new SymbolSearchService(_codeAnalysisService, _mockLogger.Object, _memoryCache);
     }
 
