@@ -17,12 +17,14 @@ namespace RoslynMcpServer.Tools
             Analyze Native AOT and trimming compatibility issues in C# code.
             Detects: reflection patterns incompatible with AOT (Type.GetType, Activator.CreateInstance, etc.),
             JSON serialization without JsonSerializerContext, runtime Regex that should use [GeneratedRegex],
-            and methods missing [RequiresUnreferencedCode] / [DynamicallyAccessedMembers] annotations.
+            methods missing [RequiresUnreferencedCode] / [DynamicallyAccessedMembers] annotations,
+            Avalonia ResourceInclude/StyleInclude created in code-behind (must be in XAML for AOT),
+            and [DllImport] methods that should use [LibraryImport] source generator.
             """)]
         public static async Task<string> AnalyzeAotCompatibility(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
-            [Description("Categories (comma-separated): Reflection, JsonSerialization, GeneratedRegex, TrimAnnotation, all. Default: all")] string categories = "all",
+            [Description("Categories (comma-separated): Reflection, JsonSerialization, GeneratedRegex, TrimAnnotation, AvaloniaRuntime, DllImport, all. Default: all")] string categories = "all",
             [Description("Minimum severity to report: Critical, High, Medium, Low, all. Default: all")] string severity = "all",
             AotCompatibilityAnalyzer analyzer = null!,
             SecurityValidator validator = null!,
@@ -34,7 +36,7 @@ namespace RoslynMcpServer.Tools
                 if (pathError != null) return pathError;
 
                 var categoryArray = categories.Equals("all", StringComparison.OrdinalIgnoreCase)
-                    ? new[] { "Reflection", "JsonSerialization", "GeneratedRegex", "TrimAnnotation" }
+                    ? new[] { "Reflection", "JsonSerialization", "GeneratedRegex", "TrimAnnotation", "AvaloniaRuntime", "DllImport" }
                     : categories.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
                 var results = await analyzer.AnalyzeAsync(solutionPath, categoryArray);
