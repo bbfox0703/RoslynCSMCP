@@ -131,6 +131,12 @@ namespace RoslynMcpServer.Core.Services
 
                     if (ShouldCheck(categories, "TrimAnnotation"))
                         issues.AddRange(CheckTrimAnnotations(root, semanticModel, syntaxTree, project.Name));
+
+                    if (ShouldCheck(categories, "AvaloniaRuntime"))
+                        issues.AddRange(CheckAvaloniaRuntime(root, semanticModel, syntaxTree, project.Name));
+
+                    if (ShouldCheck(categories, "DllImport"))
+                        issues.AddRange(CheckDllImport(root, semanticModel, syntaxTree, project.Name));
                 }
                 catch (Exception ex)
                 {
@@ -445,16 +451,127 @@ namespace RoslynMcpServer.Core.Services
             // - "Type.GetType(" targets the static string-based lookup (NOT instance obj.GetType() which is AOT-safe)
             // - ".GetValue(" and ".SetValue(" are excluded: JsonNode.GetValue<T>() and similar non-reflection APIs
             //   produce too many false positives; the real reflection uses are caught by GetProperty/GetField below
+            // - "MethodInfo.Invoke(" / "MethodBase.Invoke(" target reflection invocation
+            //   (plain ".Invoke(" excluded — it matches delegate.Invoke(), Action.Invoke() etc. which are AOT-safe)
             var text = body.ToString();
             return text.Contains("Type.GetType(") ||
                    text.Contains("Activator.") ||
                    text.Contains("Assembly.Load") ||
-                   text.Contains(".Invoke(") ||
+                   text.Contains("MethodInfo.Invoke(") ||
+                   text.Contains("MethodBase.Invoke(") ||
                    text.Contains("GetMethod(") ||
                    text.Contains("GetProperty(") ||
                    text.Contains("GetField(") ||
                    text.Contains("GetMembers(") ||
                    text.Contains("MakeGenericType(");
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // CheckAvaloniaRuntime
+        // ──────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Detects Avalonia ResourceInclude/StyleInclude created in C# code-behind.
+        /// These use runtime XAML loading (AvaloniaXamlLoader.Load) which fails under AOT
+        /// because compiled XAML resources cannot be resolved at runtime.
+        /// Must be defined in XAML instead to ensure compile-time resolution.
+        /// </summary>
+        private List<AotIssue> CheckAvaloniaRuntime(
+            SyntaxNode root, SemanticModel model, SyntaxTree tree, string project)
+        {
+            var issues = new List<AotIssue>();
+
+            var objectCreations = root.DescendantNodes().OfType<ObjectCreationExpressionSyntax>();
+            foreach (var creation in objectCreations)
+            {
+                try
+                {
+                    var typeSymbol = model.GetTypeInfo(creation).Type;
+                    if (typeSymbol == null) continue;
+
+                    var typeName = typeSymbol.ToDisplayString();
+                    if (typeName is "Avalonia.Markup.Xaml.Styling.ResourceInclude" or
+                                    "Avalonia.Markup.Xaml.Styling.StyleInclude")
+                    {
+                        var shortName = typeSymbol.Name; // "ResourceInclude" or "StyleInclude"
+                        issues.Add(CreateIssue(
+                            "AvaloniaRuntime", "Critical",
+                            $"new {shortName}() in code-behind is AOT-incompatible",
+                            $"{shortName} created in C# code-behind uses AvaloniaXamlLoader.Load() for runtime XAML loading, " +
+                            "which fails under NativeAOT because compiled XAML resources cannot be resolved at runtime. " +
+                            "Define it in XAML instead for compile-time safety.",
+                            tree, creation, project,
+                            $"Move the {shortName} definition to XAML (App.axaml or equivalent). " +
+                            "Remove unwanted resources at runtime instead of adding them dynamically.",
+                            $"<!-- Define in XAML (compile-time safe) -->\n" +
+                            $"<{shortName} Source=\"avares://MyApp/Resources/MyResource.axaml\" />\n\n" +
+                            "// C# code-behind: remove unwanted resources instead of adding\n" +
+                            "Resources.MergedDictionaries.RemoveAt(indexToRemove);"));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error checking Avalonia runtime patterns in {File}", tree.FilePath);
+                }
+            }
+
+            return issues;
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // CheckDllImport
+        // ──────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Detects [DllImport] attributes that should use [LibraryImport] for AOT compatibility.
+        /// [DllImport] uses runtime marshaling which is not supported under NativeAOT.
+        /// [LibraryImport] uses source generation for compile-time marshaling.
+        /// </summary>
+        private List<AotIssue> CheckDllImport(
+            SyntaxNode root, SemanticModel model, SyntaxTree tree, string project)
+        {
+            var issues = new List<AotIssue>();
+
+            var methodDecls = root.DescendantNodes().OfType<MethodDeclarationSyntax>();
+            foreach (var methodDecl in methodDecls)
+            {
+                try
+                {
+                    if (model.GetDeclaredSymbol(methodDecl) is not IMethodSymbol methodSymbol)
+                        continue;
+
+                    bool hasDllImport = methodSymbol.GetAttributes().Any(a =>
+                        a.AttributeClass?.ToDisplayString() == "System.Runtime.InteropServices.DllImportAttribute");
+
+                    if (!hasDllImport) continue;
+
+                    bool hasLibraryImport = methodSymbol.GetAttributes().Any(a =>
+                        a.AttributeClass?.ToDisplayString() == "System.Runtime.InteropServices.LibraryImportAttribute");
+
+                    if (hasLibraryImport) continue; // Already migrated
+
+                    issues.Add(CreateIssue(
+                        "DllImport", "High",
+                        $"[DllImport] on '{methodSymbol.Name}' — use [LibraryImport] for AOT",
+                        "[DllImport] uses runtime P/Invoke marshaling which is not supported under NativeAOT. " +
+                        "[LibraryImport] is a source-generator-based alternative that generates marshaling code at compile time.",
+                        tree, methodDecl, project,
+                        "Replace [DllImport] with [LibraryImport] and make the method 'static partial'.",
+                        "// Before:\n" +
+                        "// [DllImport(\"kernel32.dll\")]\n" +
+                        "// static extern bool CloseHandle(IntPtr handle);\n\n" +
+                        "// After:\n" +
+                        "[LibraryImport(\"kernel32.dll\")]\n" +
+                        "[return: MarshalAs(UnmanagedType.Bool)]\n" +
+                        "internal static partial bool CloseHandle(IntPtr handle);"));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error checking DllImport in {File}", tree.FilePath);
+                }
+            }
+
+            return issues;
         }
 
         // ──────────────────────────────────────────────────────────────────────
