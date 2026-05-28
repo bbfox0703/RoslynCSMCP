@@ -4,13 +4,17 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.Extensions.Logging;
 using RoslynMcpServer.Core.Models;
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 
 namespace RoslynMcpServer.Core.Services
 {
     /// <summary>
     /// Service for analyzing Native AOT and trimming compatibility issues in C# code.
     /// Detects reflection patterns, JSON serialization without source generation,
-    /// runtime Regex that can use [GeneratedRegex], and missing trim annotations.
+    /// runtime Regex that can use [GeneratedRegex], missing trim annotations,
+    /// single-file-trimmed assembly APIs, Avalonia AppBuilder mis-configuration,
+    /// AOT-hostile XAML (.axaml) patterns, and AOT-hostile .csproj build settings.
+    /// Landmine catalogue derived from the Avalonia + .NET Native AOT pitfalls doc.
     /// </summary>
     public class AotCompatibilityAnalyzer
     {
@@ -100,13 +104,6 @@ namespace RoslynMcpServer.Core.Services
             if (compilation == null)
                 return issues;
 
-            // Determine if any class inherits JsonSerializerContext (once per project)
-            bool hasJsonSerializerContext = false;
-            if (ShouldCheck(categories, "JsonSerialization"))
-            {
-                hasJsonSerializerContext = HasJsonSerializerContext(compilation);
-            }
-
             foreach (var syntaxTree in compilation.SyntaxTrees)
             {
                 // Skip generated files
@@ -124,7 +121,7 @@ namespace RoslynMcpServer.Core.Services
                         issues.AddRange(CheckReflection(root, semanticModel, syntaxTree, project.Name));
 
                     if (ShouldCheck(categories, "JsonSerialization"))
-                        issues.AddRange(CheckJsonSerialization(root, semanticModel, syntaxTree, project.Name, hasJsonSerializerContext));
+                        issues.AddRange(CheckJsonSerialization(root, semanticModel, syntaxTree, project.Name));
 
                     if (ShouldCheck(categories, "GeneratedRegex"))
                         issues.AddRange(CheckGeneratedRegex(root, semanticModel, syntaxTree, project.Name));
@@ -137,12 +134,25 @@ namespace RoslynMcpServer.Core.Services
 
                     if (ShouldCheck(categories, "DllImport"))
                         issues.AddRange(CheckDllImport(root, semanticModel, syntaxTree, project.Name));
+
+                    if (ShouldCheck(categories, "AssemblyApi"))
+                        issues.AddRange(CheckAssemblyApi(root, semanticModel, syntaxTree, project.Name));
+
+                    if (ShouldCheck(categories, "AvaloniaAppBuilder"))
+                        issues.AddRange(CheckAvaloniaAppBuilder(root, semanticModel, syntaxTree, project.Name));
                 }
                 catch (Exception ex)
                 {
                     _logger.LogDebug(ex, "Failed to analyze syntax tree: {FilePath}", syntaxTree.FilePath);
                 }
             }
+
+            // Project-level file scans (not part of the C# compilation): XAML + .csproj.
+            if (ShouldCheck(categories, "Xaml"))
+                issues.AddRange(CheckXaml(project));
+
+            if (ShouldCheck(categories, "BuildConfig"))
+                issues.AddRange(CheckBuildConfig(project));
 
             return issues;
         }
@@ -250,34 +260,17 @@ namespace RoslynMcpServer.Core.Services
         // CheckJsonSerialization
         // ──────────────────────────────────────────────────────────────────────
 
-        private static bool HasJsonSerializerContext(Compilation compilation)
-        {
-            foreach (var tree in compilation.SyntaxTrees)
-            {
-                var root = tree.GetRoot();
-                var classDecls = root.DescendantNodes().OfType<ClassDeclarationSyntax>();
-                foreach (var cls in classDecls)
-                {
-                    if (cls.BaseList == null) continue;
-                    foreach (var baseType in cls.BaseList.Types)
-                    {
-                        var baseTypeName = baseType.ToString();
-                        if (baseTypeName.Contains("JsonSerializerContext"))
-                            return true;
-                    }
-                }
-            }
-            return false;
-        }
-
+        /// <summary>
+        /// Detects per-call JSON serialization that uses a reflection-based overload.
+        /// An overload is AOT-safe only when it takes a source-generated JsonTypeInfo&lt;T&gt;
+        /// or a JsonSerializerContext — the presence of a context elsewhere in the project
+        /// does NOT make a reflection-overload call site safe (every call must pass it).
+        /// Also flags JsonValue.Create, which trips IL2026/IL3050 even under a context.
+        /// </summary>
         private List<AotIssue> CheckJsonSerialization(
-            SyntaxNode root, SemanticModel model, SyntaxTree tree,
-            string project, bool hasJsonSerializerContext)
+            SyntaxNode root, SemanticModel model, SyntaxTree tree, string project)
         {
             var issues = new List<AotIssue>();
-
-            if (hasJsonSerializerContext)
-                return issues; // Source-gen context present — no issue
 
             var invocations = root.DescendantNodes().OfType<InvocationExpressionSyntax>();
 
@@ -295,13 +288,31 @@ namespace RoslynMcpServer.Core.Services
                     if (containingType == "System.Text.Json.JsonSerializer" &&
                         (methodName is "Serialize" or "Deserialize" or "SerializeAsync" or "DeserializeAsync"))
                     {
+                        // AOT-safe overloads accept a JsonTypeInfo<T> or a JsonSerializerContext.
+                        if (UsesSourceGenJsonOverload(methodSymbol))
+                            continue;
+
                         issues.Add(CreateIssue(
                             "JsonSerialization", "High",
-                            $"JsonSerializer.{methodName} without JsonSerializerContext",
-                            "Using JsonSerializer without a source-generated JsonSerializerContext is AOT-incompatible. The reflection-based serializer cannot work in NativeAOT.",
+                            $"JsonSerializer.{methodName} reflection overload is AOT-incompatible",
+                            "This JsonSerializer overload uses runtime reflection and fails under NativeAOT. " +
+                            "A JsonSerializerContext existing elsewhere in the project does not help — every call " +
+                            "must pass JsonContext.Default.YourType (a JsonTypeInfo<T>), never the Type-argument or options-only overload.",
                             tree, invocation, project,
-                            "Add [JsonSerializable(typeof(YourType))] to a JsonSerializerContext subclass and pass the context to the serializer.",
+                            "Pass the source-generated JsonTypeInfo (Context.Default.YourType) to the call.",
                             "[JsonSerializable(typeof(MyModel))]\npublic partial class AppJsonContext : JsonSerializerContext { }\n// Usage: JsonSerializer.Serialize(obj, AppJsonContext.Default.MyModel);"));
+                    }
+                    // System.Text.Json.Nodes.JsonValue.Create — reflective even under a context.
+                    else if (containingType == "System.Text.Json.Nodes.JsonValue" && methodName == "Create")
+                    {
+                        issues.Add(CreateIssue(
+                            "JsonSerialization", "Medium",
+                            "JsonValue.Create(...) trips IL2026/IL3050 under AOT",
+                            "JsonValue.Create still trips IL2026 + IL3050 even when a JsonSerializerContext is present, " +
+                            "because it falls back to reflection-based converters for the value type.",
+                            tree, invocation, project,
+                            "Use a JsonObject initializer (new JsonObject { [\"k\"] = \"v\" }) or Utf8JsonWriter for hot paths.",
+                            "// Before: node[\"k\"] = JsonValue.Create(s);\n// After:  var o = new JsonObject { [\"k\"] = s };"));
                     }
                 }
                 catch (Exception ex)
@@ -312,6 +323,19 @@ namespace RoslynMcpServer.Core.Services
 
             return issues;
         }
+
+        /// <summary>
+        /// True when a JsonSerializer overload is AOT-safe — i.e. it accepts a
+        /// source-generated JsonTypeInfo&lt;T&gt; or a JsonSerializerContext parameter.
+        /// </summary>
+        private static bool UsesSourceGenJsonOverload(IMethodSymbol methodSymbol) =>
+            methodSymbol.Parameters.Any(p =>
+            {
+                var t = p.Type.OriginalDefinition.ToDisplayString();
+                return t == "System.Text.Json.Serialization.Metadata.JsonTypeInfo" ||
+                       t == "System.Text.Json.Serialization.Metadata.JsonTypeInfo<T>" ||
+                       t == "System.Text.Json.Serialization.JsonSerializerContext";
+            });
 
         // ──────────────────────────────────────────────────────────────────────
         // CheckGeneratedRegex
@@ -575,6 +599,374 @@ namespace RoslynMcpServer.Core.Services
         }
 
         // ──────────────────────────────────────────────────────────────────────
+        // CheckAssemblyApi
+        // ──────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Detects Assembly.GetExecutingAssembly() — trimmed away in single-file AOT
+        /// publishes, returning no version. Assembly.GetEntryAssembly() survives.
+        /// </summary>
+        private List<AotIssue> CheckAssemblyApi(
+            SyntaxNode root, SemanticModel model, SyntaxTree tree, string project)
+        {
+            var issues = new List<AotIssue>();
+
+            var invocations = root.DescendantNodes().OfType<InvocationExpressionSyntax>();
+            foreach (var invocation in invocations)
+            {
+                try
+                {
+                    var symbolInfo = model.GetSymbolInfo(invocation);
+                    if (symbolInfo.Symbol is not IMethodSymbol methodSymbol)
+                        continue;
+
+                    var containingType = methodSymbol.ContainingType?.ToDisplayString() ?? string.Empty;
+                    if (containingType != "System.Reflection.Assembly") continue;
+                    if (methodSymbol.Name != "GetExecutingAssembly") continue;
+
+                    issues.Add(CreateIssue(
+                        "AssemblyApi", "High",
+                        "Assembly.GetExecutingAssembly() is trimmed in single-file AOT",
+                        "Single-file Native AOT publishes trim Assembly.GetExecutingAssembly() — it returns null/no version at runtime. Use GetEntryAssembly() instead.",
+                        tree, invocation, project,
+                        "Replace Assembly.GetExecutingAssembly() with Assembly.GetEntryAssembly().",
+                        "// Before: var v = Assembly.GetExecutingAssembly().GetName().Version;\n// After:  var v = Assembly.GetEntryAssembly()?.GetName().Version;"));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error checking assembly API in {File}", tree.FilePath);
+                }
+            }
+
+            return issues;
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // CheckAvaloniaAppBuilder
+        // ──────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Detects Avalonia AppBuilder.Configure&lt;T&gt;() chains that are mis-configured
+        /// for Native AOT on win-x64:
+        ///   - missing .UseHarfBuzz() → process fast-fails with 0xC0000409 BEFORE any log
+        ///     write (looks identical to "EXE doesn't run").
+        ///   - missing Win32CompositionMode.RedirectionSurface → MicroCom CCW vtable init
+        ///     fails → NullReferenceException at compositor startup.
+        ///   - .UsePlatformDetect() drags X11/FreeDesktop/DBus into the assembly graph,
+        ///     producing "will always throw" ILC diagnostics for trimmed Linux entrypoints.
+        /// Only fires when an AppBuilder.Configure chain is present in the file.
+        /// </summary>
+        private List<AotIssue> CheckAvaloniaAppBuilder(
+            SyntaxNode root, SemanticModel model, SyntaxTree tree, string project)
+        {
+            var issues = new List<AotIssue>();
+
+            InvocationExpressionSyntax? configureCall = null;
+            bool hasUsePlatformDetect = false, hasUseHarfBuzz = false, hasRedirectionSurface = false;
+
+            foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                if (invocation.Expression is not MemberAccessExpressionSyntax member)
+                    continue;
+
+                var name = member.Name.Identifier.ValueText;
+                switch (name)
+                {
+                    case "Configure":
+                        // Confirm it's Avalonia.AppBuilder.Configure, not some other Configure().
+                        try
+                        {
+                            var sym = model.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+                            var ct = sym?.ContainingType?.ToDisplayString();
+                            if (ct == "Avalonia.AppBuilder")
+                                configureCall = invocation;
+                        }
+                        catch { /* best effort */ }
+                        break;
+                    case "UsePlatformDetect": hasUsePlatformDetect = true; break;
+                    case "UseHarfBuzz": hasUseHarfBuzz = true; break;
+                }
+            }
+
+            // RedirectionSurface appears as a member access on the Win32CompositionMode enum.
+            if (root.DescendantNodes().OfType<MemberAccessExpressionSyntax>()
+                    .Any(m => m.Name.Identifier.ValueText == "RedirectionSurface"))
+                hasRedirectionSurface = true;
+
+            if (configureCall == null)
+                return issues;
+
+            if (hasUsePlatformDetect)
+            {
+                issues.Add(CreateIssue(
+                    "AvaloniaAppBuilder", "Medium",
+                    "AppBuilder.UsePlatformDetect() drags Linux backends under AOT on win-x64",
+                    ".UsePlatformDetect() pulls Avalonia.X11/FreeDesktop/Tmds.DBus into the graph; ILC then emits " +
+                    "\"will always throw\" diagnostics for the Linux entrypoints whose DBus types were trimmed away.",
+                    tree, configureCall, project,
+                    "On win-x64, reference backends explicitly: .UseWin32().UseSkia().UseHarfBuzz() — don't UsePlatformDetect().",
+                    ".UseWin32()\n.UseSkia()\n.UseHarfBuzz();"));
+            }
+            else
+            {
+                if (!hasUseHarfBuzz)
+                    issues.Add(CreateIssue(
+                        "AvaloniaAppBuilder", "Critical",
+                        "AppBuilder chain is missing .UseHarfBuzz() — 0xC0000409 fast-fail under AOT",
+                        "Without .UseHarfBuzz() there is no text-shaping system; the process fast-fails with 0xC0000409 " +
+                        "BEFORE any log write, looking identical to \"the EXE doesn't run\".",
+                        tree, configureCall, project,
+                        "Add .UseHarfBuzz() to the AppBuilder chain.",
+                        "AppBuilder.Configure<App>()\n    .UseWin32()\n    .UseSkia()\n    .UseHarfBuzz();"));
+
+                if (!hasRedirectionSurface)
+                    issues.Add(CreateIssue(
+                        "AvaloniaAppBuilder", "High",
+                        "AppBuilder is missing Win32CompositionMode.RedirectionSurface",
+                        "Under AOT, MicroCom CCW vtable init fails → QueryInterface returns a null vtable → " +
+                        "NullReferenceException at compositor startup. RedirectionSurface forces the legacy GDI compositor path.",
+                        tree, configureCall, project,
+                        "Set Win32PlatformOptions.CompositionMode = [Win32CompositionMode.RedirectionSurface].",
+                        ".With(new Win32PlatformOptions\n{\n    CompositionMode = [Win32CompositionMode.RedirectionSurface],\n})"));
+            }
+
+            return issues;
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // CheckXaml
+        // ──────────────────────────────────────────────────────────────────────
+
+        private static readonly Regex RunWithBindingRegex = new(
+            @"<Run\b[^>]*\bText\s*=\s*""\{\s*(?:Compiled)?Binding",
+            RegexOptions.Compiled | RegexOptions.Singleline);
+
+        private static readonly Regex RootElementRegex = new(
+            @"<(Window|UserControl|Page)\b[^>]*>",
+            RegexOptions.Compiled | RegexOptions.Singleline);
+
+        private static readonly Regex DataTemplateOpenRegex = new(
+            @"<DataTemplate\b[^>]*>",
+            RegexOptions.Compiled | RegexOptions.Singleline);
+
+        private static readonly Regex DataGridTemplateColumnRegex = new(
+            @"<DataGridTemplateColumn\b[^>]*>",
+            RegexOptions.Compiled | RegexOptions.Singleline);
+
+        /// <summary>
+        /// Scans .axaml/.xaml files (which are NOT part of the C# compilation) for the
+        /// AOT-hostile XAML patterns in the pitfalls catalogue.
+        /// </summary>
+        private List<AotIssue> CheckXaml(Project project)
+        {
+            var issues = new List<AotIssue>();
+
+            var projectDir = string.IsNullOrEmpty(project.FilePath)
+                ? null : Path.GetDirectoryName(project.FilePath);
+            if (string.IsNullOrEmpty(projectDir) || !Directory.Exists(projectDir))
+                return issues;
+
+            IEnumerable<string> xamlFiles;
+            try
+            {
+                xamlFiles = Directory.EnumerateFiles(projectDir, "*.axaml", SearchOption.AllDirectories)
+                    .Concat(Directory.EnumerateFiles(projectDir, "*.xaml", SearchOption.AllDirectories))
+                    .Where(f => !IsInBuildOutput(f));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to enumerate XAML in {Dir}", projectDir);
+                return issues;
+            }
+
+            foreach (var file in xamlFiles)
+            {
+                string text;
+                try { text = File.ReadAllText(file); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to read XAML {File}", file); continue; }
+
+                // §0.25 / §4.10 — <Run Text="{Binding}"/> inside a TextBlock → StackOverflow under AOT.
+                foreach (Match m in RunWithBindingRegex.Matches(text))
+                {
+                    issues.Add(CreateFileIssue(
+                        "Xaml", "Critical",
+                        "<Run Text=\"{Binding ...}\"/> causes StackOverflow under AOT",
+                        "A bound <Run> inside a <TextBlock> recurses into a StackOverflow under Native AOT.",
+                        file, LineOf(text, m.Index), project.Name,
+                        "Bind on the <TextBlock> directly instead of an inner <Run>.",
+                        "<!-- Before --> <TextBlock><Run Text=\"{Binding Name}\"/></TextBlock>\n" +
+                        "<!-- After  --> <TextBlock Text=\"{Binding Name}\"/>",
+                        Snippet(text, m.Index)));
+                }
+
+                bool hasBinding = text.Contains("{Binding") || text.Contains("{CompiledBinding");
+
+                // §0.11 / §4.1 — root element must carry x:DataType for compiled bindings.
+                var rootMatch = RootElementRegex.Match(text);
+                if (hasBinding && rootMatch.Success && !rootMatch.Value.Contains("x:DataType"))
+                {
+                    issues.Add(CreateFileIssue(
+                        "Xaml", "Medium",
+                        "Root element has bindings but no x:DataType",
+                        "With AvaloniaUseCompiledBindingsByDefault=true, compiled bindings require x:DataType on the " +
+                        "root Window/UserControl/Page. Reflection bindings die under AOT.",
+                        file, LineOf(text, rootMatch.Index), project.Name,
+                        "Add x:DataType=\"vm:YourViewModel\" to the root element.",
+                        "<UserControl ... x:DataType=\"vm:FooViewModel\">",
+                        Snippet(text, rootMatch.Index)));
+                }
+
+                // §4.1 — every DataTemplate that binds also needs x:DataType.
+                foreach (Match m in DataTemplateOpenRegex.Matches(text))
+                {
+                    if (m.Value.Contains("x:DataType")) continue;
+                    issues.Add(CreateFileIssue(
+                        "Xaml", "Medium",
+                        "<DataTemplate> without x:DataType",
+                        "Compiled bindings refuse a DataTemplate without x:DataType (including nested templates).",
+                        file, LineOf(text, m.Index), project.Name,
+                        "Add x:DataType=\"m:RowModel\" to the DataTemplate.",
+                        "<DataTemplate x:DataType=\"m:ItemRow\">",
+                        Snippet(text, m.Index)));
+                }
+
+                // §4.5 — DataGridTemplateColumn won't sort under AOT without SortMemberPath.
+                foreach (Match m in DataGridTemplateColumnRegex.Matches(text))
+                {
+                    if (m.Value.Contains("SortMemberPath")) continue;
+                    issues.Add(CreateFileIssue(
+                        "Xaml", "Medium",
+                        "<DataGridTemplateColumn> without SortMemberPath won't sort under AOT",
+                        "A DataGridTemplateColumn with a compiled-binding cell template has no readable Path, so the grid " +
+                        "auto-sets CanUserSort=False and the reflection sort silently no-ops. Needs SortMemberPath + " +
+                        "CanUserSort=True + a CustomSortComparer wired in code-behind.",
+                        file, LineOf(text, m.Index), project.Name,
+                        "Add SortMemberPath=\"ClrProp\" + CanUserSort=\"True\", and wire CustomSortComparer at Loaded.",
+                        "<DataGridTemplateColumn Header=\"Offset\" SortMemberPath=\"Offset\" CanUserSort=\"True\">",
+                        Snippet(text, m.Index)));
+                }
+            }
+
+            return issues;
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // CheckBuildConfig
+        // ──────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Reads the project's .csproj and flags AOT-hostile build settings from the
+        /// pitfalls catalogue. Avalonia-specific checks only fire when the project
+        /// references an Avalonia package.
+        /// </summary>
+        private List<AotIssue> CheckBuildConfig(Project project)
+        {
+            var issues = new List<AotIssue>();
+
+            if (string.IsNullOrEmpty(project.FilePath) || !File.Exists(project.FilePath))
+                return issues;
+
+            string text;
+            try { text = File.ReadAllText(project.FilePath); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to read csproj {File}", project.FilePath); return issues; }
+
+            bool referencesAvalonia = Regex.IsMatch(text, @"PackageReference\s+Include\s*=\s*""Avalonia");
+            if (!referencesAvalonia)
+                return issues;
+
+            var csproj = project.FilePath;
+
+            // §0.3 — Avalonia 12 MicroCom needs BuiltInComInteropSupport=false for AOT.
+            var comTrue = Regex.Match(text, @"<BuiltInComInteropSupport>\s*true\s*</BuiltInComInteropSupport>", RegexOptions.IgnoreCase);
+            bool comFalse = Regex.IsMatch(text, @"<BuiltInComInteropSupport>\s*false\s*</BuiltInComInteropSupport>", RegexOptions.IgnoreCase);
+            if (!comFalse)
+            {
+                int idx = comTrue.Success ? comTrue.Index : FirstAvaloniaRefIndex(text);
+                issues.Add(CreateFileIssue(
+                    "BuildConfig", "High",
+                    "BuiltInComInteropSupport is not set to false",
+                    "Avalonia 12's MicroCom requires <BuiltInComInteropSupport>false</BuiltInComInteropSupport> for Native AOT.",
+                    csproj, LineOf(text, idx), project.Name,
+                    "Add <BuiltInComInteropSupport>false</BuiltInComInteropSupport> to a PropertyGroup.",
+                    "<BuiltInComInteropSupport>false</BuiltInComInteropSupport>",
+                    comTrue.Success ? comTrue.Value : string.Empty));
+            }
+
+            // §0.13 — don't reference Avalonia.Desktop on win-x64 (drags X11/FreeDesktop/DBus).
+            var desktopRef = Regex.Match(text, @"PackageReference\s+Include\s*=\s*""Avalonia\.Desktop""");
+            bool isWinX64 = text.Contains("win-x64");
+            if (desktopRef.Success && isWinX64)
+            {
+                issues.Add(CreateFileIssue(
+                    "BuildConfig", "Medium",
+                    "Avalonia.Desktop referenced on win-x64",
+                    "Avalonia.Desktop drags Avalonia.X11 + Avalonia.FreeDesktop + Tmds.DBus.Protocol; ILC emits " +
+                    "\"will always throw\" diagnostics for trimmed Linux entrypoints.",
+                    csproj, LineOf(text, desktopRef.Index), project.Name,
+                    "Reference Avalonia.Win32 + Avalonia.Skia + Avalonia.HarfBuzz explicitly instead of Avalonia.Desktop.",
+                    "<PackageReference Include=\"Avalonia.Win32\" Version=\"12.0.3\" />\n" +
+                    "<PackageReference Include=\"Avalonia.Skia\" Version=\"12.0.3\" />\n" +
+                    "<PackageReference Include=\"Avalonia.HarfBuzz\" Version=\"12.0.3\" />",
+                    desktopRef.Value));
+            }
+
+            // §3.1 — Avalonia loads backends via reflection; without TrimmerRootAssembly roots ILC drops them.
+            if (!text.Contains("<TrimmerRootAssembly"))
+            {
+                issues.Add(CreateFileIssue(
+                    "BuildConfig", "Medium",
+                    "No <TrimmerRootAssembly> entries for Avalonia",
+                    "Avalonia loads platform/render backends via reflection. Without TrimmerRootAssembly roots the trimmer " +
+                    "drops them and the app NREs in the compositor thread at startup.",
+                    csproj, LineOf(text, FirstAvaloniaRefIndex(text)), project.Name,
+                    "Add the canonical TrimmerRootAssembly list (Avalonia, Avalonia.Base, Avalonia.Win32, Avalonia.Skia, ...).",
+                    "<TrimmerRootAssembly Include=\"Avalonia\" />\n<TrimmerRootAssembly Include=\"Avalonia.Win32\" />\n<TrimmerRootAssembly Include=\"Avalonia.Skia\" />"));
+            }
+
+            // §0.4 — compiled bindings required under AOT; reflection bindings die.
+            bool compiledBindingsTrue = Regex.IsMatch(text,
+                @"<AvaloniaUseCompiledBindingsByDefault>\s*true\s*</AvaloniaUseCompiledBindingsByDefault>", RegexOptions.IgnoreCase);
+            if (!compiledBindingsTrue)
+            {
+                issues.Add(CreateFileIssue(
+                    "BuildConfig", "Low",
+                    "AvaloniaUseCompiledBindingsByDefault is not enabled",
+                    "Reflection-based bindings die under AOT. Enable compiled bindings by default (requires x:DataType everywhere).",
+                    csproj, LineOf(text, FirstAvaloniaRefIndex(text)), project.Name,
+                    "Add <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>.",
+                    "<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>"));
+            }
+
+            return issues;
+        }
+
+        private static int FirstAvaloniaRefIndex(string csprojText)
+        {
+            var m = Regex.Match(csprojText, @"PackageReference\s+Include\s*=\s*""Avalonia");
+            return m.Success ? m.Index : 0;
+        }
+
+        private static bool IsInBuildOutput(string path) =>
+            path.Contains("\\obj\\") || path.Contains("/obj/") ||
+            path.Contains("\\bin\\") || path.Contains("/bin/");
+
+        private static int LineOf(string text, int index)
+        {
+            int line = 1;
+            int limit = Math.Min(index, text.Length);
+            for (int i = 0; i < limit; i++)
+                if (text[i] == '\n') line++;
+            return line;
+        }
+
+        private static string Snippet(string text, int index)
+        {
+            int end = text.IndexOf('\n', index);
+            if (end < 0) end = text.Length;
+            return text[index..end].Trim();
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
         // CreateIssue helper
         // ──────────────────────────────────────────────────────────────────────
 
@@ -600,6 +992,34 @@ namespace RoslynMcpServer.Core.Services
                 LineNumber = line,
                 SymbolName = string.Empty,
                 CodeSnippet = codeSnippet.Trim(),
+                Recommendation = recommendation,
+                FixExample = fixExample
+            };
+        }
+
+        /// <summary>
+        /// CreateIssue variant for findings sourced from raw files (XAML, .csproj) that
+        /// are not part of the C# compilation and therefore have no SyntaxTree/SyntaxNode.
+        /// </summary>
+        private static AotIssue CreateFileIssue(
+            string category, string severity, string title, string description,
+            string filePath, int lineNumber, string project,
+            string recommendation, string fixExample, string codeSnippet = "")
+        {
+            var snippet = codeSnippet.Length > 100 ? codeSnippet[..100] + "…" : codeSnippet;
+
+            return new AotIssue
+            {
+                Category = category,
+                Severity = severity,
+                Title = title,
+                Description = description,
+                FilePath = filePath,
+                FileName = Path.GetFileName(filePath),
+                ProjectName = project,
+                LineNumber = lineNumber,
+                SymbolName = string.Empty,
+                CodeSnippet = snippet.Trim(),
                 Recommendation = recommendation,
                 FixExample = fixExample
             };
