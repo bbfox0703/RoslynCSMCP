@@ -14,17 +14,20 @@ namespace RoslynMcpServer.Interop.Tools;
 public class InteropTools
 {
     [McpServerTool, Description("""
-        Analyze Native AOT and trimming compatibility issues in C# code.
+        Analyze Native AOT and trimming compatibility issues across C#, XAML (.axaml), and .csproj.
         Detects: reflection patterns incompatible with AOT (Type.GetType, Activator.CreateInstance, etc.),
-        JSON serialization without JsonSerializerContext, runtime Regex that should use [GeneratedRegex],
-        methods missing [RequiresUnreferencedCode] / [DynamicallyAccessedMembers] annotations,
-        Avalonia ResourceInclude/StyleInclude created in code-behind (must be in XAML for AOT),
-        and [DllImport] methods that should use [LibraryImport] source generator.
+        JSON serializer reflection overloads (per-call) and JsonValue.Create, runtime Regex that should
+        use [GeneratedRegex], methods missing [RequiresUnreferencedCode] / [DynamicallyAccessedMembers],
+        Avalonia ResourceInclude/StyleInclude created in code-behind, [DllImport] that should use
+        [LibraryImport], Assembly.GetExecutingAssembly() (trimmed in single-file AOT), Avalonia AppBuilder
+        chains missing .UseHarfBuzz()/RedirectionSurface or using UsePlatformDetect(), AOT-hostile XAML
+        (<Run> bindings, missing x:DataType, DataGridTemplateColumn sort), and AOT-hostile .csproj build
+        settings (BuiltInComInteropSupport, Avalonia.Desktop on win-x64, missing TrimmerRootAssembly).
         """)]
     public static async Task<string> AnalyzeAotCompatibility(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
-        [Description("Categories (comma-separated): Reflection, JsonSerialization, GeneratedRegex, TrimAnnotation, AvaloniaRuntime, DllImport, all. Default: all")] string categories = "all",
+        [Description("Categories (comma-separated): Reflection, JsonSerialization, GeneratedRegex, TrimAnnotation, AvaloniaRuntime, DllImport, AssemblyApi, AvaloniaAppBuilder, Xaml, BuildConfig, all. Default: all")] string categories = "all",
         [Description("Minimum severity to report: Critical, High, Medium, Low, all. Default: all")] string severity = "all",
         AotCompatibilityAnalyzer analyzer = null!,
         SecurityValidator validator = null!,
@@ -36,7 +39,7 @@ public class InteropTools
             if (pathError != null) return pathError;
 
             var categoryArray = categories.Equals("all", StringComparison.OrdinalIgnoreCase)
-                ? new[] { "Reflection", "JsonSerialization", "GeneratedRegex", "TrimAnnotation", "AvaloniaRuntime", "DllImport" }
+                ? new[] { "Reflection", "JsonSerialization", "GeneratedRegex", "TrimAnnotation", "AvaloniaRuntime", "DllImport", "AssemblyApi", "AvaloniaAppBuilder", "Xaml", "BuildConfig" }
                 : categories.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
             var results = await analyzer.AnalyzeAsync(solutionPath, categoryArray);

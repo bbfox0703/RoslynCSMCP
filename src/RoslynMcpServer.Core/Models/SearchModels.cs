@@ -1554,7 +1554,7 @@ namespace RoslynMcpServer.Core.Models
     /// </summary>
     public class AotIssue
     {
-        public string Category { get; set; } = string.Empty;     // Reflection|JsonSerialization|GeneratedRegex|TrimAnnotation
+        public string Category { get; set; } = string.Empty;     // Reflection|JsonSerialization|GeneratedRegex|TrimAnnotation|AvaloniaRuntime|DllImport|AssemblyApi|AvaloniaAppBuilder|Xaml|BuildConfig
         public string Severity { get; set; } = string.Empty;     // Critical|High|Medium|Low
         public string Title { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
