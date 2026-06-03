@@ -1,7 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.Extensions.Logging;
 using RoslynMcpServer.Core.Models;
 using System.Collections.Concurrent;
@@ -33,7 +32,8 @@ namespace RoslynMcpServer.Core.Services
         public async Task<TestCoverageResults> AnalyzeTestCoverageAsync(
             string solutionPath,
             string scope = "public",
-            string groupBy = "project")
+            string groupBy = "project",
+            CancellationToken cancellationToken = default)
         {
             var results = new TestCoverageResults();
 
@@ -41,6 +41,12 @@ namespace RoslynMcpServer.Core.Services
             {
                 var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
                 var allTypeCoverages = new ConcurrentBag<TypeCoverage>();
+
+                // Build a single reverse-reference index of all symbols referenced from
+                // test projects. This replaces a per-member full-solution
+                // SymbolFinder.FindReferencesAsync search (which was O(members × solution))
+                // with one pass over the test code and O(1) lookups per member.
+                var testReferenceIndex = await BuildTestReferenceIndexAsync(solution, cancellationToken);
 
                 // Get non-test projects
                 var nonTestProjects = solution.Projects
@@ -54,7 +60,7 @@ namespace RoslynMcpServer.Core.Services
                 {
                     try
                     {
-                        var projectCoverages = await AnalyzeProjectCoverageAsync(project, solution, scope);
+                        var projectCoverages = await AnalyzeProjectCoverageAsync(project, solution, scope, testReferenceIndex, cancellationToken);
                         foreach (var coverage in projectCoverages)
                         {
                             allTypeCoverages.Add(coverage);
@@ -99,11 +105,13 @@ namespace RoslynMcpServer.Core.Services
         private async Task<List<TypeCoverage>> AnalyzeProjectCoverageAsync(
             Project project,
             Solution solution,
-            string scope)
+            string scope,
+            IReadOnlyDictionary<string, List<string>> testReferenceIndex,
+            CancellationToken cancellationToken)
         {
             var coverages = new List<TypeCoverage>();
 
-            var compilation = await project.GetCompilationAsync();
+            var compilation = await project.GetCompilationAsync(cancellationToken);
             if (compilation == null)
                 return coverages;
 
@@ -112,9 +120,10 @@ namespace RoslynMcpServer.Core.Services
 
             foreach (var typeSymbol in allTypes)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    var coverage = await AnalyzeTypeCoverageAsync(typeSymbol, solution, project);
+                    var coverage = await AnalyzeTypeCoverageAsync(typeSymbol, solution, project, testReferenceIndex, cancellationToken);
                     coverages.Add(coverage);
                 }
                 catch (Exception ex)
@@ -132,7 +141,9 @@ namespace RoslynMcpServer.Core.Services
         private async Task<TypeCoverage> AnalyzeTypeCoverageAsync(
             INamedTypeSymbol typeSymbol,
             Solution solution,
-            Project project)
+            Project project,
+            IReadOnlyDictionary<string, List<string>> testReferenceIndex,
+            CancellationToken cancellationToken)
         {
             var coverage = new TypeCoverage
             {
@@ -180,7 +191,7 @@ namespace RoslynMcpServer.Core.Services
 
             foreach (var member in publicMembers)
             {
-                var memberCoverage = await AnalyzeMemberCoverageAsync(member, solution);
+                var memberCoverage = await AnalyzeMemberCoverageAsync(member, testReferenceIndex);
 
                 totalComplexity += memberCoverage.CyclomaticComplexity;
                 if (memberCoverage.CyclomaticComplexity > maxComplexity)
@@ -209,7 +220,9 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Analyzes test coverage for a single member
         /// </summary>
-        private async Task<MemberCoverage> AnalyzeMemberCoverageAsync(ISymbol member, Solution solution)
+        private async Task<MemberCoverage> AnalyzeMemberCoverageAsync(
+            ISymbol member,
+            IReadOnlyDictionary<string, List<string>> testReferenceIndex)
         {
             var memberCoverage = new MemberCoverage
             {
@@ -234,28 +247,122 @@ namespace RoslynMcpServer.Core.Services
                 memberCoverage.CyclomaticComplexity = await CalculateMethodComplexityAsync(method);
             }
 
-            // Check if member has tests (simplified - checks if any test references this member)
-            try
+            // Check if member has tests (simplified - checks if any test references this member).
+            // Looked up against the pre-built reverse-reference index instead of running a
+            // full-solution reference search per member.
+            var memberKey = GetReferenceKey(member);
+            if (memberKey != null && testReferenceIndex.TryGetValue(memberKey, out var testReferences) && testReferences.Count > 0)
             {
-                var references = await SymbolFinder.FindReferencesAsync(member, solution);
-                var testReferences = references
-                    .SelectMany(r => r.Locations)
-                    .Where(loc => loc.Document != null && IsTestProject(loc.Document.Project.Name))
-                    .ToList();
-
-                memberCoverage.HasTest = testReferences.Any();
-                memberCoverage.TestMethods = testReferences
-                    .Select(loc => $"{loc.Document?.Name}:{loc.Location.GetLineSpan().StartLinePosition.Line + 1}")
-                    .Distinct()
-                    .Take(5)
-                    .ToList();
+                memberCoverage.HasTest = true;
+                memberCoverage.TestMethods = testReferences.Take(5).ToList();
             }
-            catch
+            else
             {
                 memberCoverage.HasTest = false;
             }
 
             return memberCoverage;
+        }
+
+        /// <summary>
+        /// Builds a reverse-reference index mapping a symbol key to the test-project
+        /// locations that reference it. Walks every test-project document's syntax/semantic
+        /// model exactly once, so member coverage can be resolved with O(1) lookups instead
+        /// of an O(members × solution) reference search.
+        /// </summary>
+        private async Task<IReadOnlyDictionary<string, List<string>>> BuildTestReferenceIndexAsync(
+            Solution solution,
+            CancellationToken cancellationToken)
+        {
+            var index = new ConcurrentDictionary<string, ConcurrentBag<string>>();
+
+            var testDocuments = solution.Projects
+                .Where(p => p.SupportsCompilation && IsTestProject(p.Name))
+                .SelectMany(p => p.Documents)
+                .ToList();
+
+            if (testDocuments.Count == 0)
+                return new Dictionary<string, List<string>>();
+
+            // Bound parallelism so a very large solution can't spawn unbounded
+            // semantic-model work all at once.
+            var maxConcurrency = Math.Max(1, Environment.ProcessorCount / 2);
+            using var throttle = new SemaphoreSlim(maxConcurrency);
+
+            var tasks = testDocuments.Select(async document =>
+            {
+                await throttle.WaitAsync(cancellationToken);
+                try
+                {
+                    await IndexTestDocumentAsync(document, index, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to index test document: {DocumentName}", document.Name);
+                }
+                finally
+                {
+                    throttle.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks);
+
+            return index.ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value.Distinct().ToList());
+        }
+
+        /// <summary>
+        /// Indexes every symbol referenced from a single test document.
+        /// </summary>
+        private static async Task IndexTestDocumentAsync(
+            Document document,
+            ConcurrentDictionary<string, ConcurrentBag<string>> index,
+            CancellationToken cancellationToken)
+        {
+            var semanticModel = await document.GetSemanticModelAsync(cancellationToken);
+            var root = await document.GetSyntaxRootAsync(cancellationToken);
+            if (semanticModel == null || root == null)
+                return;
+
+            foreach (var node in root.DescendantNodes())
+            {
+                if (node is not (IdentifierNameSyntax or GenericNameSyntax))
+                    continue;
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var symbol = semanticModel.GetSymbolInfo(node, cancellationToken).Symbol;
+                if (symbol == null)
+                    continue;
+
+                var key = GetReferenceKey(symbol);
+                if (key == null)
+                    continue;
+
+                var line = node.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+                index.GetOrAdd(key, _ => new ConcurrentBag<string>())
+                     .Add($"{document.Name}:{line}");
+            }
+        }
+
+        /// <summary>
+        /// Produces a stable, cross-compilation key for a symbol so that references resolved
+        /// in a test project's compilation match definitions in the analyzed project's
+        /// compilation. Returns null for symbols that have no documentation comment id.
+        /// </summary>
+        private static string? GetReferenceKey(ISymbol symbol)
+        {
+            // Map reduced extension method invocations back to their original definition.
+            if (symbol is IMethodSymbol { ReducedFrom: { } reducedFrom })
+                symbol = reducedFrom;
+
+            return symbol.OriginalDefinition.GetDocumentationCommentId();
         }
 
         /// <summary>
@@ -365,7 +472,10 @@ namespace RoslynMcpServer.Core.Services
                 }
             }
 
-            VisitNamespace(compilation.GlobalNamespace);
+            // Use the source assembly's global namespace rather than compilation.GlobalNamespace:
+            // the latter merges in every referenced assembly (the entire BCL), which would make
+            // us analyze tens of thousands of metadata types that can never have test coverage.
+            VisitNamespace(compilation.Assembly.GlobalNamespace);
             return types;
         }
 
