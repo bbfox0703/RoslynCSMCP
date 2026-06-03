@@ -259,139 +259,14 @@ namespace RoslynMcpServer.Core.Services
         }
 
         private int CalculateCyclomaticComplexity(SyntaxNode memberNode)
-        {
-            int complexity = 1; // Base complexity
-
-            // Traditional decision points
-            var decisionPoints = memberNode.DescendantNodes().Where(node =>
-                node.IsKind(SyntaxKind.IfStatement) ||
-                node.IsKind(SyntaxKind.WhileStatement) ||
-                node.IsKind(SyntaxKind.ForStatement) ||
-                node.IsKind(SyntaxKind.ForEachStatement) ||
-                node.IsKind(SyntaxKind.SwitchStatement) ||
-                node.IsKind(SyntaxKind.CatchClause) ||
-                node.IsKind(SyntaxKind.ConditionalExpression) ||      // Ternary operator (? :)
-                node.IsKind(SyntaxKind.CoalesceExpression) ||         // Null coalescing (??)
-                node.IsKind(SyntaxKind.SwitchExpression));            // Switch expressions (C# 8.0+)
-
-            complexity += decisionPoints.Count();
-
-            // Logical operators
-            var logicalOperators = memberNode.DescendantTokens().Where(token =>
-                token.IsKind(SyntaxKind.AmpersandAmpersandToken) ||   // &&
-                token.IsKind(SyntaxKind.BarBarToken) ||               // ||
-                token.IsKind(SyntaxKind.QuestionQuestionToken));      // ??
-
-            complexity += logicalOperators.Count();
-
-            // Switch expression arms (each arm adds complexity)
-            var switchExpressions = memberNode.DescendantNodes().OfType<SwitchExpressionSyntax>();
-            foreach (var switchExpr in switchExpressions)
-            {
-                // Each arm except the first adds complexity (first is already counted as SwitchExpression)
-                if (switchExpr.Arms.Count > 0)
-                {
-                    complexity += switchExpr.Arms.Count - 1;
-                }
-            }
-
-            // When clauses in catch/case statements
-            var whenClauses = memberNode.DescendantNodes().OfType<WhenClauseSyntax>();
-            complexity += whenClauses.Count();
-
-            return complexity;
-        }
+            => ComplexityCalculator.CalculateCyclomatic(memberNode);
 
         /// <summary>
         /// Calculates cognitive complexity considering nesting depth
         /// Based on SonarSource Cognitive Complexity specification
         /// </summary>
         private int CalculateCognitiveComplexity(SyntaxNode memberNode)
-        {
-            int cognitiveComplexity = 0;
-
-            void AnalyzeNode(SyntaxNode node, int nestingLevel)
-            {
-                // Structural decision points: +1 + nesting level
-                if (node.IsKind(SyntaxKind.IfStatement) ||
-                    node.IsKind(SyntaxKind.WhileStatement) ||
-                    node.IsKind(SyntaxKind.ForStatement) ||
-                    node.IsKind(SyntaxKind.ForEachStatement) ||
-                    node.IsKind(SyntaxKind.DoStatement) ||
-                    node.IsKind(SyntaxKind.SwitchStatement) ||
-                    node.IsKind(SyntaxKind.CatchClause) ||
-                    node.IsKind(SyntaxKind.ConditionalExpression) ||  // Ternary operator
-                    node.IsKind(SyntaxKind.CoalesceExpression) ||     // Null coalescing
-                    node.IsKind(SyntaxKind.SwitchExpression))         // Switch expressions
-                {
-                    cognitiveComplexity += 1 + nestingLevel;
-
-                    // Recursively analyze children with increased nesting
-                    foreach (var child in node.ChildNodes())
-                    {
-                        AnalyzeNode(child, nestingLevel + 1);
-                    }
-                    return; // Don't continue to avoid double-counting
-                }
-
-                // Logical operators: +1 (not affected by nesting)
-                if (node.IsKind(SyntaxKind.LogicalAndExpression) ||
-                    node.IsKind(SyntaxKind.LogicalOrExpression))
-                {
-                    // Only count if it breaks the binary sequence
-                    var parent = node.Parent;
-                    if (parent == null ||
-                        (!parent.IsKind(SyntaxKind.LogicalAndExpression) &&
-                         !parent.IsKind(SyntaxKind.LogicalOrExpression)))
-                    {
-                        cognitiveComplexity += 1;
-                    }
-                }
-
-                // Break and continue: +1 (not affected by nesting)
-                if (node.IsKind(SyntaxKind.BreakStatement) ||
-                    node.IsKind(SyntaxKind.ContinueStatement))
-                {
-                    cognitiveComplexity += 1;
-                }
-
-                // Goto statements: +1 (not affected by nesting)
-                if (node.IsKind(SyntaxKind.GotoStatement))
-                {
-                    cognitiveComplexity += 1;
-                }
-
-                // Switch expression arms: each arm adds +1 + nesting level
-                if (node is SwitchExpressionSyntax switchExpr)
-                {
-                    foreach (var arm in switchExpr.Arms)
-                    {
-                        cognitiveComplexity += 1 + nestingLevel;
-
-                        // When clauses add additional complexity
-                        if (arm.Pattern is not null && arm.Pattern.DescendantNodes().OfType<WhenClauseSyntax>().Any())
-                        {
-                            cognitiveComplexity += 1;
-                        }
-                    }
-                    return; // Don't continue to avoid double-counting
-                }
-
-                // Recursively analyze children at the same nesting level
-                foreach (var child in node.ChildNodes())
-                {
-                    AnalyzeNode(child, nestingLevel);
-                }
-            }
-
-            // Start analysis at nesting level 0
-            foreach (var child in memberNode.ChildNodes())
-            {
-                AnalyzeNode(child, 0);
-            }
-
-            return cognitiveComplexity;
-        }
+            => ComplexityCalculator.CalculateCognitive(memberNode);
 
         /// <summary>
         /// Calculates the maximum nesting depth of control structures

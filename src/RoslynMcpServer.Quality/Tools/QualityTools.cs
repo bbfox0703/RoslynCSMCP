@@ -231,25 +231,7 @@ public class QualityTools
     #region Helper Methods
 
     private static int CalculateCyclomaticComplexity(MethodDeclarationSyntax method)
-    {
-        int complexity = 1;
-        foreach (var node in method.DescendantNodes())
-        {
-            complexity += node switch
-            {
-                IfStatementSyntax => 1,
-                WhileStatementSyntax => 1,
-                ForStatementSyntax => 1,
-                ForEachStatementSyntax => 1,
-                CaseSwitchLabelSyntax => 1,
-                CasePatternSwitchLabelSyntax => 1,
-                CatchClauseSyntax => 1,
-                ConditionalExpressionSyntax => 1,
-                _ => 0
-            };
-        }
-        return complexity;
-    }
+        => ComplexityCalculator.CalculateCyclomatic(method);
 
     private static string GetContainingClassName(MethodDeclarationSyntax method)
     {

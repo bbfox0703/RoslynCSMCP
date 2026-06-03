@@ -2019,27 +2019,7 @@ namespace RoslynMcpServer.Tools
         }
 
         private static int CalculateCyclomaticComplexity(MethodDeclarationSyntax method)
-        {
-            int complexity = 1; // Base complexity
-            
-            var decisionPoints = method.DescendantNodes().Where(node => 
-                node.IsKind(SyntaxKind.IfStatement) ||
-                node.IsKind(SyntaxKind.WhileStatement) ||
-                node.IsKind(SyntaxKind.ForStatement) ||
-                node.IsKind(SyntaxKind.ForEachStatement) ||
-                node.IsKind(SyntaxKind.SwitchStatement) ||
-                node.IsKind(SyntaxKind.CatchClause));
-            
-            complexity += decisionPoints.Count();
-            
-            var logicalOperators = method.DescendantTokens().Where(token =>
-                token.IsKind(SyntaxKind.AmpersandAmpersandToken) ||
-                token.IsKind(SyntaxKind.BarBarToken));
-            
-            complexity += logicalOperators.Count();
-            
-            return complexity;
-        }
+            => ComplexityCalculator.CalculateCyclomatic(method);
 
         private static string GetContainingClassName(MethodDeclarationSyntax method)
         {

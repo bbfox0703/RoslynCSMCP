@@ -402,47 +402,9 @@ namespace RoslynMcpServer.Core.Services
                 return 1;
 
             var root = await location.SourceTree.GetRootAsync();
-            var methodNode = root.FindNode(location.SourceSpan) as MethodDeclarationSyntax;
+            var methodNode = root.FindNode(location.SourceSpan);
 
-            if (methodNode == null)
-                return 1;
-
-            int complexity = 1;
-
-            // Count decision points
-            var descendantNodes = methodNode.DescendantNodes();
-
-            // If statements
-            complexity += descendantNodes.OfType<IfStatementSyntax>().Count();
-
-            // While loops
-            complexity += descendantNodes.OfType<WhileStatementSyntax>().Count();
-
-            // For loops
-            complexity += descendantNodes.OfType<ForStatementSyntax>().Count();
-
-            // Foreach loops
-            complexity += descendantNodes.OfType<ForEachStatementSyntax>().Count();
-
-            // Switch cases
-            complexity += descendantNodes.OfType<SwitchSectionSyntax>().Count();
-
-            // Catch clauses
-            complexity += descendantNodes.OfType<CatchClauseSyntax>().Count();
-
-            // Logical operators (&&, ||)
-            complexity += descendantNodes.OfType<BinaryExpressionSyntax>()
-                .Count(b => b.IsKind(SyntaxKind.LogicalAndExpression) ||
-                           b.IsKind(SyntaxKind.LogicalOrExpression));
-
-            // Null-coalescing operator (??)
-            complexity += descendantNodes.OfType<BinaryExpressionSyntax>()
-                .Count(b => b.IsKind(SyntaxKind.CoalesceExpression));
-
-            // Conditional expressions (ternary operator)
-            complexity += descendantNodes.OfType<ConditionalExpressionSyntax>().Count();
-
-            return complexity;
+            return ComplexityCalculator.CalculateCyclomatic(methodNode);
         }
 
         /// <summary>
