@@ -256,25 +256,7 @@ namespace RoslynMcpServer.Core.Services
         }
 
         private int CalculateComplexity(MethodDeclarationSyntax method)
-        {
-            int complexity = 1; // Base complexity
-
-            // Decision points
-            complexity += method.DescendantNodes().OfType<IfStatementSyntax>().Count();
-            complexity += method.DescendantNodes().OfType<WhileStatementSyntax>().Count();
-            complexity += method.DescendantNodes().OfType<ForStatementSyntax>().Count();
-            complexity += method.DescendantNodes().OfType<ForEachStatementSyntax>().Count();
-            complexity += method.DescendantNodes().OfType<CaseSwitchLabelSyntax>().Count();
-            complexity += method.DescendantNodes().OfType<CatchClauseSyntax>().Count();
-
-            // Logical operators (&&, ||)
-            var logicalOperators = method.DescendantTokens()
-                .Where(t => t.IsKind(SyntaxKind.AmpersandAmpersandToken) ||
-                           t.IsKind(SyntaxKind.BarBarToken));
-            complexity += logicalOperators.Count();
-
-            return complexity;
-        }
+            => ComplexityCalculator.CalculateCyclomatic(method);
 
         private string FormatMetrics(CodeMetrics metrics, string solutionPath, string groupBy)
         {

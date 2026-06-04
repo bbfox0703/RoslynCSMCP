@@ -19,7 +19,32 @@ namespace RoslynMcpServer.Core.Services
 
         // Security pattern keywords
         private static readonly string[] SecretKeywords = { "password", "secret", "apikey", "api_key", "token", "connectionstring" };
-        private static readonly string[] SqlKeywords = { "select", "insert", "update", "delete", "drop", "exec", "execute" };
+
+        // A string is treated as SQL only when it opens with a SQL command AND carries a SQL
+        // clause/structure — this rejects prose like "... updated" or "deleted item".
+        private static readonly Regex SqlCommandRegex = new(
+            @"\b(SELECT|INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|EXEC|EXECUTE)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex SqlClauseRegex = new(
+            @"\b(FROM|INTO|SET|WHERE|VALUES|TABLE|JOIN|GROUP\s+BY|ORDER\s+BY)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Weak algorithms / insecure deserializers, matched by fully-qualified type (or a base
+        // type in the chain) rather than a substring, so "DES" can't match "ResultDescriptor".
+        private static readonly Dictionary<string, string> WeakCryptoTypes = new()
+        {
+            ["System.Security.Cryptography.MD5"] = "MD5 is cryptographically broken — use SHA256 or SHA512",
+            ["System.Security.Cryptography.SHA1"] = "SHA1 is deprecated — use SHA256 or SHA512",
+            ["System.Security.Cryptography.DES"] = "DES is insecure — use AES instead",
+            ["System.Security.Cryptography.TripleDES"] = "TripleDES is deprecated — use AES instead",
+            ["System.Security.Cryptography.RC2"] = "RC2 is insecure — use AES instead",
+        };
+        private static readonly Dictionary<string, string> InsecureDeserializerTypes = new()
+        {
+            ["System.Runtime.Serialization.Formatters.Binary.BinaryFormatter"] = "BinaryFormatter is insecure and deprecated — use System.Text.Json or protobuf",
+            ["System.Web.Script.Serialization.JavaScriptSerializer"] = "JavaScriptSerializer is deprecated — use System.Text.Json",
+            ["System.Runtime.Serialization.NetDataContractSerializer"] = "NetDataContractSerializer is insecure — use DataContractSerializer or System.Text.Json",
+        };
 
         public SecurityIssueAnalyzer(ILogger<SecurityIssueAnalyzer> logger)
         {
@@ -160,7 +185,7 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Analyzes SQL injection vulnerabilities
         /// </summary>
-        private List<SecurityIssue> AnalyzeSqlInjection(
+        internal static List<SecurityIssue> AnalyzeSqlInjection(
             SyntaxNode root,
             SemanticModel semanticModel,
             string fileName,
@@ -169,47 +194,118 @@ namespace RoslynMcpServer.Core.Services
         {
             var issues = new List<SecurityIssue>();
 
-            // Find string concatenation and interpolation that might be SQL queries
-            var stringOperations = root.DescendantNodes()
-                .Where(n => n is BinaryExpressionSyntax || n is InterpolatedStringExpressionSyntax)
-                .ToList();
-
-            foreach (var node in stringOperations)
+            // Consider only top-level string-building expressions: an interpolated string, or
+            // the outermost node of a string '+' concatenation chain (inner '+' nodes are
+            // folded into their parent's template, so we skip them here).
+            foreach (var node in root.DescendantNodes())
             {
-                var text = node.ToString().ToLowerInvariant();
+                bool isInterpolated = node is InterpolatedStringExpressionSyntax interpNode &&
+                                      interpNode.Parent is not InterpolationSyntax;
+                bool isConcat = node is BinaryExpressionSyntax be && be.IsKind(SyntaxKind.AddExpression) &&
+                                !(be.Parent is BinaryExpressionSyntax pe && pe.IsKind(SyntaxKind.AddExpression));
+                if (!isInterpolated && !isConcat)
+                    continue;
 
-                // Check if it contains SQL keywords
-                if (SqlKeywords.Any(keyword => text.Contains(keyword)))
+                // The whole expression must be a string.
+                var exprType = semanticModel.GetTypeInfo(node).Type ?? semanticModel.GetTypeInfo(node).ConvertedType;
+                if (exprType?.SpecialType != SpecialType.System_String)
+                    continue;
+
+                var (template, hasDynamicPart) = BuildSqlTemplate(node, semanticModel);
+
+                // Injection requires a runtime (non-constant) value spliced into SQL text.
+                if (!hasDynamicPart) continue;
+                if (!LooksLikeSql(template)) continue;
+
+                var lineSpan = node.GetLocation().GetLineSpan();
+                var snippet = node.ToString();
+
+                issues.Add(new SecurityIssue
                 {
-                    var lineSpan = node.GetLocation().GetLineSpan();
-                    var methodName = GetContainingMethodName(node);
-
-                    issues.Add(new SecurityIssue
-                    {
-                        Category = "sql-injection",
-                        Severity = "Critical",
-                        Title = "Potential SQL Injection",
-                        Description = node is InterpolatedStringExpressionSyntax
-                            ? "String interpolation used in SQL query - vulnerable to SQL injection"
-                            : "String concatenation used in SQL query - vulnerable to SQL injection",
-                        Recommendation = "Use parameterized queries or ORM (Entity Framework) instead",
-                        MethodName = methodName,
-                        FileName = fileName,
-                        FilePath = filePath,
-                        LineNumber = lineSpan.StartLinePosition.Line + 1,
-                        CodeSnippet = node.ToString().Length > 100 ? node.ToString().Substring(0, 100) + "..." : node.ToString(),
-                        ProjectName = projectName
-                    });
-                }
+                    Category = "sql-injection",
+                    Severity = "Critical",
+                    Title = "Potential SQL Injection",
+                    Description = isInterpolated
+                        ? "String interpolation splices a non-constant value into a SQL statement - vulnerable to SQL injection"
+                        : "String concatenation splices a non-constant value into a SQL statement - vulnerable to SQL injection",
+                    Recommendation = "Use parameterized queries or an ORM (Entity Framework) instead of building SQL from runtime values",
+                    MethodName = GetContainingMethodName(node),
+                    FileName = fileName,
+                    FilePath = filePath,
+                    LineNumber = lineSpan.StartLinePosition.Line + 1,
+                    CodeSnippet = snippet.Length > 100 ? snippet.Substring(0, 100) + "..." : snippet,
+                    ProjectName = projectName
+                });
             }
 
             return issues;
         }
 
         /// <summary>
+        /// Reconstructs the static "shape" of a string-building expression: constant parts are
+        /// kept verbatim, runtime parts become a "?" placeholder. Returns the template and
+        /// whether any runtime (non-constant) part was found.
+        /// </summary>
+        private static (string Template, bool HasDynamicPart) BuildSqlTemplate(SyntaxNode node, SemanticModel model)
+        {
+            var sb = new System.Text.StringBuilder();
+            bool dynamic = false;
+
+            void AppendExpr(ExpressionSyntax expr)
+            {
+                // Recurse through 'a + b + c' so the whole concatenation is one template.
+                if (expr is BinaryExpressionSyntax b && b.IsKind(SyntaxKind.AddExpression))
+                {
+                    AppendExpr(b.Left);
+                    AppendExpr(b.Right);
+                    return;
+                }
+
+                if (expr is InterpolatedStringExpressionSyntax interp)
+                {
+                    foreach (var content in interp.Contents)
+                    {
+                        if (content is InterpolatedStringTextSyntax t)
+                            sb.Append(t.TextToken.ValueText);
+                        else if (content is InterpolationSyntax hole)
+                            AppendValue(hole.Expression);
+                    }
+                    return;
+                }
+
+                AppendValue(expr);
+            }
+
+            void AppendValue(ExpressionSyntax expr)
+            {
+                var constant = model.GetConstantValue(expr);
+                if (constant.HasValue && constant.Value is string s)
+                {
+                    sb.Append(s);
+                }
+                else if (constant.HasValue)
+                {
+                    sb.Append(constant.Value); // constant non-string (e.g. number) — still static
+                }
+                else
+                {
+                    dynamic = true;
+                    sb.Append(" ? ");
+                }
+            }
+
+            AppendExpr((ExpressionSyntax)node);
+            return (sb.ToString(), dynamic);
+        }
+
+        /// <summary>True when a string's static shape opens with a SQL command and has a SQL clause.</summary>
+        private static bool LooksLikeSql(string template) =>
+            SqlCommandRegex.IsMatch(template) && SqlClauseRegex.IsMatch(template);
+
+        /// <summary>
         /// Analyzes hardcoded secrets
         /// </summary>
-        private List<SecurityIssue> AnalyzeHardcodedSecrets(
+        internal static List<SecurityIssue> AnalyzeHardcodedSecrets(
             SyntaxNode root,
             SemanticModel semanticModel,
             string fileName,
@@ -307,73 +403,95 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Analyzes weak cryptography usage
         /// </summary>
-        private List<SecurityIssue> AnalyzeWeakCryptography(
+        internal static List<SecurityIssue> AnalyzeWeakCryptography(
             SyntaxNode root,
             SemanticModel semanticModel,
             string fileName,
             string filePath,
-            string projectName)
+            string projectName) =>
+            AnalyzeTypeUsages(
+                root, semanticModel, fileName, filePath, projectName,
+                WeakCryptoTypes, category: "crypto", severity: "High",
+                titlePrefix: "Weak Cryptography");
+
+        /// <summary>
+        /// Flags usages of a known set of types (matched by fully-qualified name, including
+        /// base types so concrete providers like MD5CryptoServiceProvider are caught), de-duplicated
+        /// per source line so a single usage is reported once rather than once per identifier token.
+        /// </summary>
+        private static List<SecurityIssue> AnalyzeTypeUsages(
+            SyntaxNode root,
+            SemanticModel semanticModel,
+            string fileName,
+            string filePath,
+            string projectName,
+            IReadOnlyDictionary<string, string> knownTypes,
+            string category,
+            string severity,
+            string titlePrefix)
         {
             var issues = new List<SecurityIssue>();
+            var seen = new HashSet<(int Line, string Type)>();
 
-            // Find type usages
-            var identifiers = root.DescendantNodes()
-                .OfType<IdentifierNameSyntax>()
-                .ToList();
-
-            foreach (var identifier in identifiers)
+            foreach (var node in root.DescendantNodes())
             {
-                var symbolInfo = semanticModel.GetSymbolInfo(identifier);
-                var symbol = symbolInfo.Symbol;
-
-                if (symbol == null) continue;
-
-                var typeName = symbol.ContainingType?.Name ?? symbol.Name;
-
-                // Check for weak crypto algorithms
-                var weakAlgorithms = new Dictionary<string, string>
+                // Only look at type-bearing usages: object creation and name references.
+                ITypeSymbol? type = node switch
                 {
-                    { "MD5", "MD5 is cryptographically broken - use SHA256 or SHA512" },
-                    { "SHA1", "SHA1 is deprecated - use SHA256 or SHA512" },
-                    { "DES", "DES is insecure - use AES instead" },
-                    { "TripleDES", "TripleDES is deprecated - use AES instead" },
-                    { "RC2", "RC2 is insecure - use AES instead" }
+                    ObjectCreationExpressionSyntax oc => semanticModel.GetTypeInfo(oc).Type,
+                    IdentifierNameSyntax id => semanticModel.GetSymbolInfo(id).Symbol as ITypeSymbol,
+                    _ => null
                 };
+                if (type is null) continue;
 
-                foreach (var weakAlgo in weakAlgorithms)
+                var (matchedKey, message) = MatchKnownType(type, knownTypes);
+                if (matchedKey is null) continue;
+
+                var lineSpan = node.GetLocation().GetLineSpan();
+                int line = lineSpan.StartLinePosition.Line + 1;
+                var shortName = matchedKey.Substring(matchedKey.LastIndexOf('.') + 1);
+                if (!seen.Add((line, matchedKey))) continue; // already reported on this line
+
+                issues.Add(new SecurityIssue
                 {
-                    if (typeName.Contains(weakAlgo.Key))
-                    {
-                        var lineSpan = identifier.GetLocation().GetLineSpan();
-                        var methodName = GetContainingMethodName(identifier);
-
-                        issues.Add(new SecurityIssue
-                        {
-                            Category = "crypto",
-                            Severity = "High",
-                            Title = $"Weak Cryptography: {weakAlgo.Key}",
-                            Description = weakAlgo.Value,
-                            Recommendation = weakAlgo.Value.Split('-')[1].Trim(),
-                            MethodName = methodName,
-                            FileName = fileName,
-                            FilePath = filePath,
-                            LineNumber = lineSpan.StartLinePosition.Line + 1,
-                            CodeSnippet = identifier.ToString(),
-                            ProjectName = projectName
-                        });
-
-                        break;
-                    }
-                }
+                    Category = category,
+                    Severity = severity,
+                    Title = $"{titlePrefix}: {shortName}",
+                    Description = message!,
+                    Recommendation = message!.Contains('—') ? message.Split('—')[1].Trim() : message,
+                    MethodName = GetContainingMethodName(node),
+                    FileName = fileName,
+                    FilePath = filePath,
+                    LineNumber = line,
+                    CodeSnippet = node.ToString(),
+                    ProjectName = projectName
+                });
             }
 
             return issues;
         }
 
         /// <summary>
+        /// Returns the matched known-type key and its message if <paramref name="type"/> or any
+        /// of its base types is in <paramref name="knownTypes"/> (by fully-qualified name).
+        /// </summary>
+        private static (string? Key, string? Message) MatchKnownType(
+            ITypeSymbol type, IReadOnlyDictionary<string, string> knownTypes)
+        {
+            for (ITypeSymbol? t = type; t is not null; t = t.BaseType)
+            {
+                var fullName = t.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                    .Replace("global::", string.Empty);
+                if (knownTypes.TryGetValue(fullName, out var message))
+                    return (fullName, message);
+            }
+            return (null, null);
+        }
+
+        /// <summary>
         /// Analyzes path traversal vulnerabilities
         /// </summary>
-        private List<SecurityIssue> AnalyzePathTraversal(
+        internal static List<SecurityIssue> AnalyzePathTraversal(
             SyntaxNode root,
             SemanticModel semanticModel,
             string fileName,
@@ -435,71 +553,21 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Analyzes insecure deserialization
         /// </summary>
-        private List<SecurityIssue> AnalyzeDeserialization(
+        internal static List<SecurityIssue> AnalyzeDeserialization(
             SyntaxNode root,
             SemanticModel semanticModel,
             string fileName,
             string filePath,
-            string projectName)
-        {
-            var issues = new List<SecurityIssue>();
-
-            // Find dangerous deserializers
-            var identifiers = root.DescendantNodes()
-                .OfType<IdentifierNameSyntax>()
-                .ToList();
-
-            foreach (var identifier in identifiers)
-            {
-                var symbolInfo = semanticModel.GetSymbolInfo(identifier);
-                var symbol = symbolInfo.Symbol;
-
-                if (symbol == null) continue;
-
-                var typeName = symbol.ContainingType?.Name ?? symbol.Name;
-
-                // Check for insecure deserializers
-                var insecureDeserializers = new Dictionary<string, string>
-                {
-                    { "BinaryFormatter", "BinaryFormatter is insecure and deprecated - use System.Text.Json or protobuf" },
-                    { "JavaScriptSerializer", "JavaScriptSerializer is deprecated - use System.Text.Json" },
-                    { "NetDataContractSerializer", "NetDataContractSerializer is insecure - use DataContractSerializer or System.Text.Json" }
-                };
-
-                foreach (var deser in insecureDeserializers)
-                {
-                    if (typeName.Contains(deser.Key))
-                    {
-                        var lineSpan = identifier.GetLocation().GetLineSpan();
-                        var methodName = GetContainingMethodName(identifier);
-
-                        issues.Add(new SecurityIssue
-                        {
-                            Category = "deserialization",
-                            Severity = "Critical",
-                            Title = $"Insecure Deserialization: {deser.Key}",
-                            Description = deser.Value,
-                            Recommendation = deser.Value.Split('-')[1].Trim(),
-                            MethodName = methodName,
-                            FileName = fileName,
-                            FilePath = filePath,
-                            LineNumber = lineSpan.StartLinePosition.Line + 1,
-                            CodeSnippet = identifier.ToString(),
-                            ProjectName = projectName
-                        });
-
-                        break;
-                    }
-                }
-            }
-
-            return issues;
-        }
+            string projectName) =>
+            AnalyzeTypeUsages(
+                root, semanticModel, fileName, filePath, projectName,
+                InsecureDeserializerTypes, category: "deserialization", severity: "Critical",
+                titlePrefix: "Insecure Deserialization");
 
         /// <summary>
         /// Gets the containing method name for a syntax node
         /// </summary>
-        private string GetContainingMethodName(SyntaxNode node)
+        private static string GetContainingMethodName(SyntaxNode node)
         {
             var method = node.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
             if (method != null)

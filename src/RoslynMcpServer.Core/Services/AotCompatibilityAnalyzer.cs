@@ -5,6 +5,8 @@ using Microsoft.Extensions.Logging;
 using RoslynMcpServer.Core.Models;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
+using System.Xml;
+using System.Xml.Linq;
 
 namespace RoslynMcpServer.Core.Services
 {
@@ -737,6 +739,14 @@ namespace RoslynMcpServer.Core.Services
         // CheckXaml
         // ──────────────────────────────────────────────────────────────────────
 
+        // Value-level markup-extension test, applied to a parsed attribute value (NOT the
+        // raw file): "{Binding ...}" / "{CompiledBinding ...}", allowing inner whitespace.
+        private static readonly Regex BindingMarkupRegex = new(
+            @"\{\s*(?:Compiled)?Binding\b",
+            RegexOptions.Compiled);
+
+        // Legacy element-level regexes — used ONLY as a fallback when a XAML file is not
+        // well-formed XML and XDocument cannot parse it.
         private static readonly Regex RunWithBindingRegex = new(
             @"<Run\b[^>]*\bText\s*=\s*""\{\s*(?:Compiled)?Binding",
             RegexOptions.Compiled | RegexOptions.Singleline);
@@ -755,7 +765,9 @@ namespace RoslynMcpServer.Core.Services
 
         /// <summary>
         /// Scans .axaml/.xaml files (which are NOT part of the C# compilation) for the
-        /// AOT-hostile XAML patterns in the pitfalls catalogue.
+        /// AOT-hostile XAML patterns in the pitfalls catalogue. XAML is XML, so the file
+        /// is parsed with <see cref="XDocument"/> (line info preserved) rather than matched
+        /// with brittle text regexes; a malformed file falls back to the legacy regex scan.
         /// </summary>
         private List<AotIssue> CheckXaml(Project project)
         {
@@ -785,70 +797,180 @@ namespace RoslynMcpServer.Core.Services
                 try { text = File.ReadAllText(file); }
                 catch (Exception ex) { _logger.LogDebug(ex, "Failed to read XAML {File}", file); continue; }
 
-                // §0.25 / §4.10 — <Run Text="{Binding}"/> inside a TextBlock → StackOverflow under AOT.
-                foreach (Match m in RunWithBindingRegex.Matches(text))
-                {
-                    issues.Add(CreateFileIssue(
-                        "Xaml", "Critical",
-                        "<Run Text=\"{Binding ...}\"/> causes StackOverflow under AOT",
-                        "A bound <Run> inside a <TextBlock> recurses into a StackOverflow under Native AOT.",
-                        file, LineOf(text, m.Index), project.Name,
-                        "Bind on the <TextBlock> directly instead of an inner <Run>.",
-                        "<!-- Before --> <TextBlock><Run Text=\"{Binding Name}\"/></TextBlock>\n" +
-                        "<!-- After  --> <TextBlock Text=\"{Binding Name}\"/>",
-                        Snippet(text, m.Index)));
-                }
-
-                bool hasBinding = text.Contains("{Binding") || text.Contains("{CompiledBinding");
-
-                // §0.11 / §4.1 — root element must carry x:DataType for compiled bindings.
-                var rootMatch = RootElementRegex.Match(text);
-                if (hasBinding && rootMatch.Success && !rootMatch.Value.Contains("x:DataType"))
-                {
-                    issues.Add(CreateFileIssue(
-                        "Xaml", "Medium",
-                        "Root element has bindings but no x:DataType",
-                        "With AvaloniaUseCompiledBindingsByDefault=true, compiled bindings require x:DataType on the " +
-                        "root Window/UserControl/Page. Reflection bindings die under AOT.",
-                        file, LineOf(text, rootMatch.Index), project.Name,
-                        "Add x:DataType=\"vm:YourViewModel\" to the root element.",
-                        "<UserControl ... x:DataType=\"vm:FooViewModel\">",
-                        Snippet(text, rootMatch.Index)));
-                }
-
-                // §4.1 — every DataTemplate that binds also needs x:DataType.
-                foreach (Match m in DataTemplateOpenRegex.Matches(text))
-                {
-                    if (m.Value.Contains("x:DataType")) continue;
-                    issues.Add(CreateFileIssue(
-                        "Xaml", "Medium",
-                        "<DataTemplate> without x:DataType",
-                        "Compiled bindings refuse a DataTemplate without x:DataType (including nested templates).",
-                        file, LineOf(text, m.Index), project.Name,
-                        "Add x:DataType=\"m:RowModel\" to the DataTemplate.",
-                        "<DataTemplate x:DataType=\"m:ItemRow\">",
-                        Snippet(text, m.Index)));
-                }
-
-                // §4.5 — DataGridTemplateColumn won't sort under AOT without SortMemberPath.
-                foreach (Match m in DataGridTemplateColumnRegex.Matches(text))
-                {
-                    if (m.Value.Contains("SortMemberPath")) continue;
-                    issues.Add(CreateFileIssue(
-                        "Xaml", "Medium",
-                        "<DataGridTemplateColumn> without SortMemberPath won't sort under AOT",
-                        "A DataGridTemplateColumn with a compiled-binding cell template has no readable Path, so the grid " +
-                        "auto-sets CanUserSort=False and the reflection sort silently no-ops. Needs SortMemberPath + " +
-                        "CanUserSort=True + a CustomSortComparer wired in code-behind.",
-                        file, LineOf(text, m.Index), project.Name,
-                        "Add SortMemberPath=\"ClrProp\" + CanUserSort=\"True\", and wire CustomSortComparer at Loaded.",
-                        "<DataGridTemplateColumn Header=\"Offset\" SortMemberPath=\"Offset\" CanUserSort=\"True\">",
-                        Snippet(text, m.Index)));
-                }
+                issues.AddRange(AnalyzeXaml(text, file, project.Name));
             }
 
             return issues;
         }
+
+        /// <summary>
+        /// Analyzes one XAML file's text: parses it as XML (preferred) and falls back to the
+        /// legacy regex scan only if the file is not well-formed. Exposed for unit testing
+        /// without an MSBuild workspace.
+        /// </summary>
+        internal static List<AotIssue> AnalyzeXaml(string text, string filePath, string projectName)
+        {
+            var issues = new List<AotIssue>();
+
+            XDocument doc;
+            try
+            {
+                doc = XDocument.Parse(text, LoadOptions.SetLineInfo);
+            }
+            catch (XmlException)
+            {
+                return CheckXamlRegexFallback(filePath, text, projectName);
+            }
+
+            AnalyzeXamlDocument(doc, filePath, projectName, issues);
+            return issues;
+        }
+
+        /// <summary>XML-based XAML analysis over a parsed document.</summary>
+        private static void AnalyzeXamlDocument(XDocument doc, string file, string projectName, List<AotIssue> issues)
+        {
+            var elements = doc.Descendants().ToList();
+
+            // §0.25 / §4.10 — <Run Text="{Binding}"/> inside a TextBlock → StackOverflow under AOT.
+            foreach (var run in elements.Where(e => e.Name.LocalName == "Run"))
+            {
+                var textAttr = run.Attributes().FirstOrDefault(a => a.Name.LocalName == "Text");
+                if (textAttr is null || !IsBindingValue(textAttr.Value)) continue;
+
+                issues.Add(CreateFileIssue(
+                    "Xaml", "Critical",
+                    "<Run Text=\"{Binding ...}\"/> causes StackOverflow under AOT",
+                    "A bound <Run> inside a <TextBlock> recurses into a StackOverflow under Native AOT.",
+                    file, LineOf(run), projectName,
+                    "Bind on the <TextBlock> directly instead of an inner <Run>.",
+                    "<!-- Before --> <TextBlock><Run Text=\"{Binding Name}\"/></TextBlock>\n" +
+                    "<!-- After  --> <TextBlock Text=\"{Binding Name}\"/>",
+                    ElementSnippet(run)));
+            }
+
+            // Does the document use bindings anywhere (any attribute value)?
+            bool hasBinding = elements
+                .SelectMany(e => e.Attributes())
+                .Any(a => IsBindingValue(a.Value));
+
+            // §0.11 / §4.1 — root element must carry x:DataType for compiled bindings.
+            var root = doc.Root;
+            if (hasBinding && root is not null &&
+                root.Name.LocalName is "Window" or "UserControl" or "Page" &&
+                !HasDataTypeAttr(root))
+            {
+                issues.Add(CreateFileIssue(
+                    "Xaml", "Medium",
+                    "Root element has bindings but no x:DataType",
+                    "With AvaloniaUseCompiledBindingsByDefault=true, compiled bindings require x:DataType on the " +
+                    "root Window/UserControl/Page. Reflection bindings die under AOT.",
+                    file, LineOf(root), projectName,
+                    "Add x:DataType=\"vm:YourViewModel\" to the root element.",
+                    "<UserControl ... x:DataType=\"vm:FooViewModel\">",
+                    ElementSnippet(root)));
+            }
+
+            // §4.1 — every DataTemplate that binds also needs x:DataType.
+            foreach (var tmpl in elements.Where(e => e.Name.LocalName == "DataTemplate"))
+            {
+                if (HasDataTypeAttr(tmpl)) continue;
+                issues.Add(CreateFileIssue(
+                    "Xaml", "Medium",
+                    "<DataTemplate> without x:DataType",
+                    "Compiled bindings refuse a DataTemplate without x:DataType (including nested templates).",
+                    file, LineOf(tmpl), projectName,
+                    "Add x:DataType=\"m:RowModel\" to the DataTemplate.",
+                    "<DataTemplate x:DataType=\"m:ItemRow\">",
+                    ElementSnippet(tmpl)));
+            }
+
+            // §4.5 — DataGridTemplateColumn won't sort under AOT without SortMemberPath.
+            foreach (var col in elements.Where(e => e.Name.LocalName == "DataGridTemplateColumn"))
+            {
+                if (col.Attributes().Any(a => a.Name.LocalName == "SortMemberPath")) continue;
+                issues.Add(CreateFileIssue(
+                    "Xaml", "Medium",
+                    "<DataGridTemplateColumn> without SortMemberPath won't sort under AOT",
+                    "A DataGridTemplateColumn with a compiled-binding cell template has no readable Path, so the grid " +
+                    "auto-sets CanUserSort=False and the reflection sort silently no-ops. Needs SortMemberPath + " +
+                    "CanUserSort=True + a CustomSortComparer wired in code-behind.",
+                    file, LineOf(col), projectName,
+                    "Add SortMemberPath=\"ClrProp\" + CanUserSort=\"True\", and wire CustomSortComparer at Loaded.",
+                    "<DataGridTemplateColumn Header=\"Offset\" SortMemberPath=\"Offset\" CanUserSort=\"True\">",
+                    ElementSnippet(col)));
+            }
+        }
+
+        /// <summary>Legacy text-regex XAML scan, retained only for non-well-formed files.</summary>
+        private static List<AotIssue> CheckXamlRegexFallback(string file, string text, string projectName)
+        {
+            var issues = new List<AotIssue>();
+
+            foreach (Match m in RunWithBindingRegex.Matches(text))
+            {
+                issues.Add(CreateFileIssue(
+                    "Xaml", "Critical",
+                    "<Run Text=\"{Binding ...}\"/> causes StackOverflow under AOT",
+                    "A bound <Run> inside a <TextBlock> recurses into a StackOverflow under Native AOT.",
+                    file, LineOf(text, m.Index), projectName,
+                    "Bind on the <TextBlock> directly instead of an inner <Run>.",
+                    "<!-- Before --> <TextBlock><Run Text=\"{Binding Name}\"/></TextBlock>\n" +
+                    "<!-- After  --> <TextBlock Text=\"{Binding Name}\"/>",
+                    Snippet(text, m.Index)));
+            }
+
+            bool hasBinding = text.Contains("{Binding") || text.Contains("{CompiledBinding");
+
+            var rootMatch = RootElementRegex.Match(text);
+            if (hasBinding && rootMatch.Success && !rootMatch.Value.Contains("x:DataType"))
+            {
+                issues.Add(CreateFileIssue(
+                    "Xaml", "Medium",
+                    "Root element has bindings but no x:DataType",
+                    "With AvaloniaUseCompiledBindingsByDefault=true, compiled bindings require x:DataType on the " +
+                    "root Window/UserControl/Page. Reflection bindings die under AOT.",
+                    file, LineOf(text, rootMatch.Index), projectName,
+                    "Add x:DataType=\"vm:YourViewModel\" to the root element.",
+                    "<UserControl ... x:DataType=\"vm:FooViewModel\">",
+                    Snippet(text, rootMatch.Index)));
+            }
+
+            foreach (Match m in DataTemplateOpenRegex.Matches(text))
+            {
+                if (m.Value.Contains("x:DataType")) continue;
+                issues.Add(CreateFileIssue(
+                    "Xaml", "Medium",
+                    "<DataTemplate> without x:DataType",
+                    "Compiled bindings refuse a DataTemplate without x:DataType (including nested templates).",
+                    file, LineOf(text, m.Index), projectName,
+                    "Add x:DataType=\"m:RowModel\" to the DataTemplate.",
+                    "<DataTemplate x:DataType=\"m:ItemRow\">",
+                    Snippet(text, m.Index)));
+            }
+
+            foreach (Match m in DataGridTemplateColumnRegex.Matches(text))
+            {
+                if (m.Value.Contains("SortMemberPath")) continue;
+                issues.Add(CreateFileIssue(
+                    "Xaml", "Medium",
+                    "<DataGridTemplateColumn> without SortMemberPath won't sort under AOT",
+                    "A DataGridTemplateColumn with a compiled-binding cell template has no readable Path, so the grid " +
+                    "auto-sets CanUserSort=False and the reflection sort silently no-ops. Needs SortMemberPath + " +
+                    "CanUserSort=True + a CustomSortComparer wired in code-behind.",
+                    file, LineOf(text, m.Index), projectName,
+                    "Add SortMemberPath=\"ClrProp\" + CanUserSort=\"True\", and wire CustomSortComparer at Loaded.",
+                    "<DataGridTemplateColumn Header=\"Offset\" SortMemberPath=\"Offset\" CanUserSort=\"True\">",
+                    Snippet(text, m.Index)));
+            }
+
+            return issues;
+        }
+
+        private static bool IsBindingValue(string? value) =>
+            !string.IsNullOrEmpty(value) && BindingMarkupRegex.IsMatch(value);
+
+        private static bool HasDataTypeAttr(XElement element) =>
+            element.Attributes().Any(a => a.Name.LocalName == "DataType");
 
         // ──────────────────────────────────────────────────────────────────────
         // CheckBuildConfig
@@ -861,22 +983,132 @@ namespace RoslynMcpServer.Core.Services
         /// </summary>
         private List<AotIssue> CheckBuildConfig(Project project)
         {
-            var issues = new List<AotIssue>();
-
             if (string.IsNullOrEmpty(project.FilePath) || !File.Exists(project.FilePath))
-                return issues;
+                return new List<AotIssue>();
+
+            var csproj = project.FilePath;
 
             string text;
-            try { text = File.ReadAllText(project.FilePath); }
-            catch (Exception ex) { _logger.LogDebug(ex, "Failed to read csproj {File}", project.FilePath); return issues; }
+            try { text = File.ReadAllText(csproj); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to read csproj {File}", csproj); return new List<AotIssue>(); }
+
+            return AnalyzeBuildConfig(text, csproj, project.Name);
+        }
+
+        /// <summary>
+        /// Analyzes a .csproj's text for AOT-hostile Avalonia build settings: parses it as XML
+        /// (preferred) and falls back to the legacy regex scan only if it is not well-formed.
+        /// Exposed for unit testing without an MSBuild workspace.
+        /// </summary>
+        internal static List<AotIssue> AnalyzeBuildConfig(string text, string csproj, string projectName)
+        {
+            var issues = new List<AotIssue>();
+
+            XDocument doc;
+            try
+            {
+                doc = XDocument.Parse(text, LoadOptions.SetLineInfo);
+            }
+            catch (XmlException)
+            {
+                return CheckBuildConfigRegexFallback(csproj, text, projectName);
+            }
+
+            var elements = doc.Descendants().ToList();
+
+            // MSBuild element/property names are case-insensitive; XML element names are not,
+            // so match on LocalName case-insensitively and ignore any MSBuild xmlns.
+            static bool Is(XElement e, string name) =>
+                string.Equals(e.Name.LocalName, name, StringComparison.OrdinalIgnoreCase);
+
+            var packageRefs = elements.Where(e => Is(e, "PackageReference")).ToList();
+            static string Include(XElement e) =>
+                e.Attribute("Include")?.Value ?? e.Attribute("Update")?.Value ?? string.Empty;
+
+            var firstAvaloniaRef = packageRefs.FirstOrDefault(e =>
+                Include(e).StartsWith("Avalonia", StringComparison.OrdinalIgnoreCase));
+            if (firstAvaloniaRef is null)
+                return issues; // not an Avalonia project — skip Avalonia-specific checks
+
+            int firstAvaloniaLine = LineOf(firstAvaloniaRef);
+
+            // §0.3 — Avalonia 12 MicroCom needs BuiltInComInteropSupport=false for AOT.
+            var comElem = elements.FirstOrDefault(e => Is(e, "BuiltInComInteropSupport"));
+            bool comFalse = comElem is not null &&
+                            string.Equals(comElem.Value.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+            if (!comFalse)
+            {
+                issues.Add(CreateFileIssue(
+                    "BuildConfig", "High",
+                    "BuiltInComInteropSupport is not set to false",
+                    "Avalonia 12's MicroCom requires <BuiltInComInteropSupport>false</BuiltInComInteropSupport> for Native AOT.",
+                    csproj, comElem is not null ? LineOf(comElem) : firstAvaloniaLine, projectName,
+                    "Add <BuiltInComInteropSupport>false</BuiltInComInteropSupport> to a PropertyGroup.",
+                    "<BuiltInComInteropSupport>false</BuiltInComInteropSupport>",
+                    comElem is not null ? ElementSnippet(comElem) : string.Empty));
+            }
+
+            // §0.13 — don't reference Avalonia.Desktop on win-x64 (drags X11/FreeDesktop/DBus).
+            var desktopRef = packageRefs.FirstOrDefault(e =>
+                string.Equals(Include(e), "Avalonia.Desktop", StringComparison.OrdinalIgnoreCase));
+            bool isWinX64 = elements
+                .Where(e => Is(e, "RuntimeIdentifier") || Is(e, "RuntimeIdentifiers"))
+                .Any(e => e.Value.Contains("win-x64", StringComparison.OrdinalIgnoreCase));
+            if (desktopRef is not null && isWinX64)
+            {
+                issues.Add(CreateFileIssue(
+                    "BuildConfig", "Medium",
+                    "Avalonia.Desktop referenced on win-x64",
+                    "Avalonia.Desktop drags Avalonia.X11 + Avalonia.FreeDesktop + Tmds.DBus.Protocol; ILC emits " +
+                    "\"will always throw\" diagnostics for trimmed Linux entrypoints.",
+                    csproj, LineOf(desktopRef), projectName,
+                    "Reference Avalonia.Win32 + Avalonia.Skia + Avalonia.HarfBuzz explicitly instead of Avalonia.Desktop.",
+                    "<PackageReference Include=\"Avalonia.Win32\" Version=\"12.0.3\" />\n" +
+                    "<PackageReference Include=\"Avalonia.Skia\" Version=\"12.0.3\" />\n" +
+                    "<PackageReference Include=\"Avalonia.HarfBuzz\" Version=\"12.0.3\" />",
+                    ElementSnippet(desktopRef)));
+            }
+
+            // §3.1 — Avalonia loads backends via reflection; without TrimmerRootAssembly roots ILC drops them.
+            if (!elements.Any(e => Is(e, "TrimmerRootAssembly")))
+            {
+                issues.Add(CreateFileIssue(
+                    "BuildConfig", "Medium",
+                    "No <TrimmerRootAssembly> entries for Avalonia",
+                    "Avalonia loads platform/render backends via reflection. Without TrimmerRootAssembly roots the trimmer " +
+                    "drops them and the app NREs in the compositor thread at startup.",
+                    csproj, firstAvaloniaLine, projectName,
+                    "Add the canonical TrimmerRootAssembly list (Avalonia, Avalonia.Base, Avalonia.Win32, Avalonia.Skia, ...).",
+                    "<TrimmerRootAssembly Include=\"Avalonia\" />\n<TrimmerRootAssembly Include=\"Avalonia.Win32\" />\n<TrimmerRootAssembly Include=\"Avalonia.Skia\" />"));
+            }
+
+            // §0.4 — compiled bindings required under AOT; reflection bindings die.
+            var compiledBindingsElem = elements.FirstOrDefault(e => Is(e, "AvaloniaUseCompiledBindingsByDefault"));
+            bool compiledBindingsTrue = compiledBindingsElem is not null &&
+                string.Equals(compiledBindingsElem.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+            if (!compiledBindingsTrue)
+            {
+                issues.Add(CreateFileIssue(
+                    "BuildConfig", "Low",
+                    "AvaloniaUseCompiledBindingsByDefault is not enabled",
+                    "Reflection-based bindings die under AOT. Enable compiled bindings by default (requires x:DataType everywhere).",
+                    csproj, compiledBindingsElem is not null ? LineOf(compiledBindingsElem) : firstAvaloniaLine, projectName,
+                    "Add <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>.",
+                    "<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>"));
+            }
+
+            return issues;
+        }
+
+        /// <summary>Legacy text-regex csproj scan, retained only for non-well-formed files.</summary>
+        private static List<AotIssue> CheckBuildConfigRegexFallback(string csproj, string text, string projectName)
+        {
+            var issues = new List<AotIssue>();
 
             bool referencesAvalonia = Regex.IsMatch(text, @"PackageReference\s+Include\s*=\s*""Avalonia");
             if (!referencesAvalonia)
                 return issues;
 
-            var csproj = project.FilePath;
-
-            // §0.3 — Avalonia 12 MicroCom needs BuiltInComInteropSupport=false for AOT.
             var comTrue = Regex.Match(text, @"<BuiltInComInteropSupport>\s*true\s*</BuiltInComInteropSupport>", RegexOptions.IgnoreCase);
             bool comFalse = Regex.IsMatch(text, @"<BuiltInComInteropSupport>\s*false\s*</BuiltInComInteropSupport>", RegexOptions.IgnoreCase);
             if (!comFalse)
@@ -886,13 +1118,12 @@ namespace RoslynMcpServer.Core.Services
                     "BuildConfig", "High",
                     "BuiltInComInteropSupport is not set to false",
                     "Avalonia 12's MicroCom requires <BuiltInComInteropSupport>false</BuiltInComInteropSupport> for Native AOT.",
-                    csproj, LineOf(text, idx), project.Name,
+                    csproj, LineOf(text, idx), projectName,
                     "Add <BuiltInComInteropSupport>false</BuiltInComInteropSupport> to a PropertyGroup.",
                     "<BuiltInComInteropSupport>false</BuiltInComInteropSupport>",
                     comTrue.Success ? comTrue.Value : string.Empty));
             }
 
-            // §0.13 — don't reference Avalonia.Desktop on win-x64 (drags X11/FreeDesktop/DBus).
             var desktopRef = Regex.Match(text, @"PackageReference\s+Include\s*=\s*""Avalonia\.Desktop""");
             bool isWinX64 = text.Contains("win-x64");
             if (desktopRef.Success && isWinX64)
@@ -902,7 +1133,7 @@ namespace RoslynMcpServer.Core.Services
                     "Avalonia.Desktop referenced on win-x64",
                     "Avalonia.Desktop drags Avalonia.X11 + Avalonia.FreeDesktop + Tmds.DBus.Protocol; ILC emits " +
                     "\"will always throw\" diagnostics for trimmed Linux entrypoints.",
-                    csproj, LineOf(text, desktopRef.Index), project.Name,
+                    csproj, LineOf(text, desktopRef.Index), projectName,
                     "Reference Avalonia.Win32 + Avalonia.Skia + Avalonia.HarfBuzz explicitly instead of Avalonia.Desktop.",
                     "<PackageReference Include=\"Avalonia.Win32\" Version=\"12.0.3\" />\n" +
                     "<PackageReference Include=\"Avalonia.Skia\" Version=\"12.0.3\" />\n" +
@@ -910,7 +1141,6 @@ namespace RoslynMcpServer.Core.Services
                     desktopRef.Value));
             }
 
-            // §3.1 — Avalonia loads backends via reflection; without TrimmerRootAssembly roots ILC drops them.
             if (!text.Contains("<TrimmerRootAssembly"))
             {
                 issues.Add(CreateFileIssue(
@@ -918,12 +1148,11 @@ namespace RoslynMcpServer.Core.Services
                     "No <TrimmerRootAssembly> entries for Avalonia",
                     "Avalonia loads platform/render backends via reflection. Without TrimmerRootAssembly roots the trimmer " +
                     "drops them and the app NREs in the compositor thread at startup.",
-                    csproj, LineOf(text, FirstAvaloniaRefIndex(text)), project.Name,
+                    csproj, LineOf(text, FirstAvaloniaRefIndex(text)), projectName,
                     "Add the canonical TrimmerRootAssembly list (Avalonia, Avalonia.Base, Avalonia.Win32, Avalonia.Skia, ...).",
                     "<TrimmerRootAssembly Include=\"Avalonia\" />\n<TrimmerRootAssembly Include=\"Avalonia.Win32\" />\n<TrimmerRootAssembly Include=\"Avalonia.Skia\" />"));
             }
 
-            // §0.4 — compiled bindings required under AOT; reflection bindings die.
             bool compiledBindingsTrue = Regex.IsMatch(text,
                 @"<AvaloniaUseCompiledBindingsByDefault>\s*true\s*</AvaloniaUseCompiledBindingsByDefault>", RegexOptions.IgnoreCase);
             if (!compiledBindingsTrue)
@@ -932,7 +1161,7 @@ namespace RoslynMcpServer.Core.Services
                     "BuildConfig", "Low",
                     "AvaloniaUseCompiledBindingsByDefault is not enabled",
                     "Reflection-based bindings die under AOT. Enable compiled bindings by default (requires x:DataType everywhere).",
-                    csproj, LineOf(text, FirstAvaloniaRefIndex(text)), project.Name,
+                    csproj, LineOf(text, FirstAvaloniaRefIndex(text)), projectName,
                     "Add <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>.",
                     "<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>"));
             }
@@ -944,6 +1173,22 @@ namespace RoslynMcpServer.Core.Services
         {
             var m = Regex.Match(csprojText, @"PackageReference\s+Include\s*=\s*""Avalonia");
             return m.Success ? m.Index : 0;
+        }
+
+        /// <summary>1-based line of an XML node when line info was preserved, else 1.</summary>
+        private static int LineOf(XObject node) =>
+            node is IXmlLineInfo li && li.HasLineInfo() ? li.LineNumber : 1;
+
+        /// <summary>Single-line snippet of an element's opening tag (attributes preserved).</summary>
+        private static string ElementSnippet(XElement element)
+        {
+            // Render just the start tag rather than the whole subtree.
+            var clone = new XElement(element.Name, element.Attributes());
+            var xml = clone.ToString(SaveOptions.DisableFormatting);
+            int selfClose = xml.IndexOf("/>", StringComparison.Ordinal);
+            int open = xml.IndexOf('>');
+            if (selfClose >= 0) return xml[..(selfClose + 2)];
+            return open >= 0 ? xml[..(open + 1)] : xml;
         }
 
         private static bool IsInBuildOutput(string path) =>

@@ -210,35 +210,9 @@ namespace RoslynMcpServer.Core.Services
         /// Calculates cyclomatic complexity for a method
         /// </summary>
         private int CalculateMethodComplexity(MethodDeclarationSyntax method)
-        {
-            int complexity = 1; // Base complexity
-
-            var body = method.Body;
-            if (body == null)
-                return complexity;
-
-            // Count decision points
-            complexity += body.DescendantNodes().OfType<IfStatementSyntax>().Count();
-            complexity += body.DescendantNodes().OfType<WhileStatementSyntax>().Count();
-            complexity += body.DescendantNodes().OfType<ForStatementSyntax>().Count();
-            complexity += body.DescendantNodes().OfType<ForEachStatementSyntax>().Count();
-            complexity += body.DescendantNodes().OfType<CaseSwitchLabelSyntax>().Count();
-            complexity += body.DescendantNodes().OfType<CatchClauseSyntax>().Count();
-            complexity += body.DescendantNodes().OfType<ConditionalExpressionSyntax>().Count(); // ternary
-
-            // Count logical operators
-            var binaryExpressions = body.DescendantNodes().OfType<BinaryExpressionSyntax>();
-            foreach (var expr in binaryExpressions)
-            {
-                if (expr.IsKind(SyntaxKind.LogicalAndExpression) ||
-                    expr.IsKind(SyntaxKind.LogicalOrExpression))
-                {
-                    complexity++;
-                }
-            }
-
-            return complexity;
-        }
+            // Pass the whole method so expression-bodied members (which have no .Body)
+            // are also measured; the shared calculator handles a null/empty body.
+            => ComplexityCalculator.CalculateCyclomatic(method);
 
         /// <summary>
         /// Counts using directives and namespaces
