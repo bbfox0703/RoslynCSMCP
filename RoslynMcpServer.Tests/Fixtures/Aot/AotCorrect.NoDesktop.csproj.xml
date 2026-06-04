@@ -1,0 +1,37 @@
+<!--
+  AOT-validation corpus fixture (authored, not a verbatim copy).
+  Represents an AOT-correct Avalonia win-x64 app that AVOIDS Avalonia.Desktop and references
+  Win32/Skia/HarfBuzz explicitly. Modeled on the shipped settings of D:\Github\ZoltDump
+  (ui/ZoltDumpUI/ZoltDumpUI.csproj) and D:\Github\AOBMaker.
+  Expected: AotCompatibilityAnalyzer.AnalyzeBuildConfig finds ZERO issues.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- Must be false for Native AOT before Avalonia 12.0 -->
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishAot Condition="'$(PublishAot)' == ''">false</PublishAot>
+    <TrimMode>partial</TrimMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Explicit backends instead of Avalonia.Desktop (avoids dragging X11/FreeDesktop/DBus). -->
+    <PackageReference Include="Avalonia" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Win32" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Skia" Version="12.0.4" />
+    <PackageReference Include="Avalonia.HarfBuzz" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Avalonia" />
+    <TrimmerRootAssembly Include="Avalonia.Base" />
+    <TrimmerRootAssembly Include="Avalonia.Win32" />
+    <TrimmerRootAssembly Include="Avalonia.Skia" />
+    <TrimmerRootAssembly Include="Avalonia.Controls.DataGrid" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,30 @@
+<!--
+  AOT-validation corpus fixture (authored, not a verbatim copy).
+  Represents an AOT-clean compiled-binding UserControl: x:DataType on the root, plain
+  DataGridTextColumn (not DataGridTemplateColumn), and no bound <Run> inside a <TextBlock>.
+  Modeled on D:\Github\ZoltDump (ui/ZoltDumpUI/Views/ClassStructPanel.axaml).
+  Expected: AotCompatibilityAnalyzer.AnalyzeXaml finds ZERO issues.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Sample.ViewModels"
+             x:Class="Sample.Views.ClassStructPanel"
+             x:DataType="vm:ClassStructViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
+      <TextBlock Text="Class:" />
+      <TextBlock Text="{Binding ClassName}" FontWeight="Bold" />
+      <TextBlock Text="{Binding ClassAddr}" FontFamily="Consolas" />
+    </StackPanel>
+
+    <DataGrid ItemsSource="{Binding Properties}"
+              AutoGenerateColumns="False"
+              IsReadOnly="True">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Offset" Binding="{Binding Offset, StringFormat='0x{0:X}'}" />
+        <DataGridTextColumn Header="Name" Binding="{Binding Name}" />
+        <DataGridTextColumn Header="Type" Binding="{Binding Type}" />
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>
