@@ -219,6 +219,10 @@ Use FindReferences tool with:
 - `categories` (string, optional): Categories to check (comma-separated): sql-injection, secrets, crypto, path-traversal, deserialization, all (default: all)
 - `severity` (string, optional): Severity filter: critical, high, medium, low, all (default: all)
 
+**Detection notes**: Analysis is semantic rather than keyword-based, to keep false positives low:
+- **SQL injection** is reported only when a string's static shape looks like SQL *and* a non-constant (runtime) value is spliced in — constant-only queries and prose such as `"... was updated"` are not flagged.
+- **Weak crypto / insecure deserialization** are matched by fully-qualified type name (including base types, so derived providers are caught) and de-duplicated per line — a substring like `DES` will not match an unrelated type such as `ResultDescriptor`.
+
 ---
 
 ### 18. FindUnusedDependencies

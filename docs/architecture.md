@@ -81,7 +81,9 @@
 
 ### AnalyzeCodeComplexity
 - Calculates cyclomatic complexity for methods
-- Complexity = 1 + decision points (`if`/`while`/`for`/`foreach`/`switch`/`catch`) + logical operators (`&&`/`||`)
+- All complexity is computed by a single shared `ComplexityCalculator` (`Core/Services/ComplexityCalculator.cs`) so every tool reports the same number
+- Complexity = 1 + decision points: `if`/`while`/`do`/`for`/`foreach`, `catch`, `case` labels (pattern labels included, `default` excluded), switch-expression arms (discard excluded), `when` guards, ternary `?:`, null-coalescing `??`, null-conditional `?.`/`?[]`, logical `&&`/`||`, and pattern `and`/`or` combinators
+- Also provides nesting-weighted **cognitive complexity** (SonarSource model)
 - Default threshold is 5, configurable via tool parameter
 
 ### CodeAnalysisService (`Services/CodeAnalysisService.cs`)
