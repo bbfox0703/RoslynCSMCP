@@ -1,0 +1,38 @@
+<!--
+  AOT-validation corpus fixture (authored, not a verbatim copy).
+  Represents an AOT app on win-x64 that STILL references Avalonia.Desktop. Modeled on the shipped
+  settings of D:\Github\UE5CEDumper (ui/UE5DumpUI/UE5DumpUI.csproj), D:\Github\AchievoLab and
+  D:\Github\CrimsonAtomtic, which all keep Avalonia.Desktop.
+
+  The Avalonia.Desktop reference is a DELIBERATELY ACCEPTED finding: on an already-shipped app,
+  switching to explicit Win32/Skia/HarfBuzz backends is a behavioral change that requires a full
+  re-test of the win-x64 publish, so the maintainers keep Avalonia.Desktop for now. The analyzer
+  is correct to surface it (Medium), and this fixture pins that it surfaces ONLY that one finding.
+
+  Expected: AotCompatibilityAnalyzer.AnalyzeBuildConfig finds EXACTLY ONE issue
+  (the "Avalonia.Desktop referenced on win-x64" Medium) and nothing else.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishAot Condition="'$(PublishAot)' == ''">false</PublishAot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Avalonia" />
+    <TrimmerRootAssembly Include="Avalonia.Desktop" />
+    <TrimmerRootAssembly Include="Avalonia.Win32" />
+    <TrimmerRootAssembly Include="Avalonia.Skia" />
+  </ItemGroup>
+</Project>

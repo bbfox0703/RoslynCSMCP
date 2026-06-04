@@ -1062,7 +1062,10 @@ namespace RoslynMcpServer.Core.Services
                     "Avalonia.Desktop drags Avalonia.X11 + Avalonia.FreeDesktop + Tmds.DBus.Protocol; ILC emits " +
                     "\"will always throw\" diagnostics for trimmed Linux entrypoints.",
                     csproj, LineOf(desktopRef), projectName,
-                    "Reference Avalonia.Win32 + Avalonia.Skia + Avalonia.HarfBuzz explicitly instead of Avalonia.Desktop.",
+                    "Reference Avalonia.Win32 + Avalonia.Skia + Avalonia.HarfBuzz explicitly instead of Avalonia.Desktop. " +
+                    "Tradeoff: on an already-shipped app this is a behavioral change to the platform/render backend " +
+                    "wiring — re-test the win-x64 publish before removing Avalonia.Desktop. It is reasonable to keep " +
+                    "Avalonia.Desktop and accept this finding until that re-test is done.",
                     "<PackageReference Include=\"Avalonia.Win32\" Version=\"12.0.3\" />\n" +
                     "<PackageReference Include=\"Avalonia.Skia\" Version=\"12.0.3\" />\n" +
                     "<PackageReference Include=\"Avalonia.HarfBuzz\" Version=\"12.0.3\" />",
@@ -1134,7 +1137,10 @@ namespace RoslynMcpServer.Core.Services
                     "Avalonia.Desktop drags Avalonia.X11 + Avalonia.FreeDesktop + Tmds.DBus.Protocol; ILC emits " +
                     "\"will always throw\" diagnostics for trimmed Linux entrypoints.",
                     csproj, LineOf(text, desktopRef.Index), projectName,
-                    "Reference Avalonia.Win32 + Avalonia.Skia + Avalonia.HarfBuzz explicitly instead of Avalonia.Desktop.",
+                    "Reference Avalonia.Win32 + Avalonia.Skia + Avalonia.HarfBuzz explicitly instead of Avalonia.Desktop. " +
+                    "Tradeoff: on an already-shipped app this is a behavioral change to the platform/render backend " +
+                    "wiring — re-test the win-x64 publish before removing Avalonia.Desktop. It is reasonable to keep " +
+                    "Avalonia.Desktop and accept this finding until that re-test is done.",
                     "<PackageReference Include=\"Avalonia.Win32\" Version=\"12.0.3\" />\n" +
                     "<PackageReference Include=\"Avalonia.Skia\" Version=\"12.0.3\" />\n" +
                     "<PackageReference Include=\"Avalonia.HarfBuzz\" Version=\"12.0.3\" />",
