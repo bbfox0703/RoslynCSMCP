@@ -113,7 +113,7 @@ show_config_example() {
 
         echo -e "${GREEN}claude mcp add --transport stdio $server_name $scope_arg\\${NC}"
         echo -e "${GREEN}    --env DOTNET_ENVIRONMENT=Production \\${NC}"
-        echo -e "${GREEN}    -- dotnet run --project \"$project_path\"${NC}"
+        echo -e "${GREEN}    -- dotnet run --project \"$project_path\" -c Release${NC}"
         echo
     done
 }
@@ -146,7 +146,7 @@ show_mcp_json_example() {
 
         echo "    \"$server_name\": {"
         echo '      "command": "dotnet",'
-        echo "      \"args\": [\"run\", \"--project\", \"$project_path\"],"
+        echo "      \"args\": [\"run\", \"--project\", \"$project_path\", \"-c\", \"Release\"],"
         echo '      "env": { "DOTNET_ENVIRONMENT": "Production" }'
         echo -n "    }"
     done
@@ -182,7 +182,7 @@ generate_mcp_json() {
             cat <<ENTRY
     "$server_name": {
       "command": "dotnet",
-      "args": ["run", "--project", "$project_path"],
+      "args": ["run", "--project", "$project_path", "-c", "Release"],
       "env": { "DOTNET_ENVIRONMENT": "Production" }
     }
 ENTRY
@@ -376,7 +376,7 @@ for mod in "${SELECTED_MODULES[@]}"; do
     # Add MCP server
     if claude mcp add --transport stdio "$server_name" $scope_arg \
         --env DOTNET_ENVIRONMENT=Production \
-        -- dotnet run --project "$project_path" > /dev/null 2>&1; then
+        -- dotnet run --project "$project_path" -c Release > /dev/null 2>&1; then
         CONFIGURED_SERVERS+=("$server_name")
     else
         echo -e "${RED}   Failed to configure $server_name${NC}"
