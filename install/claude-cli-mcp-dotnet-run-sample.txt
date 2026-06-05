@@ -5,53 +5,58 @@
 # MODULAR SETUP (Recommended for token optimization)
 # ============================================================
 
-# Navigation Module (6 tools, ~1,050 tokens)
+# Navigation Module (7 tools, ~1,225 tokens)
 claude mcp add roslyn-navigation --scope user --transport stdio \
     --env DOTNET_ENVIRONMENT=Production \
-    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Navigation
+    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Navigation -c Release
 
-# Quality Module (6 tools, ~1,050 tokens)
+# Quality Module (8 tools, ~1,400 tokens)
 claude mcp add roslyn-quality --scope user --transport stdio \
     --env DOTNET_ENVIRONMENT=Production \
-    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Quality
+    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Quality -c Release
 
 # Security Module (3 tools, ~525 tokens)
 claude mcp add roslyn-security --scope user --transport stdio \
     --env DOTNET_ENVIRONMENT=Production \
-    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Security
+    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Security -c Release
 
 # Dependencies Module (5 tools, ~875 tokens)
 claude mcp add roslyn-dependencies --scope user --transport stdio \
     --env DOTNET_ENVIRONMENT=Production \
-    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Dependencies
+    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Dependencies -c Release
 
-# Refactoring Module (4 tools, ~700 tokens)
+# Refactoring Module (5 tools, ~875 tokens)
 claude mcp add roslyn-refactoring --scope user --transport stdio \
     --env DOTNET_ENVIRONMENT=Production \
-    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Refactoring
+    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Refactoring -c Release
 
 # Testing Module (2 tools, ~350 tokens)
 claude mcp add roslyn-testing --scope user --transport stdio \
     --env DOTNET_ENVIRONMENT=Production \
-    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Testing
+    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Testing -c Release
 
-# Metrics Module (3 tools, ~525 tokens)
+# Metrics Module (4 tools, ~700 tokens)
 claude mcp add roslyn-metrics --scope user --transport stdio \
     --env DOTNET_ENVIRONMENT=Production \
-    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Metrics
+    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Metrics -c Release
 
-# Advanced Module (13 tools, ~2,275 tokens)
+# Advanced Module (15 tools, ~2,625 tokens)
 claude mcp add roslyn-advanced --scope user --transport stdio \
     --env DOTNET_ENVIRONMENT=Production \
-    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Advanced
+    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Advanced -c Release
+
+# Interop Module (3 tools, ~525 tokens)
+claude mcp add roslyn-interop --scope user --transport stdio \
+    --env DOTNET_ENVIRONMENT=Production \
+    -- dotnet run --project D:\Github\RoslynCSMCP\src\RoslynMcpServer.Interop -c Release
 
 # ============================================================
-# FULL VERSION (All 42 tools, ~7,350 tokens)
+# FULL VERSION (All 51 tools, ~8,925 tokens)
 # ============================================================
 
 claude mcp add roslyn-full --scope user --transport stdio \
     --env DOTNET_ENVIRONMENT=Production \
-    -- dotnet run --project D:\Github\RoslynCSMCP\RoslynMcpServer
+    -- dotnet run --project D:\Github\RoslynCSMCP\RoslynMcpServer -c Release
 
 # ============================================================
 # SCOPE OPTIONS
@@ -64,5 +69,6 @@ claude mcp add roslyn-full --scope user --transport stdio \
 # NOTES
 # ============================================================
 # - Use absolute paths (e.g., D:\Github\RoslynCSMCP\...)
+# - "-c Release" matches the build configuration the setup scripts produce
 # - dotnet run will auto-build if needed (slower startup)
 # - For faster startup, build first then use .exe

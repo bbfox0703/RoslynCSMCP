@@ -137,7 +137,7 @@ show_config_example() {
 
         echo "    \"$server_name\": {"
         echo '      "command": "dotnet",'
-        echo "      \"args\": [\"run\", \"--project\", \"$project_path\"],"
+        echo "      \"args\": [\"run\", \"--project\", \"$project_path\", \"-c\", \"Release\"],"
         echo '      "env": {'
         echo '        "DOTNET_ENVIRONMENT": "Production"'
         echo '      }'
@@ -338,7 +338,7 @@ build_config_json() {
         cat <<ENTRY
     "$server_name": {
       "command": "dotnet",
-      "args": ["run", "--project", "$project_path"],
+      "args": ["run", "--project", "$project_path", "-c", "Release"],
       "env": {
         "DOTNET_ENVIRONMENT": "Production"
       }
@@ -376,20 +376,14 @@ FIRST_MOD="${SELECTED_MODULES[0]}"
 FIRST_PATH=$(get_module_field "$FIRST_MOD" 2)
 TEST_PROJECT_PATH="$ROOT_PATH/$FIRST_PATH"
 
-cd "$TEST_PROJECT_PATH"
-timeout 3s dotnet run --no-build > /dev/null 2>&1 &
-SERVER_PID=$!
-sleep 2
-
-if ps -p $SERVER_PID > /dev/null 2>&1; then
+# MCP stdio servers read from stdin and shut down cleanly on EOF.
+# Feed empty stdin so the server initializes then exits; exit code 0 = healthy.
+if echo '' | timeout 60s dotnet run --no-build -c Release --project "$TEST_PROJECT_PATH" > /dev/null 2>&1; then
     echo -e "${GREEN}   Server started successfully${NC}"
-    kill $SERVER_PID 2>/dev/null || true
 else
     echo -e "${RED}   Server failed to start${NC}"
     exit 1
 fi
-
-cd "$SCRIPT_DIR"
 
 # Show config example
 show_config_example "$ROOT_PATH" "${SELECTED_MODULES[@]}"

@@ -68,7 +68,7 @@ function Show-ConfigExample {
 
         $configJson.mcpServers[$serverName] = @{
             command = "dotnet"
-            args = @("run", "--project", $projectPath.Replace('\', '/'))
+            args = @("run", "--project", $projectPath.Replace('\', '/'), "-c", "Release")
             env = @{
                 DOTNET_ENVIRONMENT = "Production"
             }
@@ -293,7 +293,7 @@ foreach ($mod in $selectedModules) {
 
     $existingConfig.mcpServers[$serverName] = @{
         command = "dotnet"
-        args = @("run", "--project", $projectPath)
+        args = @("run", "--project", $projectPath, "-c", "Release")
         env = @{
             DOTNET_ENVIRONMENT = "Production"
         }
@@ -316,22 +316,15 @@ Write-Host "4. Testing server startup..." -ForegroundColor Yellow
 $firstModule = $modules[$selectedModules[0]]
 $testProjectPath = Join-Path $rootPath $firstModule.Path
 
-$job = Start-Job -ScriptBlock {
-    param($path)
-    Set-Location $path
-    dotnet run --no-build
-} -ArgumentList $testProjectPath
+# MCP stdio servers read from stdin and shut down cleanly on EOF.
+# Feed empty stdin so the server initializes then exits; exit code 0 = healthy.
+$testOutput = $null | & dotnet run --no-build -c Release --project $testProjectPath 2>&1 | Out-String
 
-Start-Sleep -Seconds 3
-
-if ($job.State -eq "Running") {
+if ($LASTEXITCODE -eq 0) {
     Write-Host "   Server started successfully" -ForegroundColor Green
-    Stop-Job $job
-    Remove-Job $job
 } else {
-    Write-Host "   Server failed to start" -ForegroundColor Red
-    Receive-Job $job
-    Remove-Job $job
+    Write-Host "   Server failed to start (exit code $LASTEXITCODE)" -ForegroundColor Red
+    Write-Host $testOutput
     exit 1
 }
 

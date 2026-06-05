@@ -2,7 +2,7 @@
   "mcpServers": {
     "roslyn-full": {
       "command": "dotnet",
-      "args": ["run", "--project", "${workspaceFolder}/../RoslynCSMCP/RoslynMcpServer"],
+      "args": ["run", "--project", "${workspaceFolder}/../RoslynCSMCP/RoslynMcpServer", "-c", "Release"],
       "env": {
         "DOTNET_ENVIRONMENT": "Production"
       }

@@ -28,12 +28,12 @@ Replace `${workspaceFolder}/../RoslynCSMCP` with:
 
 **Absolute Path (Recommended)**:
 ```json
-"args": ["run", "--project", "D:/Tools/RoslynCSMCP/src/RoslynMcpServer.Navigation"]
+"args": ["run", "--project", "D:/Tools/RoslynCSMCP/src/RoslynMcpServer.Navigation", "-c", "Release"]
 ```
 
 **Relative Path**:
 ```json
-"args": ["run", "--project", "../RoslynCSMCP/src/RoslynMcpServer.Navigation"]
+"args": ["run", "--project", "../RoslynCSMCP/src/RoslynMcpServer.Navigation", "-c", "Release"]
 ```
 
 ## Module Reference
@@ -60,12 +60,12 @@ Create your own `.mcp.json` by combining modules:
   "mcpServers": {
     "roslyn-navigation": {
       "command": "dotnet",
-      "args": ["run", "--project", "/path/to/RoslynCSMCP/src/RoslynMcpServer.Navigation"],
+      "args": ["run", "--project", "/path/to/RoslynCSMCP/src/RoslynMcpServer.Navigation", "-c", "Release"],
       "env": { "DOTNET_ENVIRONMENT": "Production" }
     },
     "roslyn-dependencies": {
       "command": "dotnet",
-      "args": ["run", "--project", "/path/to/RoslynCSMCP/src/RoslynMcpServer.Dependencies"],
+      "args": ["run", "--project", "/path/to/RoslynCSMCP/src/RoslynMcpServer.Dependencies", "-c", "Release"],
       "env": { "DOTNET_ENVIRONMENT": "Production" }
     }
   }

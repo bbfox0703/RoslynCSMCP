@@ -2,12 +2,12 @@
   "mcpServers": {
     "roslyn-navigation": {
       "command": "dotnet",
-      "args": ["run", "--project", "/path/to/RoslynCSMCP/src/RoslynMcpServer.Navigation"],
+      "args": ["run", "--project", "/path/to/RoslynCSMCP/src/RoslynMcpServer.Navigation", "-c", "Release"],
       "env": { "DOTNET_ENVIRONMENT": "Production" }
     },
     "roslyn-quality": {
       "command": "dotnet",
-      "args": ["run", "--project", "/path/to/RoslynCSMCP/src/RoslynMcpServer.Quality"],
+      "args": ["run", "--project", "/path/to/RoslynCSMCP/src/RoslynMcpServer.Quality", "-c", "Release"],
       "env": { "DOTNET_ENVIRONMENT": "Production" }
     }
   }

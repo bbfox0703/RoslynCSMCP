@@ -2,21 +2,21 @@
   "mcpServers": {
     "roslyn-navigation": {
       "command": "dotnet",
-      "args": ["run", "--project", "${workspaceFolder}/../RoslynCSMCP/src/RoslynMcpServer.Navigation"],
+      "args": ["run", "--project", "${workspaceFolder}/../RoslynCSMCP/src/RoslynMcpServer.Navigation", "-c", "Release"],
       "env": {
         "DOTNET_ENVIRONMENT": "Production"
       }
     },
     "roslyn-quality": {
       "command": "dotnet",
-      "args": ["run", "--project", "${workspaceFolder}/../RoslynCSMCP/src/RoslynMcpServer.Quality"],
+      "args": ["run", "--project", "${workspaceFolder}/../RoslynCSMCP/src/RoslynMcpServer.Quality", "-c", "Release"],
       "env": {
         "DOTNET_ENVIRONMENT": "Production"
       }
     },
     "roslyn-security": {
       "command": "dotnet",
-      "args": ["run", "--project", "${workspaceFolder}/../RoslynCSMCP/src/RoslynMcpServer.Security"],
+      "args": ["run", "--project", "${workspaceFolder}/../RoslynCSMCP/src/RoslynMcpServer.Security", "-c", "Release"],
       "env": {
         "DOTNET_ENVIRONMENT": "Production"
       }

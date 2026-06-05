@@ -67,7 +67,7 @@ function Show-ConfigExample {
 
         Write-Host "claude mcp add --transport stdio $serverName $scopeArg\" -ForegroundColor Green
         Write-Host "    --env DOTNET_ENVIRONMENT=Production \" -ForegroundColor Green
-        Write-Host "    -- dotnet run --project `"$projectPath`"" -ForegroundColor Green
+        Write-Host "    -- dotnet run --project `"$projectPath`" -c Release" -ForegroundColor Green
         Write-Host
     }
 }
@@ -88,7 +88,7 @@ function Generate-McpJson {
 
         $config.mcpServers[$serverName] = @{
             command = "dotnet"
-            args = @("run", "--project", $projectPath.Replace('\', '/'))
+            args = @("run", "--project", $projectPath.Replace('\', '/'), "-c", "Release")
             env = @{
                 DOTNET_ENVIRONMENT = "Production"
             }
@@ -120,7 +120,7 @@ function Show-McpJsonExample {
 
         $config.mcpServers[$serverName] = @{
             command = "dotnet"
-            args = @("run", "--project", $projectPath.Replace('\', '/'))
+            args = @("run", "--project", $projectPath.Replace('\', '/'), "-c", "Release")
             env = @{
                 DOTNET_ENVIRONMENT = "Production"
             }
@@ -323,7 +323,7 @@ foreach ($mod in $selectedModules) {
     ) + $scopeArg + @(
         "--env", "DOTNET_ENVIRONMENT=Production",
         "--",
-        "dotnet", "run", "--project", $projectPath
+        "dotnet", "run", "--project", $projectPath, "-c", "Release"
     )
 
     try {

@@ -2,7 +2,7 @@
   "mcpServers": {
     "roslyn-navigation": {
       "command": "dotnet",
-      "args": ["run", "--project", "${workspaceFolder}/../RoslynCSMCP/src/RoslynMcpServer.Navigation"],
+      "args": ["run", "--project", "${workspaceFolder}/../RoslynCSMCP/src/RoslynMcpServer.Navigation", "-c", "Release"],
       "env": {
         "DOTNET_ENVIRONMENT": "Production"
       }
