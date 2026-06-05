@@ -16,18 +16,20 @@ NC='\033[0m' # No Color
 # Default values
 CLAUDE_CONFIG_PATH=""
 SKIP_BUILD=false
+REMOVE_ALL=false
 
 # Module definitions (name|path|tools|tokens|description)
 declare -A MODULES
-MODULES["1"]="Full|RoslynMcpServer|42|7350|All tools in one server"
-MODULES["2"]="Navigation|src/RoslynMcpServer.Navigation|6|1050|Symbol search, references, file outline"
-MODULES["3"]="Quality|src/RoslynMcpServer.Quality|6|1050|Code smells, complexity, naming"
+MODULES["1"]="Full|RoslynMcpServer|51|8925|All tools in one server"
+MODULES["2"]="Navigation|src/RoslynMcpServer.Navigation|7|1225|Symbol search, references, file outline"
+MODULES["3"]="Quality|src/RoslynMcpServer.Quality|8|1400|Code smells, complexity, naming"
 MODULES["4"]="Security|src/RoslynMcpServer.Security|3|525|Security issues, thread safety"
 MODULES["5"]="Dependencies|src/RoslynMcpServer.Dependencies|5|875|Dependency analysis, packages"
-MODULES["6"]="Refactoring|src/RoslynMcpServer.Refactoring|4|700|Rename, extract interface"
+MODULES["6"]="Refactoring|src/RoslynMcpServer.Refactoring|5|875|Rename, extract interface"
 MODULES["7"]="Testing|src/RoslynMcpServer.Testing|2|350|Test discovery, coverage"
-MODULES["8"]="Metrics|src/RoslynMcpServer.Metrics|3|525|Code metrics, statistics"
-MODULES["9"]="Advanced|src/RoslynMcpServer.Advanced|13|2275|Batch queries, call hierarchy"
+MODULES["8"]="Metrics|src/RoslynMcpServer.Metrics|4|700|Code metrics, statistics"
+MODULES["9"]="Advanced|src/RoslynMcpServer.Advanced|15|2625|Batch queries, call hierarchy"
+MODULES["10"]="Interop|src/RoslynMcpServer.Interop|3|525|AOT/trimming, P/Invoke, unsafe code"
 
 get_module_field() {
     local key="$1"
@@ -40,21 +42,71 @@ show_menu() {
     echo
     echo -e "${CYAN}=== Select Tool Set ===${NC}"
     echo
-    echo -e "${WHITE}  [1] Full          (42 tools, ~7,350 tokens) - All tools in one server${NC}"
+    echo -e "${WHITE}  [1] Full          (51 tools, ~8,925 tokens) - All tools in one server${NC}"
     echo
     echo -e "${GRAY}  --- Modular Options (for token optimization) ---${NC}"
-    echo -e "${WHITE}  [2] Navigation    ( 6 tools, ~1,050 tokens) - Symbol search, references, file outline${NC}"
-    echo -e "${WHITE}  [3] Quality       ( 6 tools, ~1,050 tokens) - Code smells, complexity, naming${NC}"
+    echo -e "${WHITE}  [2] Navigation    ( 7 tools, ~1,225 tokens) - Symbol search, references, file outline${NC}"
+    echo -e "${WHITE}  [3] Quality       ( 8 tools, ~1,400 tokens) - Code smells, complexity, naming${NC}"
     echo -e "${WHITE}  [4] Security      ( 3 tools,   ~525 tokens) - Security issues, thread safety${NC}"
     echo -e "${WHITE}  [5] Dependencies  ( 5 tools,   ~875 tokens) - Dependency analysis, packages${NC}"
-    echo -e "${WHITE}  [6] Refactoring   ( 4 tools,   ~700 tokens) - Rename, extract interface${NC}"
+    echo -e "${WHITE}  [6] Refactoring   ( 5 tools,   ~875 tokens) - Rename, extract interface${NC}"
     echo -e "${WHITE}  [7] Testing       ( 2 tools,   ~350 tokens) - Test discovery, coverage${NC}"
-    echo -e "${WHITE}  [8] Metrics       ( 3 tools,   ~525 tokens) - Code metrics, statistics${NC}"
-    echo -e "${WHITE}  [9] Advanced      (13 tools, ~2,275 tokens) - Batch queries, call hierarchy${NC}"
+    echo -e "${WHITE}  [8] Metrics       ( 4 tools,   ~700 tokens) - Code metrics, statistics${NC}"
+    echo -e "${WHITE}  [9] Advanced      (15 tools, ~2,625 tokens) - Batch queries, call hierarchy${NC}"
+    echo -e "${WHITE}  [10] Interop      ( 3 tools,   ~525 tokens) - AOT/trimming, P/Invoke, unsafe code${NC}"
     echo
     echo -e "${YELLOW}  [A] All Modular   (Select multiple modules)${NC}"
+    echo -e "${YELLOW}  [R] Remove All    (Uninstall all Roslyn MCP servers)${NC}"
     echo -e "${RED}  [Q] Quit${NC}"
     echo
+}
+
+remove_all_servers() {
+    local config_path="$1"
+
+    if [ -z "$config_path" ]; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            config_path="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+        elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            config_path="$HOME/.config/Claude/claude_desktop_config.json"
+        else
+            echo -e "${RED}   Unsupported operating system${NC}"
+            exit 1
+        fi
+    fi
+
+    echo
+    echo -e "${YELLOW}Removing all Roslyn MCP servers...${NC}"
+    echo "   Config path: $config_path"
+
+    if [ ! -f "$config_path" ]; then
+        echo -e "${YELLOW}   Config file not found, nothing to remove.${NC}"
+        return
+    fi
+
+    if ! command -v jq &> /dev/null; then
+        echo -e "${RED}   jq is required to remove servers. Please install jq.${NC}"
+        exit 1
+    fi
+
+    local removed=0
+    for key in "${!MODULES[@]}"; do
+        local name
+        name=$(get_module_field "$key" 1)
+        local server_name="roslyn-$(echo "$name" | tr '[:upper:]' '[:lower:]')"
+        if [ "$(jq --arg n "$server_name" '(.mcpServers // {}) | has($n)' "$config_path")" = "true" ]; then
+            jq --arg n "$server_name" 'del(.mcpServers[$n])' "$config_path" > "${config_path}.tmp" && mv "${config_path}.tmp" "$config_path"
+            echo -e "${GREEN}   Removed $server_name${NC}"
+            removed=$((removed + 1))
+        fi
+    done
+
+    if [ "$removed" -eq 0 ]; then
+        echo -e "${YELLOW}   No Roslyn MCP servers were configured.${NC}"
+    else
+        echo
+        echo -e "${GREEN}Removed $removed server(s). Restart Claude Desktop to apply.${NC}"
+    fi
 }
 
 show_config_example() {
@@ -109,6 +161,10 @@ while [[ $# -gt 0 ]]; do
             SKIP_BUILD=true
             shift
             ;;
+        --remove-all)
+            REMOVE_ALL=true
+            shift
+            ;;
         --help|-h)
             cat <<EOF
 Roslyn MCP Server Setup Script for Claude Desktop
@@ -118,11 +174,13 @@ Usage: ./setup-claude-desktop.sh [options]
 Options:
   --config-path <path>  Specify custom path to Claude Desktop config file
   --skip-build          Skip building the project
+  --remove-all          Remove all configured Roslyn MCP servers and exit
   --help, -h            Show this help message
 
 Examples:
   ./setup-claude-desktop.sh                                    # Interactive mode
   ./setup-claude-desktop.sh --skip-build                       # Skip building step
+  ./setup-claude-desktop.sh --remove-all                       # Uninstall all Roslyn servers
   ./setup-claude-desktop.sh --config-path ~/custom/config.json # Custom config path
 EOF
             exit 0
@@ -143,6 +201,12 @@ ROOT_PATH="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo -e "${GREEN}Project location: $ROOT_PATH${NC}"
 echo
+
+# Handle removal (no build / .NET needed)
+if [ "$REMOVE_ALL" = true ]; then
+    remove_all_servers "$CLAUDE_CONFIG_PATH"
+    exit 0
+fi
 
 # Check .NET installation
 echo -e "${YELLOW}1. Checking .NET installation...${NC}"
@@ -165,6 +229,10 @@ while true; do
             echo -e "${YELLOW}Setup cancelled.${NC}"
             exit 0
             ;;
+        R)
+            remove_all_servers "$CLAUDE_CONFIG_PATH"
+            exit 0
+            ;;
         A)
             echo
             echo -e "${YELLOW}Select modules to install (comma-separated, e.g., 2,3,4):${NC}"
@@ -182,7 +250,7 @@ while true; do
             fi
             break
             ;;
-        [1-9])
+        *)
             if [[ -n "${MODULES[$selection]}" ]]; then
                 SELECTED_MODULES+=("$selection")
                 break
@@ -190,10 +258,6 @@ while true; do
                 echo -e "${RED}Invalid selection. Please try again.${NC}"
                 continue
             fi
-            ;;
-        *)
-            echo -e "${RED}Invalid selection. Please try again.${NC}"
-            continue
             ;;
     esac
 done

@@ -17,10 +17,10 @@ cp mcp.json.navigation /path/to/your/project/.mcp.json
 
 | File | Modules | Tools | Tokens | Use Case |
 |------|---------|-------|--------|----------|
-| `mcp.json.full` | Full | 42 | ~7,350 | All features |
-| `mcp.json.navigation` | Navigation | 6 | ~1,050 | Code exploration |
-| `mcp.json.quality` | Quality | 6 | ~1,050 | Code review |
-| `mcp.json.standard` | Nav + Quality + Security | 15 | ~2,625 | Daily development |
+| `mcp.json.full` | Full | 51 | ~8,925 | All features |
+| `mcp.json.navigation` | Navigation | 7 | ~1,225 | Code exploration |
+| `mcp.json.quality` | Quality | 8 | ~1,400 | Code review |
+| `mcp.json.standard` | Nav + Quality + Security | 18 | ~3,150 | Daily development |
 
 ## Path Configuration
 
@@ -40,15 +40,16 @@ Replace `${workspaceFolder}/../RoslynCSMCP` with:
 
 | Module | Path | Tools | Available Skills |
 |--------|------|-------|------------------|
-| Full | `RoslynMcpServer` | 42 | All skills |
-| Navigation | `src/RoslynMcpServer.Navigation` | 6 | `/roslyn-explore`, `/roslyn-navigate`, `/roslyn-outline` |
-| Quality | `src/RoslynMcpServer.Quality` | 6 | `/roslyn-quality` |
+| Full | `RoslynMcpServer` | 51 | All skills |
+| Navigation | `src/RoslynMcpServer.Navigation` | 7 | `/roslyn-explore`, `/roslyn-navigate`, `/roslyn-outline` |
+| Quality | `src/RoslynMcpServer.Quality` | 8 | `/roslyn-quality` |
 | Security | `src/RoslynMcpServer.Security` | 3 | `/roslyn-security` |
 | Dependencies | `src/RoslynMcpServer.Dependencies` | 5 | `/roslyn-dependencies` |
-| Refactoring | `src/RoslynMcpServer.Refactoring` | 4 | `/roslyn-refactor` |
+| Refactoring | `src/RoslynMcpServer.Refactoring` | 5 | `/roslyn-refactor` |
 | Testing | `src/RoslynMcpServer.Testing` | 2 | `/roslyn-testing` |
-| Metrics | `src/RoslynMcpServer.Metrics` | 3 | `/roslyn-metrics` |
-| Advanced | `src/RoslynMcpServer.Advanced` | 13 | `/roslyn-deep-analysis`, `/roslyn-batch`, `/roslyn-api-diff` |
+| Metrics | `src/RoslynMcpServer.Metrics` | 4 | `/roslyn-metrics` |
+| Advanced | `src/RoslynMcpServer.Advanced` | 15 | `/roslyn-deep-analysis`, `/roslyn-batch`, `/roslyn-api-diff` |
+| Interop | `src/RoslynMcpServer.Interop` | 3 | `/roslyn-interop` |
 
 ## Custom Configuration
 

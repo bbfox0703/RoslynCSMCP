@@ -6,7 +6,7 @@ Each skill corresponds to an MCP module; simply load the corresponding module to
 
 ---
 
-## Module: Navigation (6 tools)
+## Module: Navigation (7 tools)
 
 ### /roslyn-explore
 
@@ -49,7 +49,7 @@ View file structure outline.
 
 ---
 
-## Module: Quality (6 tools)
+## Module: Quality (8 tools)
 
 ### /roslyn-quality
 
@@ -102,7 +102,7 @@ Dependency and architectural analysis.
 
 ---
 
-## Module: Refactoring (4 tools)
+## Module: Refactoring (5 tools)
 
 ### /roslyn-refactor
 
@@ -134,7 +134,7 @@ Test coverage analysis.
 
 ---
 
-## Module: Metrics (3 tools)
+## Module: Metrics (4 tools)
 
 ### /roslyn-metrics
 
@@ -150,7 +150,7 @@ Code metrics report.
 
 ---
 
-## Module: Advanced (13 tools)
+## Module: Advanced (15 tools)
 
 ### /roslyn-deep-analysis
 
@@ -203,12 +203,28 @@ API change analysis.
 
 ---
 
+## Module: Interop (3 tools)
+
+### /roslyn-interop
+
+Native interop and AOT/trimming readiness review.
+**Required Module**: `RoslynMcpServer.Interop`
+**Usage**: `/roslyn-interop <solution-path>`
+**Steps**:
+
+1. Call `AnalyzeAotCompatibility` to detect AOT/trimming incompatibilities (reflection, XAML, `.csproj` settings)
+2. Call `AnalyzePInvoke` to audit P/Invoke patterns and `[DllImport]` → `[LibraryImport]` migration opportunities
+3. Call `AnalyzeUnsafeCode` to review pointer usage, `fixed` blocks, and `stackalloc` patterns
+4. Present interop report with migration and safety recommendations
+
+---
+
 ## Full Version Only
 
 ### /roslyn-full-audit
 
 Full code audit (Requires Full version or all modules).
-**Required**: `RoslynMcpServer` (Full) or all 8 modules
+**Required**: `RoslynMcpServer` (Full) or all 9 modules
 **Usage**: `/roslyn-full-audit <solution-path>`
 **Steps**:
 
@@ -226,15 +242,16 @@ Full code audit (Requires Full version or all modules).
 
 | Module | Skills | Tools |
 | --- | --- | --- |
-| Navigation | `/roslyn-explore`, `/roslyn-navigate`, `/roslyn-outline` | 6 |
-| Quality | `/roslyn-quality` | 6 |
+| Navigation | `/roslyn-explore`, `/roslyn-navigate`, `/roslyn-outline` | 7 |
+| Quality | `/roslyn-quality` | 8 |
 | Security | `/roslyn-security` | 3 |
 | Dependencies | `/roslyn-dependencies` | 5 |
-| Refactoring | `/roslyn-refactor` | 4 |
+| Refactoring | `/roslyn-refactor` | 5 |
 | Testing | `/roslyn-testing` | 2 |
-| Metrics | `/roslyn-metrics` | 3 |
-| Advanced | `/roslyn-deep-analysis`, `/roslyn-batch`, `/roslyn-api-diff` | 13 |
-| **Full** | `/roslyn-full-audit` + all above | 42 |
+| Metrics | `/roslyn-metrics` | 4 |
+| Advanced | `/roslyn-deep-analysis`, `/roslyn-batch`, `/roslyn-api-diff` | 15 |
+| Interop | `/roslyn-interop` | 3 |
+| **Full** | `/roslyn-full-audit` + all above | 51 |
 
 ---
 
@@ -258,6 +275,7 @@ Copy the required skill definitions to the project's `CLAUDE.md`.
     ├── roslyn-testing.md      # Testing
     ├── roslyn-metrics.md      # Metrics
     ├── roslyn-batch.md        # Advanced
+    ├── roslyn-interop.md      # Interop
     └── roslyn-full-audit.md   # Full only
 
 ```
@@ -292,6 +310,7 @@ With this configuration, only `/roslyn-explore`, `/roslyn-navigate`, and `/rosly
 | **Testing** | `/roslyn-testing` |
 | **Metrics** | `/roslyn-metrics` |
 | **Advanced** | `/roslyn-deep-analysis`, `/roslyn-batch`, `/roslyn-api-diff` |
+| **Interop** | `/roslyn-interop` |
 | **Full** | All of the above + `/roslyn-full-audit` |
 
 ---

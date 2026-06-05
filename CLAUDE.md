@@ -44,7 +44,7 @@ npx @modelcontextprotocol/inspector dotnet run --project ./RoslynMcpServer
 RoslynCSMCP.sln
 ├── src/
 │   ├── RoslynMcpServer.Core/           # Shared library (services, models, auth)
-│   ├── RoslynMcpServer.Navigation/     # Navigation MCP   (6 tools,  ~1,050 tokens)
+│   ├── RoslynMcpServer.Navigation/     # Navigation MCP   (7 tools,  ~1,225 tokens)
 │   ├── RoslynMcpServer.Quality/        # Quality MCP      (8 tools,  ~1,400 tokens)
 │   ├── RoslynMcpServer.Security/       # Security MCP     (3 tools,    ~525 tokens)
 │   ├── RoslynMcpServer.Dependencies/   # Dependencies MCP (5 tools,    ~875 tokens)

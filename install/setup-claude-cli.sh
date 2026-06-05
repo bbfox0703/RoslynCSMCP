@@ -15,18 +15,20 @@ NC='\033[0m' # No Color
 
 # Default scope
 SCOPE="user"
+REMOVE_ALL=false
 
 # Module definitions (name|path|tools|tokens|description)
 declare -A MODULES
-MODULES["1"]="Full|RoslynMcpServer|42|7350|All tools in one server"
-MODULES["2"]="Navigation|src/RoslynMcpServer.Navigation|6|1050|Symbol search, references, file outline"
-MODULES["3"]="Quality|src/RoslynMcpServer.Quality|6|1050|Code smells, complexity, naming"
+MODULES["1"]="Full|RoslynMcpServer|51|8925|All tools in one server"
+MODULES["2"]="Navigation|src/RoslynMcpServer.Navigation|7|1225|Symbol search, references, file outline"
+MODULES["3"]="Quality|src/RoslynMcpServer.Quality|8|1400|Code smells, complexity, naming"
 MODULES["4"]="Security|src/RoslynMcpServer.Security|3|525|Security issues, thread safety"
 MODULES["5"]="Dependencies|src/RoslynMcpServer.Dependencies|5|875|Dependency analysis, packages"
-MODULES["6"]="Refactoring|src/RoslynMcpServer.Refactoring|4|700|Rename, extract interface"
+MODULES["6"]="Refactoring|src/RoslynMcpServer.Refactoring|5|875|Rename, extract interface"
 MODULES["7"]="Testing|src/RoslynMcpServer.Testing|2|350|Test discovery, coverage"
-MODULES["8"]="Metrics|src/RoslynMcpServer.Metrics|3|525|Code metrics, statistics"
-MODULES["9"]="Advanced|src/RoslynMcpServer.Advanced|13|2275|Batch queries, call hierarchy"
+MODULES["8"]="Metrics|src/RoslynMcpServer.Metrics|4|700|Code metrics, statistics"
+MODULES["9"]="Advanced|src/RoslynMcpServer.Advanced|15|2625|Batch queries, call hierarchy"
+MODULES["10"]="Interop|src/RoslynMcpServer.Interop|3|525|AOT/trimming, P/Invoke, unsafe code"
 
 get_module_field() {
     local key="$1"
@@ -35,23 +37,53 @@ get_module_field() {
     echo "$data" | cut -d'|' -f"$field"
 }
 
+remove_all_servers() {
+    echo
+    echo -e "${YELLOW}Removing all Roslyn MCP servers...${NC}"
+
+    if ! command -v claude &> /dev/null; then
+        echo -e "${RED}   Claude CLI not found.${NC}"
+        exit 1
+    fi
+
+    local removed=0
+    for key in "${!MODULES[@]}"; do
+        local name
+        name=$(get_module_field "$key" 1)
+        local server_name="roslyn-$(echo "$name" | tr '[:upper:]' '[:lower:]')"
+        if claude mcp remove "$server_name" > /dev/null 2>&1; then
+            echo -e "${GREEN}   Removed $server_name${NC}"
+            removed=$((removed + 1))
+        fi
+    done
+
+    if [ "$removed" -eq 0 ]; then
+        echo -e "${YELLOW}   No Roslyn MCP servers were configured.${NC}"
+    else
+        echo
+        echo -e "${GREEN}Removed $removed server(s).${NC}"
+    fi
+}
+
 show_menu() {
     echo
     echo -e "${CYAN}=== Select Tool Set ===${NC}"
     echo
-    echo -e "${WHITE}  [1] Full          (42 tools, ~7,350 tokens) - All tools in one server${NC}"
+    echo -e "${WHITE}  [1] Full          (51 tools, ~8,925 tokens) - All tools in one server${NC}"
     echo
     echo -e "${GRAY}  --- Modular Options (for token optimization) ---${NC}"
-    echo -e "${WHITE}  [2] Navigation    ( 6 tools, ~1,050 tokens) - Symbol search, references, file outline${NC}"
-    echo -e "${WHITE}  [3] Quality       ( 6 tools, ~1,050 tokens) - Code smells, complexity, naming${NC}"
+    echo -e "${WHITE}  [2] Navigation    ( 7 tools, ~1,225 tokens) - Symbol search, references, file outline${NC}"
+    echo -e "${WHITE}  [3] Quality       ( 8 tools, ~1,400 tokens) - Code smells, complexity, naming${NC}"
     echo -e "${WHITE}  [4] Security      ( 3 tools,   ~525 tokens) - Security issues, thread safety${NC}"
     echo -e "${WHITE}  [5] Dependencies  ( 5 tools,   ~875 tokens) - Dependency analysis, packages${NC}"
-    echo -e "${WHITE}  [6] Refactoring   ( 4 tools,   ~700 tokens) - Rename, extract interface${NC}"
+    echo -e "${WHITE}  [6] Refactoring   ( 5 tools,   ~875 tokens) - Rename, extract interface${NC}"
     echo -e "${WHITE}  [7] Testing       ( 2 tools,   ~350 tokens) - Test discovery, coverage${NC}"
-    echo -e "${WHITE}  [8] Metrics       ( 3 tools,   ~525 tokens) - Code metrics, statistics${NC}"
-    echo -e "${WHITE}  [9] Advanced      (13 tools, ~2,275 tokens) - Batch queries, call hierarchy${NC}"
+    echo -e "${WHITE}  [8] Metrics       ( 4 tools,   ~700 tokens) - Code metrics, statistics${NC}"
+    echo -e "${WHITE}  [9] Advanced      (15 tools, ~2,625 tokens) - Batch queries, call hierarchy${NC}"
+    echo -e "${WHITE}  [10] Interop      ( 3 tools,   ~525 tokens) - AOT/trimming, P/Invoke, unsafe code${NC}"
     echo
     echo -e "${YELLOW}  [A] All Modular   (Select multiple modules)${NC}"
+    echo -e "${YELLOW}  [R] Remove All    (Uninstall all Roslyn MCP servers)${NC}"
     echo -e "${RED}  [Q] Quit${NC}"
     echo
 }
@@ -171,21 +203,29 @@ while [[ $# -gt 0 ]]; do
             SCOPE="$2"
             shift 2
             ;;
+        --remove-all)
+            REMOVE_ALL=true
+            shift
+            ;;
         --help|-h)
             cat <<EOF
 RoslynCSMCP Setup Script for Claude CLI
 
-Usage: ./setup-claude-cli.sh [--scope <user|project|local>] [--help]
+Usage: ./setup-claude-cli.sh [--scope <user|project|local>] [--remove-all] [--help]
 
 Scopes:
   user    - Available in all projects (recommended for personal use)
   project - Team-shared via .mcp.json (recommended for teams)
   local   - Only in current directory (for testing)
 
+Options:
+  --remove-all - Remove all configured Roslyn MCP servers and exit
+
 Examples:
   ./setup-claude-cli.sh                    # Interactive mode, user scope (default)
   ./setup-claude-cli.sh --scope project    # Project scope
   ./setup-claude-cli.sh --scope local      # Local scope
+  ./setup-claude-cli.sh --remove-all       # Uninstall all Roslyn servers
 EOF
             exit 0
             ;;
@@ -205,6 +245,12 @@ fi
 
 echo -e "${CYAN}=== RoslynCSMCP Setup for Claude CLI ===${NC}"
 echo
+
+# Handle removal (no build needed)
+if [ "$REMOVE_ALL" = true ]; then
+    remove_all_servers
+    exit 0
+fi
 
 # Get script directory and project path
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -247,6 +293,10 @@ while true; do
             echo -e "${YELLOW}Setup cancelled.${NC}"
             exit 0
             ;;
+        R)
+            remove_all_servers
+            exit 0
+            ;;
         A)
             echo
             echo -e "${YELLOW}Select modules to install (comma-separated, e.g., 2,3,4):${NC}"
@@ -264,7 +314,7 @@ while true; do
             fi
             break
             ;;
-        [1-9])
+        *)
             if [[ -n "${MODULES[$selection]}" ]]; then
                 SELECTED_MODULES+=("$selection")
                 break
@@ -272,10 +322,6 @@ while true; do
                 echo -e "${RED}Invalid selection. Please try again.${NC}"
                 continue
             fi
-            ;;
-        *)
-            echo -e "${RED}Invalid selection. Please try again.${NC}"
-            continue
             ;;
     esac
 done
