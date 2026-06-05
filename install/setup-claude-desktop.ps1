@@ -4,39 +4,43 @@
 param(
     [string]$ClaudeConfigPath = "",
     [switch]$SkipBuild,
+    [switch]$RemoveAll,
     [switch]$Help
 )
 
 # Module definitions
 $modules = @{
-    "1" = @{ Name = "Full"; Path = "RoslynMcpServer"; Tools = 42; Tokens = 7350; Description = "All tools in one server" }
-    "2" = @{ Name = "Navigation"; Path = "src/RoslynMcpServer.Navigation"; Tools = 6; Tokens = 1050; Description = "Symbol search, references, file outline" }
-    "3" = @{ Name = "Quality"; Path = "src/RoslynMcpServer.Quality"; Tools = 6; Tokens = 1050; Description = "Code smells, complexity, naming" }
+    "1" = @{ Name = "Full"; Path = "RoslynMcpServer"; Tools = 51; Tokens = 8925; Description = "All tools in one server" }
+    "2" = @{ Name = "Navigation"; Path = "src/RoslynMcpServer.Navigation"; Tools = 7; Tokens = 1225; Description = "Symbol search, references, file outline" }
+    "3" = @{ Name = "Quality"; Path = "src/RoslynMcpServer.Quality"; Tools = 8; Tokens = 1400; Description = "Code smells, complexity, naming" }
     "4" = @{ Name = "Security"; Path = "src/RoslynMcpServer.Security"; Tools = 3; Tokens = 525; Description = "Security issues, thread safety" }
     "5" = @{ Name = "Dependencies"; Path = "src/RoslynMcpServer.Dependencies"; Tools = 5; Tokens = 875; Description = "Dependency analysis, packages" }
-    "6" = @{ Name = "Refactoring"; Path = "src/RoslynMcpServer.Refactoring"; Tools = 4; Tokens = 700; Description = "Rename, extract interface" }
+    "6" = @{ Name = "Refactoring"; Path = "src/RoslynMcpServer.Refactoring"; Tools = 5; Tokens = 875; Description = "Rename, extract interface" }
     "7" = @{ Name = "Testing"; Path = "src/RoslynMcpServer.Testing"; Tools = 2; Tokens = 350; Description = "Test discovery, coverage" }
-    "8" = @{ Name = "Metrics"; Path = "src/RoslynMcpServer.Metrics"; Tools = 3; Tokens = 525; Description = "Code metrics, statistics" }
-    "9" = @{ Name = "Advanced"; Path = "src/RoslynMcpServer.Advanced"; Tools = 13; Tokens = 2275; Description = "Batch queries, call hierarchy" }
+    "8" = @{ Name = "Metrics"; Path = "src/RoslynMcpServer.Metrics"; Tools = 4; Tokens = 700; Description = "Code metrics, statistics" }
+    "9" = @{ Name = "Advanced"; Path = "src/RoslynMcpServer.Advanced"; Tools = 15; Tokens = 2625; Description = "Batch queries, call hierarchy" }
+    "10" = @{ Name = "Interop"; Path = "src/RoslynMcpServer.Interop"; Tools = 3; Tokens = 525; Description = "AOT/trimming, P/Invoke, unsafe code" }
 }
 
 function Show-Menu {
     Write-Host
     Write-Host "=== Select Tool Set ===" -ForegroundColor Cyan
     Write-Host
-    Write-Host "  [1] Full          (42 tools, ~7,350 tokens) - All tools in one server" -ForegroundColor White
+    Write-Host "  [1] Full          (51 tools, ~8,925 tokens) - All tools in one server" -ForegroundColor White
     Write-Host
     Write-Host "  --- Modular Options (for token optimization) ---" -ForegroundColor Gray
-    Write-Host "  [2] Navigation    ( 6 tools, ~1,050 tokens) - Symbol search, references, file outline" -ForegroundColor White
-    Write-Host "  [3] Quality       ( 6 tools, ~1,050 tokens) - Code smells, complexity, naming" -ForegroundColor White
+    Write-Host "  [2] Navigation    ( 7 tools, ~1,225 tokens) - Symbol search, references, file outline" -ForegroundColor White
+    Write-Host "  [3] Quality       ( 8 tools, ~1,400 tokens) - Code smells, complexity, naming" -ForegroundColor White
     Write-Host "  [4] Security      ( 3 tools,   ~525 tokens) - Security issues, thread safety" -ForegroundColor White
     Write-Host "  [5] Dependencies  ( 5 tools,   ~875 tokens) - Dependency analysis, packages" -ForegroundColor White
-    Write-Host "  [6] Refactoring   ( 4 tools,   ~700 tokens) - Rename, extract interface" -ForegroundColor White
+    Write-Host "  [6] Refactoring   ( 5 tools,   ~875 tokens) - Rename, extract interface" -ForegroundColor White
     Write-Host "  [7] Testing       ( 2 tools,   ~350 tokens) - Test discovery, coverage" -ForegroundColor White
-    Write-Host "  [8] Metrics       ( 3 tools,   ~525 tokens) - Code metrics, statistics" -ForegroundColor White
-    Write-Host "  [9] Advanced      (13 tools, ~2,275 tokens) - Batch queries, call hierarchy" -ForegroundColor White
+    Write-Host "  [8] Metrics       ( 4 tools,   ~700 tokens) - Code metrics, statistics" -ForegroundColor White
+    Write-Host "  [9] Advanced      (15 tools, ~2,625 tokens) - Batch queries, call hierarchy" -ForegroundColor White
+    Write-Host "  [10] Interop      ( 3 tools,   ~525 tokens) - AOT/trimming, P/Invoke, unsafe code" -ForegroundColor White
     Write-Host
     Write-Host "  [A] All Modular   (Select multiple modules)" -ForegroundColor Yellow
+    Write-Host "  [R] Remove All    (Uninstall all Roslyn MCP servers)" -ForegroundColor Magenta
     Write-Host "  [Q] Quit" -ForegroundColor Red
     Write-Host
 }
@@ -76,6 +80,59 @@ function Show-ConfigExample {
     Write-Host
 }
 
+function Remove-AllRoslynServers {
+    param([string]$ConfigPath)
+
+    if ($ConfigPath -eq "") {
+        $ConfigPath = "$env:APPDATA\Claude\claude_desktop_config.json"
+    }
+
+    Write-Host
+    Write-Host "Removing all Roslyn MCP servers..." -ForegroundColor Yellow
+    Write-Host "   Config path: $ConfigPath"
+
+    if (-not (Test-Path $ConfigPath)) {
+        Write-Host "   Config file not found, nothing to remove." -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json -AsHashtable
+    } catch {
+        Write-Host "   Could not parse config file: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+
+    if (($null -eq $config) -or (-not $config.ContainsKey('mcpServers'))) {
+        Write-Host "   No mcpServers section found, nothing to remove." -ForegroundColor Yellow
+        return
+    }
+
+    $removed = @()
+    foreach ($mod in $modules.Values) {
+        $serverName = "roslyn-$($mod.Name.ToLower())"
+        if ($config.mcpServers.ContainsKey($serverName)) {
+            $config.mcpServers.Remove($serverName)
+            $removed += $serverName
+            Write-Host "   Removed $serverName" -ForegroundColor Green
+        }
+    }
+
+    if ($removed.Count -eq 0) {
+        Write-Host "   No Roslyn MCP servers were configured." -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        $config | ConvertTo-Json -Depth 10 | Set-Content $ConfigPath -Encoding UTF8
+        Write-Host
+        Write-Host "Removed $($removed.Count) server(s). Restart Claude Desktop to apply." -ForegroundColor Green
+    } catch {
+        Write-Host "   Failed to write configuration: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+}
+
 if ($Help) {
     Write-Host @"
 Roslyn MCP Server Setup Script
@@ -85,11 +142,13 @@ Usage: .\setup-claude-desktop.ps1 [options]
 Options:
   -ClaudeConfigPath <path>   Specify custom path to Claude Desktop config file
   -SkipBuild                 Skip building the project
+  -RemoveAll                 Remove all configured Roslyn MCP servers and exit
   -Help                      Show this help message
 
 Examples:
   .\setup-claude-desktop.ps1                                    # Interactive mode
   .\setup-claude-desktop.ps1 -SkipBuild                        # Skip building step
+  .\setup-claude-desktop.ps1 -RemoveAll                        # Uninstall all Roslyn servers
   .\setup-claude-desktop.ps1 -ClaudeConfigPath "C:\custom\config.json"  # Custom config path
 "@
     exit 0
@@ -104,6 +163,12 @@ $rootPath = Split-Path -Parent $scriptDir
 
 Write-Host "Project location: $rootPath" -ForegroundColor Green
 Write-Host
+
+# Handle removal (no build / .NET needed)
+if ($RemoveAll) {
+    Remove-AllRoslynServers -ConfigPath $ClaudeConfigPath
+    exit 0
+}
 
 # Check .NET installation
 Write-Host "1. Checking .NET installation..." -ForegroundColor Yellow
@@ -125,6 +190,10 @@ while ($true) {
     switch ($selection.ToUpper()) {
         "Q" {
             Write-Host "Setup cancelled." -ForegroundColor Yellow
+            exit 0
+        }
+        "R" {
+            Remove-AllRoslynServers -ConfigPath $ClaudeConfigPath
             exit 0
         }
         "A" {

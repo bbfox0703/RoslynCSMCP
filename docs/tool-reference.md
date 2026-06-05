@@ -1,9 +1,9 @@
 # RoslynCSMCP Tools Reference
 
-This document lists all available MCP tools provided by RoslynCSMCP server for C# code analysis.
+This document details the core MCP tools provided by RoslynCSMCP server for C# code analysis.
 
 > **Last Updated**: 2026-01-12
-> **Total Tools**: 34
+> **Total Tools**: 51 (34 detailed below; see the [README](../README.md) for the full tool list including the Interop, performance, and modernization tools)
 >
 > **Recent Additions**: FindTODOComments, FindLargeFiles, FindDeprecatedAPIs, GetFileStatistics, AnalyzePackages, GetTestCoverage, GetChangeImpact, FindPerformanceIssues, AnalyzeNamingConventions, AnalyzeAPIChanges
 

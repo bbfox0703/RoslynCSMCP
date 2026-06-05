@@ -4,39 +4,43 @@
 param(
     [ValidateSet("user", "project", "local")]
     [string]$Scope = "user",
+    [switch]$RemoveAll,
     [switch]$Help
 )
 
 # Module definitions
 $modules = @{
-    "1" = @{ Name = "Full"; Path = "RoslynMcpServer"; Tools = 42; Tokens = 7350; Description = "All tools in one server" }
-    "2" = @{ Name = "Navigation"; Path = "src/RoslynMcpServer.Navigation"; Tools = 6; Tokens = 1050; Description = "Symbol search, references, file outline" }
-    "3" = @{ Name = "Quality"; Path = "src/RoslynMcpServer.Quality"; Tools = 6; Tokens = 1050; Description = "Code smells, complexity, naming" }
+    "1" = @{ Name = "Full"; Path = "RoslynMcpServer"; Tools = 51; Tokens = 8925; Description = "All tools in one server" }
+    "2" = @{ Name = "Navigation"; Path = "src/RoslynMcpServer.Navigation"; Tools = 7; Tokens = 1225; Description = "Symbol search, references, file outline" }
+    "3" = @{ Name = "Quality"; Path = "src/RoslynMcpServer.Quality"; Tools = 8; Tokens = 1400; Description = "Code smells, complexity, naming" }
     "4" = @{ Name = "Security"; Path = "src/RoslynMcpServer.Security"; Tools = 3; Tokens = 525; Description = "Security issues, thread safety" }
     "5" = @{ Name = "Dependencies"; Path = "src/RoslynMcpServer.Dependencies"; Tools = 5; Tokens = 875; Description = "Dependency analysis, packages" }
-    "6" = @{ Name = "Refactoring"; Path = "src/RoslynMcpServer.Refactoring"; Tools = 4; Tokens = 700; Description = "Rename, extract interface" }
+    "6" = @{ Name = "Refactoring"; Path = "src/RoslynMcpServer.Refactoring"; Tools = 5; Tokens = 875; Description = "Rename, extract interface" }
     "7" = @{ Name = "Testing"; Path = "src/RoslynMcpServer.Testing"; Tools = 2; Tokens = 350; Description = "Test discovery, coverage" }
-    "8" = @{ Name = "Metrics"; Path = "src/RoslynMcpServer.Metrics"; Tools = 3; Tokens = 525; Description = "Code metrics, statistics" }
-    "9" = @{ Name = "Advanced"; Path = "src/RoslynMcpServer.Advanced"; Tools = 13; Tokens = 2275; Description = "Batch queries, call hierarchy" }
+    "8" = @{ Name = "Metrics"; Path = "src/RoslynMcpServer.Metrics"; Tools = 4; Tokens = 700; Description = "Code metrics, statistics" }
+    "9" = @{ Name = "Advanced"; Path = "src/RoslynMcpServer.Advanced"; Tools = 15; Tokens = 2625; Description = "Batch queries, call hierarchy" }
+    "10" = @{ Name = "Interop"; Path = "src/RoslynMcpServer.Interop"; Tools = 3; Tokens = 525; Description = "AOT/trimming, P/Invoke, unsafe code" }
 }
 
 function Show-Menu {
     Write-Host
     Write-Host "=== Select Tool Set ===" -ForegroundColor Cyan
     Write-Host
-    Write-Host "  [1] Full          (42 tools, ~7,350 tokens) - All tools in one server" -ForegroundColor White
+    Write-Host "  [1] Full          (51 tools, ~8,925 tokens) - All tools in one server" -ForegroundColor White
     Write-Host
     Write-Host "  --- Modular Options (for token optimization) ---" -ForegroundColor Gray
-    Write-Host "  [2] Navigation    ( 6 tools, ~1,050 tokens) - Symbol search, references, file outline" -ForegroundColor White
-    Write-Host "  [3] Quality       ( 6 tools, ~1,050 tokens) - Code smells, complexity, naming" -ForegroundColor White
+    Write-Host "  [2] Navigation    ( 7 tools, ~1,225 tokens) - Symbol search, references, file outline" -ForegroundColor White
+    Write-Host "  [3] Quality       ( 8 tools, ~1,400 tokens) - Code smells, complexity, naming" -ForegroundColor White
     Write-Host "  [4] Security      ( 3 tools,   ~525 tokens) - Security issues, thread safety" -ForegroundColor White
     Write-Host "  [5] Dependencies  ( 5 tools,   ~875 tokens) - Dependency analysis, packages" -ForegroundColor White
-    Write-Host "  [6] Refactoring   ( 4 tools,   ~700 tokens) - Rename, extract interface" -ForegroundColor White
+    Write-Host "  [6] Refactoring   ( 5 tools,   ~875 tokens) - Rename, extract interface" -ForegroundColor White
     Write-Host "  [7] Testing       ( 2 tools,   ~350 tokens) - Test discovery, coverage" -ForegroundColor White
-    Write-Host "  [8] Metrics       ( 3 tools,   ~525 tokens) - Code metrics, statistics" -ForegroundColor White
-    Write-Host "  [9] Advanced      (13 tools, ~2,275 tokens) - Batch queries, call hierarchy" -ForegroundColor White
+    Write-Host "  [8] Metrics       ( 4 tools,   ~700 tokens) - Code metrics, statistics" -ForegroundColor White
+    Write-Host "  [9] Advanced      (15 tools, ~2,625 tokens) - Batch queries, call hierarchy" -ForegroundColor White
+    Write-Host "  [10] Interop      ( 3 tools,   ~525 tokens) - AOT/trimming, P/Invoke, unsafe code" -ForegroundColor White
     Write-Host
     Write-Host "  [A] All Modular   (Select multiple modules)" -ForegroundColor Yellow
+    Write-Host "  [R] Remove All    (Uninstall all Roslyn MCP servers)" -ForegroundColor Magenta
     Write-Host "  [Q] Quit" -ForegroundColor Red
     Write-Host
 }
@@ -128,21 +132,55 @@ function Show-McpJsonExample {
     Write-Host
 }
 
+function Remove-AllRoslynServers {
+    Write-Host
+    Write-Host "Removing all Roslyn MCP servers..." -ForegroundColor Yellow
+
+    try {
+        claude --version 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Claude CLI not responding" }
+    } catch {
+        Write-Host "   Claude CLI not found." -ForegroundColor Red
+        exit 1
+    }
+
+    $removed = @()
+    foreach ($mod in $modules.Values) {
+        $serverName = "roslyn-$($mod.Name.ToLower())"
+        claude mcp remove $serverName 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $removed += $serverName
+            Write-Host "   Removed $serverName" -ForegroundColor Green
+        }
+    }
+
+    if ($removed.Count -eq 0) {
+        Write-Host "   No Roslyn MCP servers were configured." -ForegroundColor Yellow
+    } else {
+        Write-Host
+        Write-Host "Removed $($removed.Count) server(s)." -ForegroundColor Green
+    }
+}
+
 if ($Help) {
     Write-Host @"
 RoslynCSMCP Setup Script for Claude CLI
 
-Usage: .\setup-claude-cli.ps1 [-Scope <user|project|local>] [-Help]
+Usage: .\setup-claude-cli.ps1 [-Scope <user|project|local>] [-RemoveAll] [-Help]
 
 Scopes:
   user    - Available in all projects (recommended for personal use)
   project - Team-shared via .mcp.json (recommended for teams)
   local   - Only in current directory (for testing)
 
+Options:
+  -RemoveAll - Remove all configured Roslyn MCP servers and exit
+
 Examples:
   .\setup-claude-cli.ps1                    # Interactive mode, user scope (default)
   .\setup-claude-cli.ps1 -Scope project     # Project scope
   .\setup-claude-cli.ps1 -Scope local       # Local scope
+  .\setup-claude-cli.ps1 -RemoveAll         # Uninstall all Roslyn servers
 "@
     exit 0
 }
@@ -157,6 +195,12 @@ $rootPath = Split-Path -Parent $scriptDir
 Write-Host "Project location: $rootPath" -ForegroundColor Green
 Write-Host "Configuration scope: $Scope" -ForegroundColor Green
 Write-Host
+
+# Handle removal (no build needed)
+if ($RemoveAll) {
+    Remove-AllRoslynServers
+    exit 0
+}
 
 # Check if Claude CLI is installed
 Write-Host "1. Checking Claude CLI installation..." -ForegroundColor Yellow
@@ -194,6 +238,10 @@ while ($true) {
     switch ($selection.ToUpper()) {
         "Q" {
             Write-Host "Setup cancelled." -ForegroundColor Yellow
+            exit 0
+        }
+        "R" {
+            Remove-AllRoslynServers
             exit 0
         }
         "A" {

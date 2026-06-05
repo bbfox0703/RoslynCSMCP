@@ -30,20 +30,21 @@ Load only the modules you need to minimize token usage:
 
 | Module | Tools | ~Tokens |
 |--------|-------|---------|
-| Navigation | 6 | ~1,050 |
-| Quality | 6 | ~1,050 |
+| Navigation | 7 | ~1,225 |
+| Quality | 8 | ~1,400 |
 | Security | 3 | ~525 |
 | Dependencies | 5 | ~875 |
-| Refactoring | 4 | ~700 |
+| Refactoring | 5 | ~875 |
 | Testing | 2 | ~350 |
-| Metrics | 3 | ~525 |
-| Advanced | 13 | ~2,275 |
+| Metrics | 4 | ~700 |
+| Advanced | 15 | ~2,625 |
+| Interop | 3 | ~525 |
 
 ---
 
 ## Full Version Configuration
 
-All 42 tools in a single server:
+All 51 tools in a single server:
 
 ```json
 {
@@ -55,6 +56,35 @@ All 42 tools in a single server:
   }
 }
 ```
+
+---
+
+## Automated Setup & Uninstall
+
+The `install/` scripts configure (or remove) the MCP servers for you, interactively or via flags.
+
+| Target | Windows | Linux/macOS |
+|--------|---------|-------------|
+| Claude Desktop | `.\install\setup-claude-desktop.ps1` | `./install/setup-claude-desktop.sh` |
+| Claude CLI | `.\install\setup-claude-cli.ps1` | `./install/setup-claude-cli.sh` |
+
+Run without arguments for the interactive menu (pick a tool set, or `[R]` to remove all).
+
+**Uninstall all Roslyn MCP servers:**
+
+```powershell
+# Windows
+.\install\setup-claude-desktop.ps1 -RemoveAll
+.\install\setup-claude-cli.ps1 -RemoveAll
+```
+
+```bash
+# Linux/macOS
+./install/setup-claude-desktop.sh --remove-all
+./install/setup-claude-cli.sh --remove-all
+```
+
+Removal targets only the servers these scripts create (`roslyn-full` … `roslyn-interop`); any other `roslyn-*` entries you added manually are left untouched. The Desktop scripts edit `claude_desktop_config.json` directly (the Linux/macOS script needs `jq`); the CLI scripts call `claude mcp remove`. Restart Claude Desktop after removal.
 
 ---
 

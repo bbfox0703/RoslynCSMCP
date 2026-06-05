@@ -15,7 +15,7 @@ Notice: most codes after forked from original repository was completed by Claude
 - **Code Complexity Analysis** - Identify high-complexity methods using cyclomatic complexity metrics
 - **Performance Optimized** - Multi-level caching (Memory, Redis, File system) and incremental analysis for large codebases
 - **Security Hardened** - Input validation, path sanitization, and safe file operations
-- **Modular Architecture** - Load only the tools you need to minimize token overhead (350-2,275 tokens per module vs 7,350 for full)
+- **Modular Architecture** - Load only the tools you need to minimize token overhead (350-2,625 tokens per module vs 8,925 for full)
 - ...and more!
 
 ## What is RoslynCSMCP?
@@ -54,7 +54,7 @@ RoslynCSMCP now supports **modular MCP servers** for optimized token usage. Inst
 | Module | Tools | Tokens | Description |
 |--------|-------|--------|-------------|
 | **Full** | 51 | ~8,925 | Complete toolset (backward compatible) |
-| **Navigation** | 6 | ~1,050 | Symbol search, references, file outline |
+| **Navigation** | 7 | ~1,225 | Symbol search, references, file outline |
 | **Quality** | 8 | ~1,400 | Code smells, complexity, concurrency, magic numbers |
 | **Security** | 3 | ~525 | Security issues, thread safety, exception handling |
 | **Dependencies** | 5 | ~875 | Dependency analysis, packages, DI container |
@@ -698,7 +698,7 @@ The server features a **modular, layered architecture** that supports both full 
 RoslynCSMCP.sln
 ├── src/
 │   ├── RoslynMcpServer.Core/           # Shared library (services, models)
-│   ├── RoslynMcpServer.Navigation/     # Navigation MCP  (6 tools)
+│   ├── RoslynMcpServer.Navigation/     # Navigation MCP  (7 tools)
 │   ├── RoslynMcpServer.Quality/        # Quality MCP     (8 tools)
 │   ├── RoslynMcpServer.Security/       # Security MCP    (3 tools)
 │   ├── RoslynMcpServer.Dependencies/   # Dependencies MCP (5 tools)
@@ -868,7 +868,7 @@ In Production mode (default), only warnings and errors are logged to:
 | Document | Description |
 |----------|-------------|
 | **[CLAUDE.md](CLAUDE.md)** | Development guide and architecture for Claude Code |
-| **[docs/FEATURES.md](docs/FEATURES.md)** | Complete API reference for all 42 tools |
+| **[docs/FEATURES.md](docs/FEATURES.md)** | Complete API reference for all 51 tools |
 | **[docs/EXAMPLES.md](docs/EXAMPLES.md)** | Comprehensive usage guide with 100+ examples |
 | **[docs/TESTING.md](docs/TESTING.md)** | Testing guide (Desktop & CLI setup, MCP tests) |
 | **[docs/AGENT_SKILLS.md](docs/AGENT_SKILLS.md)** | Agent skills guide for effective tool usage |
