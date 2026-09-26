@@ -966,9 +966,23 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Execute multiple queries in a single batch request")]
+        [McpServerTool, Description("""
+            Run several read-only queries in one call. Returns each result under a "Query N: <tool>" header,
+            then a count of succeeded and failed queries; one failing query does not stop the others.
+            Supports only these tools, with these parameter names (? = optional):
+            SearchSymbols (solutionPath, searchPattern, symbolKind?, ignoreCase?),
+            FindReferences (solutionPath, symbolName, includeDefinition?),
+            GetSymbolInfo (solutionPath, symbolName),
+            GetCodeMetrics (solutionPath, groupBy?),
+            GetDependencyGraph (solutionPath, format?, includePackages?),
+            GetCallHierarchy (solutionPath, methodName, direction?, maxDepth?),
+            AnalyzeDependencies (solutionPath, maxDepth?).
+            Batch parameter names differ from the standalone tools (searchPattern/symbolKind, not pattern/symbolTypes),
+            and the standalone tools expose more options, so call them directly when you need those options
+            or any tool not listed here.
+            """)]
         public static async Task<string> BatchQuery(
-            [Description("JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)")] string queriesJson,
+            [Description("JSON array of objects, each with a \"tool\" name and a \"parameters\" object. Tool names are the PascalCase names listed above, matched case-insensitively; snake_case names such as search_symbols are not recognized.")] string queriesJson,
             [Description("Execute queries in parallel (default: true)")] bool parallel = true,
             IServiceProvider? serviceProvider = null)
         {
@@ -7775,7 +7789,7 @@ namespace RoslynMcpServer.Tools
 
         #region Phase 1 Tools
 
-        [McpServerTool, Description("Find magic numbers and hardcoded literals that should be extracted as constants")]
+        [McpServerTool, Description("Inventory numeric and string literals that could be extracted as named constants, skipping common values such as 0 and 1. Broad by design: every remaining literal is reported, including strings of at least minStringLength characters. For fewer, higher-signal results on numeric literals only, classified by how each is used and with severities, use AnalyzeMagicNumbers.")]
         public static async Task<string> FindMagicNumbers(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (counts only), normal (grouped list), detailed (with suggestions). Default: normal")]
@@ -7839,10 +7853,10 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Analyze architecture layer violations based on defined rules (Clean Architecture, DDD, etc.)")]
+        [McpServerTool, Description("Check project-to-project references against a layered architecture you define (Clean Architecture, DDD, etc.). Projects are assigned to layers by name pattern; projects matching no layer are ignored, and a project matching several layers is assigned to the last one listed. Reports references a rule forbids (High), references between layers with no rule (Medium), and circular dependencies (Critical). Works on project references only, not type-level usage.")]
         public static async Task<string> AnalyzeLayerViolations(
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("JSON string defining layers and rules. Example: {\"layers\":[{\"name\":\"Presentation\",\"projects\":[\"*.Web\"]},{\"name\":\"Domain\",\"projects\":[\"*.Domain\"]}],\"rules\":[{\"from\":\"Presentation\",\"to\":\"Domain\",\"allowed\":true}]}")]
+            [Description("JSON object: {\"layers\": [{\"name\": string, \"projectPatterns\": [project-name globs using * and ?]}], \"rules\": [{\"fromLayer\": layer name, \"toLayer\": layer name, \"allowed\": bool}]}. Property names are case-insensitive; layer names in rules must match the layer names exactly.")]
             string layerDefinitionsJson,
             [Description("Output format: summary (counts only), normal (grouped list), detailed (with recommendations). Default: normal")]
             string format = "normal",
@@ -7866,7 +7880,7 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Safely rename a symbol with preview and conflict detection")]
+        [McpServerTool, Description("Rename a symbol and all of its references across the solution, with conflict detection. With previewOnly=true (the default) it only reports the affected files, locations, conflicts, and a risk level. With previewOnly=false it applies the rename and writes the changed files to disk; it does not apply when conflicts are detected. The target is the first declaration found whose simple name exactly equals symbolName (types, methods, properties, and fields are searched), so when the name is ambiguous, confirm from the preview that it picked the intended symbol before applying.")]
         public static async Task<string> RenameSymbolSafely(
             [Description("Current symbol name to rename")] string symbolName,
             [Description("New name for the symbol")] string newName,
@@ -8551,7 +8565,7 @@ namespace RoslynMcpServer.Tools
         // ExtractInterface - Extract interface from a class
         // ============================================================================
 
-        [McpServerTool, Description("Extract interface from a class for better testability and SOLID principles")]
+        [McpServerTool, Description("Generate the source code of an interface from a class's public methods and properties, for testability or dependency inversion. Returns the generated interface code as text; it does not create files or modify the class, so applying it is up to you. Fails if the class is not found or is already an interface, and warns if a type with the interface name already exists.")]
         public static async Task<string> ExtractInterface(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Class name to extract interface from")] string typeName,
@@ -8653,7 +8667,7 @@ namespace RoslynMcpServer.Tools
         // FindThreadSafetyIssues - Detect thread safety issues and race conditions
         // ============================================================================
 
-        [McpServerTool, Description("Detect common thread safety issues and potential race conditions (mutable static fields, unsynchronized access)")]
+        [McpServerTool, Description("Detect shared-state thread-safety risks and potential race conditions: mutable static fields, shared state accessed without synchronization, and non-thread-safe collections. Does not check async/await usage, await inside lock, or CancellationToken propagation.")]
         public static async Task<string> FindThreadSafetyIssues(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Check mutable static fields (default: true)")] bool checkStaticFields = true,

@@ -40,6 +40,8 @@ public class AdvancedQueryToolsTests : IDisposable
         services.AddSingleton<CodeAnalysisService>();
         services.AddSingleton<SymbolSearchService>();
         services.AddSingleton<CallHierarchyService>();
+        services.AddSingleton<CodeMetricsService>();
+        services.AddSingleton<DependencyGraphService>();
         services.AddSingleton<BatchQueryService>();
         services.AddSingleton<TestDiscoveryService>();
         services.AddSingleton<SecurityValidator>();
@@ -188,9 +190,9 @@ public class AdvancedQueryToolsTests : IDisposable
             {
                 ""tool"": ""SearchSymbols"",
                 ""parameters"": {
-                    ""pattern"": ""*"",
+                    ""searchPattern"": ""*"",
                     ""solutionPath"": """ + _solutionPath!.Replace("\\", "\\\\") + @""",
-                    ""symbolTypes"": ""class""
+                    ""symbolKind"": ""class""
                 }
             },
             {
@@ -209,11 +211,27 @@ public class AdvancedQueryToolsTests : IDisposable
             serviceProvider: _serviceProvider);
 
         // Assert
-        result.Should().NotBeNullOrEmpty();
-        result.Should().Match(r =>
-            r.Contains("Query") ||
-            r.Contains("Result") ||
-            r.Contains("batch"));
+        result.Should().Contain("Summary: 2 succeeded, 0 failed");
+    }
+
+    [Fact]
+    public async Task BatchQuery_UnsupportedTool_ReportsToolNameInError()
+    {
+        // Arrange
+        CreateTestSolution();
+
+        var queries = @"[{ ""tool"": ""FindTODOComments"", ""parameters"": { ""solutionPath"": """
+            + _solutionPath!.Replace("\\", "\\\\") + @""" } }]";
+
+        // Act
+        var result = await CodeNavigationTools.BatchQuery(
+            queriesJson: queries,
+            parallel: false,
+            serviceProvider: _serviceProvider);
+
+        // Assert
+        result.Should().Contain("Unknown tool 'FindTODOComments'");
+        result.Should().Contain("Summary: 0 succeeded, 1 failed");
     }
 
     [Fact]

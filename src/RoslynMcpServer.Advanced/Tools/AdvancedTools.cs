@@ -13,10 +13,23 @@ namespace RoslynMcpServer.Advanced.Tools;
 [McpServerToolType]
 public class AdvancedTools
 {
-    [McpServerTool, Description("Execute multiple queries in a single batch request")]
+    [McpServerTool, Description("""
+        Run several read-only queries in one call. Returns each result under a "Query N: <tool>" header,
+        then a count of succeeded and failed queries; one failing query does not stop the others.
+        Supports only these tools, with these parameter names (? = optional):
+        SearchSymbols (solutionPath, searchPattern, symbolKind?, ignoreCase?),
+        FindReferences (solutionPath, symbolName, includeDefinition?),
+        GetSymbolInfo (solutionPath, symbolName),
+        GetCodeMetrics (solutionPath, groupBy?),
+        GetDependencyGraph (solutionPath, format?, includePackages?),
+        GetCallHierarchy (solutionPath, methodName, direction?, maxDepth?),
+        AnalyzeDependencies (solutionPath, maxDepth?).
+        Batch parameter names differ from the standalone tools (searchPattern/symbolKind, not pattern/symbolTypes),
+        and the standalone tools expose more options, so call them directly when you need those options
+        or any tool not listed here.
+        """)]
     public static async Task<string> BatchQuery(
-        [Description("JSON array of queries to execute")] string queriesJson,
-        [Description("Path to solution file (.sln)")] string solutionPath,
+        [Description("JSON array of objects, each with a \"tool\" name and a \"parameters\" object. Tool names are the PascalCase names listed above, matched case-insensitively; snake_case names such as search_symbols are not recognized.")] string queriesJson,
         BatchQueryService batchService = null!,
         McpErrorHandler errorHandler = null!)
     {

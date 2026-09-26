@@ -1519,17 +1519,11 @@ Start with minimal detail, drill down as needed.
 
 #### Scenario 3: Code Quality Audit
 
-**Batch Query**:
-```json
-[
-  {"tool": "GetCodeMetrics", "parameters": {...}},
-  {"tool": "FindUnusedCode", "parameters": {"format": "summary", ...}},
-  {"tool": "FindPerformanceIssues", "parameters": {"format": "normal", ...}},
-  {"tool": "AnalyzeNamingConventions", "parameters": {...}}
-]
-```
-
-**Total: ~1,800 tokens (vs ~5,000+ tokens separate queries)**
+**Parallel calls** (these tools are not available through BatchQuery):
+- GetCodeMetrics
+- FindUnusedCode (format: "summary")
+- FindPerformanceIssues (format: "normal")
+- AnalyzeNamingConventions
 
 ---
 
@@ -1617,18 +1611,13 @@ Savings: 81%
 ### Workflow 3: Code Quality Review
 
 ```
-# Batch query for comprehensive analysis
-BatchQuery([
-  { tool: "GetCodeMetrics", parameters: {...} },
-  { tool: "FindUnusedCode", parameters: {format: "summary", ...} },
-  { tool: "FindPerformanceIssues", parameters: {format: "normal", ...} },
-  { tool: "AnalyzeNamingConventions", parameters: {scope: "public", ...} },
-  { tool: "FindTODOComments", parameters: {...} }
-])
-
-Total: ~2,000 tokens (single request)
-Traditional: ~6,000+ tokens (multiple requests)
-Savings: 67%
+# Independent calls - issue them in parallel
+# (BatchQuery does not support these tools)
+GetCodeMetrics(path)
+FindUnusedCode(path, format: "summary")
+FindPerformanceIssues(path, format: "normal")
+AnalyzeNamingConventions(path, scope: "public")
+FindTODOComments(path)
 ```
 
 ---

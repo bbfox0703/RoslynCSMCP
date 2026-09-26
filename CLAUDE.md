@@ -34,7 +34,7 @@ npx @modelcontextprotocol/inspector dotnet run --project ./RoslynMcpServer
 
 ## Critical: MSBuild Registration
 
-`MSBuildLocator.RegisterDefaults()` **must** be called before any Roslyn workspace operation. This is already handled in `Program.cs:12-33` — do not move or remove it.
+`MSBuildLocator.RegisterDefaults()` **must** be called before any Roslyn workspace operation. This is already handled near the top of `Main` in `RoslynMcpServer/Program.cs` and in each `src/*/Program.cs` — do not move or remove it.
 
 ---
 

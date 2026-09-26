@@ -1,12 +1,15 @@
-# Skill: Navigate Symbols
-Locate specific symbols, their definitions, and find all references or implementations.
+---
+name: roslyn-navigate
+description: Locate a C# symbol's definition, its references, and its implementations with the RoslynMcpServer Navigation tools. Use when the user asks where something is defined, where it is used, or what implements it.
+---
+
+# Navigate Symbols
 
 **Required Module**: `RoslynMcpServer.Navigation`
 **Usage**: `/roslyn-navigate <symbol-name> <solution-path>`
 
-**Steps**:
-1. Call `SearchSymbols` to locate the symbol.
-2. Call `GetSymbolInfo` with `detailLevel: "basic"` for details.
-3. Call `FindReferences` with `detailLevel: "summary"` for usage count.
-4. Call `FindImplementations` if the symbol is an interface.
-5. Present location, usage count, and implementations.
+Tell the user where the symbol is defined, how widely and where it is used, and, for interfaces and abstract classes, what implements it.
+
+`SearchSymbols` resolves a partial or ambiguous name to concrete symbols. `GetSymbolInfo` describes the definition. `FindReferences` lists usages at the detail level you need; `FindReferencesFiltered` narrows them (exclude tests, cross-project only, writes only, by project). `FindImplementations` lists implementations of an interface or abstract class.
+
+Report the definition location, the usage count, the call sites that matter, and any implementations.

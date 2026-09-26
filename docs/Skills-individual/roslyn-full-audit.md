@@ -1,14 +1,11 @@
-# Skill: Full Code Audit
-Perform a complete end-to-end audit of the codebase across all available domains.
+---
+name: roslyn-full-audit
+description: End-to-end audit of a C# solution across structure, dependencies, metrics, quality, security, and test coverage with the full RoslynMcpServer. Use when the user asks for a complete or comprehensive code audit.
+---
 
-**Required Module**: `RoslynMcpServer` (Full) or all 8 individual modules.
+# Full Code Audit
+
+**Required Module**: `RoslynMcpServer` (Full) or all 9 individual modules
 **Usage**: `/roslyn-full-audit <solution-path>`
 
-**Steps**:
-1. Call `GetProjectStructure` (Navigation).
-2. Call `GetDependencyGraph` (Dependencies).
-3. Call `GetCodeMetrics` (Metrics).
-4. Call `FindCodeSmells` (Quality).
-5. Call `FindSecurityIssues` (Security).
-6. Call `GetTestCoverage` (Testing).
-7. Present a comprehensive audit report covering structure, health, and security.
+Produce one audit report, organized by area and led by the most important findings, covering structure (`GetProjectStructure`, `GetDependencyGraph`), size and complexity (`GetCodeMetrics`), code quality (`FindCodeSmells`), security (`FindSecurityIssues`), and test coverage (`GetTestCoverage`). Use the other available tools to dig into the problems these surface.

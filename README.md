@@ -499,7 +499,7 @@ The server exposes **51 MCP tools** for comprehensive C# code analysis, organize
     - ~250-500 tokens depending on direction
 
 11. **BatchQuery** - Execute multiple queries in a single request
-    - Combine any MCP tools in one batch
+    - Combines SearchSymbols, FindReferences, GetSymbolInfo, GetCodeMetrics, GetDependencyGraph, GetCallHierarchy, and AnalyzeDependencies
     - Parallel or sequential execution
     - Graceful error handling (partial failures don't stop others)
     - Saves ~50-100 tokens per additional query vs separate requests

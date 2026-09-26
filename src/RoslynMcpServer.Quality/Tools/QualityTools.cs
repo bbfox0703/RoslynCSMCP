@@ -160,7 +160,7 @@ public class QualityTools
         }
     }
 
-    [McpServerTool, Description("Find magic numbers and hardcoded literals that should be extracted as constants")]
+    [McpServerTool, Description("Inventory numeric and string literals that could be extracted as named constants, skipping common values such as 0 and 1. Broad by design: every remaining literal is reported, including strings of at least minStringLength characters. For fewer, higher-signal results on numeric literals only, classified by how each is used and with severities, use AnalyzeMagicNumbers.")]
     public static async Task<string> FindMagicNumbers(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (with suggestions). Default: normal")]
@@ -536,6 +536,7 @@ public class QualityTools
         static List<T>/Dictionary<K,V> used without thread-safe alternatives,
         mutable static primitive fields without volatile/Interlocked/ThreadStatic,
         and await expressions inside lock() blocks (use SemaphoreSlim instead).
+        Does not analyze general shared-state data races beyond static collections and fields.
         """)]
     public static async Task<string> AnalyzeConcurrencyPatterns(
         [Description("Path to solution file (.sln)")] string solutionPath,
@@ -743,6 +744,7 @@ public class QualityTools
         comparison operators with literal threshold > 10 (ComparisonLiteral, e.g. count > 42),
         and return statements that return a literal integer > 1 as an exit/error code (ReturnLiteral).
         Complements PInvoke's MagicOffset (unsafe pointer arithmetic) with general non-unsafe coverage.
+        Numeric literals only; for a broad inventory that also covers string literals, use FindMagicNumbers.
         """)]
     public static async Task<string> AnalyzeMagicNumbers(
         [Description("Path to solution file (.sln)")] string solutionPath,
