@@ -70,23 +70,7 @@ class Program
             });
 
             // Register services needed for quality tools
-            builder.Services.AddSingleton<CodeAnalysisService>();
-            builder.Services.AddSingleton<CodeMetricsService>();
-            builder.Services.AddSingleton<Phase1AnalysisService>();
-            builder.Services.AddSingleton<UnusedCodeAnalyzer>();
-            builder.Services.AddSingleton<DuplicateCodeAnalyzer>();
-            builder.Services.AddSingleton<NamingConventionAnalyzer>();
-            builder.Services.AddSingleton<ConcurrencyPatternAnalyzer>();
-            builder.Services.AddSingleton<MagicNumberAnalyzer>();
-            builder.Services.AddSingleton<SecurityValidator>();
-            builder.Services.AddSingleton<DiagnosticLogger>();
-            builder.Services.AddSingleton<IncrementalAnalyzer>();
-            builder.Services.AddSingleton<IPersistentCache, FilePersistentCache>();
-            builder.Services.AddSingleton<MultiLevelCacheManager>();
-            builder.Services.AddSingleton<McpErrorHandler>();        // MCP error handling service
-            builder.Services.AddSingleton<CancellationManager>();    // Request cancellation tracking
-            builder.Services.AddSingleton<CancellableOperation>();   // Cancellable operation helper
-            builder.Services.AddMemoryCache();
+            ConfigureServices(builder.Services);
 
             builder.Services
                 .AddMcpServer()
@@ -110,6 +94,31 @@ class Program
         {
             await Log.CloseAndFlushAsync();
         }
+    }
+
+    /// <summary>
+    /// Registers the services this server's tools depend on. Kept separate from Main so tests
+    /// can verify every tool-injected service resolves without starting the host.
+    /// </summary>
+    internal static void ConfigureServices(IServiceCollection services)
+    {
+        services.AddSingleton<CodeAnalysisService>();
+        services.AddSingleton<CodeMetricsService>();
+        services.AddSingleton<Phase1AnalysisService>();
+        services.AddSingleton<UnusedCodeAnalyzer>();
+        services.AddSingleton<DuplicateCodeAnalyzer>();
+        services.AddSingleton<NamingConventionAnalyzer>();
+        services.AddSingleton<ConcurrencyPatternAnalyzer>();
+        services.AddSingleton<MagicNumberAnalyzer>();
+        services.AddSingleton<SecurityValidator>();
+        services.AddSingleton<DiagnosticLogger>();
+        services.AddSingleton<IncrementalAnalyzer>();
+        services.AddSingleton<IPersistentCache, FilePersistentCache>();
+        services.AddSingleton<MultiLevelCacheManager>();
+        services.AddSingleton<McpErrorHandler>();        // MCP error handling service
+        services.AddSingleton<CancellationManager>();    // Request cancellation tracking
+        services.AddSingleton<CancellableOperation>();   // Cancellable operation helper
+        services.AddMemoryCache();
     }
 
     private static string GetLogDirectory()
