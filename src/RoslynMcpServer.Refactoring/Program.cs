@@ -60,21 +60,7 @@ class Program
             });
 
             // Register services needed for refactoring tools
-            builder.Services.AddSingleton<CodeAnalysisService>();
-            builder.Services.AddSingleton<Phase1AnalysisService>();
-            builder.Services.AddSingleton<Phase2AnalysisService>();
-            builder.Services.AddSingleton<SymbolSearchService>();
-            builder.Services.AddSingleton<ChangeImpactAnalyzer>();
-            builder.Services.AddSingleton<SourceGeneratorOpportunityAnalyzer>();
-            builder.Services.AddSingleton<SecurityValidator>();
-            builder.Services.AddSingleton<DiagnosticLogger>();
-            builder.Services.AddSingleton<IncrementalAnalyzer>();
-            builder.Services.AddSingleton<IPersistentCache, FilePersistentCache>();
-            builder.Services.AddSingleton<MultiLevelCacheManager>();
-            builder.Services.AddSingleton<McpErrorHandler>();        // MCP error handling service
-            builder.Services.AddSingleton<CancellationManager>();    // Request cancellation tracking
-            builder.Services.AddSingleton<CancellableOperation>();   // Cancellable operation helper
-            builder.Services.AddMemoryCache();
+            ConfigureServices(builder.Services);
 
             builder.Services
                 .AddMcpServer()
@@ -98,6 +84,29 @@ class Program
         {
             await Log.CloseAndFlushAsync();
         }
+    }
+
+    /// <summary>
+    /// Registers the services this server's tools depend on. Kept separate from Main so tests
+    /// can verify every tool-injected service resolves without starting the host.
+    /// </summary>
+    internal static void ConfigureServices(IServiceCollection services)
+    {
+        services.AddSingleton<CodeAnalysisService>();
+        services.AddSingleton<Phase1AnalysisService>();
+        services.AddSingleton<Phase2AnalysisService>();
+        services.AddSingleton<SymbolSearchService>();
+        services.AddSingleton<ChangeImpactAnalyzer>();
+        services.AddSingleton<SourceGeneratorOpportunityAnalyzer>();
+        services.AddSingleton<SecurityValidator>();
+        services.AddSingleton<DiagnosticLogger>();
+        services.AddSingleton<IncrementalAnalyzer>();
+        services.AddSingleton<IPersistentCache, FilePersistentCache>();
+        services.AddSingleton<MultiLevelCacheManager>();
+        services.AddSingleton<McpErrorHandler>();        // MCP error handling service
+        services.AddSingleton<CancellationManager>();    // Request cancellation tracking
+        services.AddSingleton<CancellableOperation>();   // Cancellable operation helper
+        services.AddMemoryCache();
     }
 
     private static string GetLogDirectory()
