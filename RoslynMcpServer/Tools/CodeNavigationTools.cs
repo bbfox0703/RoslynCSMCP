@@ -295,14 +295,16 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            Describe one declared symbol found by simple name, ignoring case: kind, accessibility, namespace, declaring
-            type, source file and line, attributes, and for methods the return type and parameters or for properties the
-            type. When several symbols share the name, framework members included, only the first one found is
-            described, with no indication that others exist. Qualified names return 'Symbol not found.' Field types and
-            documentation comments are not reported.
+            Describe one type or member declared in the solution's source: kind, accessibility, namespace or
+            declaring type, source file and line, attributes, and for methods the return type and parameters or for
+            properties the type. Only source declarations are matched (never framework or package members); nested
+            types and their members are included. Exact-case matches win over case-insensitive ones, and without type
+            arguments a non-generic type wins over generic ones. If several declarations still match (for example
+            overloads, or the same name in different types), nothing is described and the candidates are listed with
+            names to call again with. An unknown name returns 'Symbol not found.'
             """)]
         public static async Task<string> GetSymbolInfo(
-            [Description("Simple (unqualified) symbol name, matched case-insensitively; qualified names are not supported. When several symbols share the name, the first one found is used.")] string symbolName,
+            [Description("Simple ('Save'), qualified ('UserService.Save', 'App.Services.UserService.Save'), or nested-type ('Outer.Inner') name, matched case-insensitively. Add type arguments ('Result<T>') to select a generic type and a parameter list ('Save(User, bool)', 'Save()') to select an overload.")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Detail level: summary (minimal), basic (balanced), full (comprehensive). Default: basic")]
             string detailLevel = "basic",
@@ -334,6 +336,10 @@ namespace RoslynMcpServer.Tools
                     "full" => FormatSymbolInfoFull(info),
                     _ => FormatSymbolInfoBasic(info)
                 };
+            }
+            catch (SymbolResolutionException ex)
+            {
+                return ex.Message;
             }
             catch (Exception ex)
             {
@@ -1360,16 +1366,18 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            Find source types that implement an interface (directly, through a base class, or through an inherited
+            Find the source types that implement an interface (directly, through a base class, or through an inherited
             interface) or derive from an abstract class at any depth, including through constructed generics (IRepo<int>
             counts for IRepo<T>), grouped by the declaring project with file, line, namespace, base class, and other
-            interfaces; each type is listed once. The target is the first source type (nested types included) whose
-            simple name matches, ignoring case; referenced types such as IDisposable are used only when no source type
-            matches. A concrete class, an unknown name, and no matches all return the same no-implementations message.
-            For subclasses of a concrete class, use GetClassHierarchy.
+            interfaces; each type is listed once. The target must be an interface or abstract class declared in the
+            solution's source, so framework types such as IDisposable cannot be the target. Exact-case matches win over
+            case-insensitive ones; if several interfaces or abstract classes still match, the candidates are listed
+            instead. An unknown name, and a name that only matches other kinds of declaration (such as a concrete
+            class), are reported as such rather than as 'no implementations'. For subclasses of a concrete class, use
+            GetClassHierarchy.
             """)]
         public static async Task<string> FindImplementations(
-            [Description("Simple (unqualified) name of an interface or abstract class, without generic arguments, matched case-insensitively; source types are searched before referenced assemblies and the first match is used.")] string typeName,
+            [Description("Simple ('IRepository'), qualified ('App.Data.IRepository'), or nested-type ('Outer.IInner') name of an interface or abstract class, matched case-insensitively. Add type arguments ('IRepository<T>') to select a generic type.")] string typeName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (names with file:line, grouped by project), normal (adds accessibility, namespace, doc summary, base class, other interfaces), detailed (adds all interfaces and counts by accessibility). Default: normal")]
             string format = "normal",
@@ -1405,6 +1413,10 @@ namespace RoslynMcpServer.Tools
                     "normal" => FormatImplementationResults(results, typeName),
                     _ => FormatImplementationResults(results, typeName)
                 };
+            }
+            catch (SymbolResolutionException ex)
+            {
+                return ex.Message;
             }
             catch (Exception ex)
             {
@@ -1799,16 +1811,17 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            Show the inheritance tree of one type: ancestors (base-class chain excluding System.Object, plus declared
-            interfaces, recursively, including framework types) and descendants (source types that derive from or
-            directly implement it, recursively, including through constructed generic bases such as Base<int>). The
-            name is a simple type name matched case-insensitively; qualified names are not accepted. Source types,
-            nested ones included, are searched first and the first match wins; framework types are used only when no
-            source type matches. A descendant appears once under each type it directly derives from or implements. For
-            a flat list of an interface's implementers, use FindImplementations.
+            Show the inheritance tree of one type declared in the solution's source, up to 10 levels each way: ancestors
+            (base-class chain excluding System.Object, plus declared interfaces, recursively, including framework types)
+            and descendants (source types that derive from or directly implement it, recursively, including through
+            constructed generic bases such as Base<int>). A descendant appears once under each type it directly derives
+            from or implements. The starting type must be declared in the solution's source, so a framework type such as
+            Exception cannot be the starting point. Exact-case matches win over case-insensitive ones, and without type
+            arguments a non-generic type wins over generic ones; if several types still match, the candidates are listed
+            instead. For a flat list of an interface's implementers, use FindImplementations.
             """)]
         public static async Task<string> GetClassHierarchy(
-            [Description("Simple type name without namespace or generic arguments, matched case-insensitively; source types are searched before referenced assemblies and the first match is used.")] string typeName,
+            [Description("Simple ('Shape'), qualified ('App.Geometry.Shape'), or nested-type ('Outer.Inner') type name, matched case-insensitively. Add type arguments ('Repository<T>') to select a generic type.")] string typeName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: compact (tree structure only), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
@@ -1857,6 +1870,10 @@ namespace RoslynMcpServer.Tools
                     "normal" => FormatClassHierarchy(result, normalizedDirection),
                     _ => FormatClassHierarchy(result, normalizedDirection)
                 };
+            }
+            catch (SymbolResolutionException ex)
+            {
+                return ex.Message;
             }
             catch (Exception ex)
             {

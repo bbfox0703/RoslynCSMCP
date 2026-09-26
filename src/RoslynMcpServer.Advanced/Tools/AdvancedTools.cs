@@ -190,16 +190,17 @@ public class AdvancedTools
     }
 
     [McpServerTool, Description("""
-        Show the inheritance tree of one type, up to 10 levels each way: ancestors (base-class chain excluding
-        System.Object, plus declared interfaces, recursively, including framework types) and descendants (source
-        types that derive from or directly implement it, recursively, including through constructed generic bases
-        such as Base<int>). The name is a simple type name matched case-insensitively; qualified names are not
-        accepted. Source types, nested ones included, are searched first and the first match wins; framework types
-        are used only when no source type matches. A descendant appears once under each type it directly derives
-        from or implements.
+        Show the inheritance tree of one type declared in the solution's source, up to 10 levels each way: ancestors
+        (base-class chain excluding System.Object, plus declared interfaces, recursively, including framework types)
+        and descendants (source types that derive from or directly implement it, recursively, including through
+        constructed generic bases such as Base<int>). A descendant appears once under each type it directly derives
+        from or implements. The starting type must be declared in the solution's source, so a framework type such as
+        Exception cannot be the starting point. Exact-case matches win over case-insensitive ones, and without type
+        arguments a non-generic type wins over generic ones; if several types still match, the candidates are listed
+        instead. An unknown name returns 'Type not found.'
         """)]
     public static async Task<string> GetClassHierarchy(
-        [Description("Simple type name without namespace or generic arguments, matched case-insensitively; source types are searched before referenced assemblies and the first match is used.")] string typeName,
+        [Description("Simple ('Shape'), qualified ('App.Geometry.Shape'), or nested-type ('Outer.Inner') type name, matched case-insensitively. Add type arguments ('Repository<T>') to select a generic type.")] string typeName,
         [Description("Path to solution file (.sln or .slnx)")] string solutionPath,
         [Description("Output format: compact (indented type names), normal (full names, kinds, and file:line), detailed (adds project, namespace, abstract marker, and the target's documentation), mermaid (classDiagram of the full trees), or json (full trees with kind, namespace, project, file, and line); other values, including text, fall back to normal. Default: normal")] string format = "normal",
         SymbolSearchService searchService = null!,
@@ -213,6 +214,10 @@ public class AdvancedTools
 
             var results = await searchService.GetClassHierarchyAsync(typeName, solutionPath);
             return FormatClassHierarchy(results, NormalizeFormat(format));
+        }
+        catch (SymbolResolutionException ex)
+        {
+            return ex.Message;
         }
         catch (Exception ex)
         {

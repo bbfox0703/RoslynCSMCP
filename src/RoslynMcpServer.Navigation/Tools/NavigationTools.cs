@@ -241,14 +241,16 @@ public class NavigationTools
     }
 
     [McpServerTool, Description("""
-        Describe one declared symbol found by simple name, ignoring case: kind, accessibility, namespace, return or
+        Describe one type or member declared in the solution's source: kind, accessibility, namespace, return or
         property type, and source file and line; the full level adds declaring type, parameters, and the XML
-        documentation comment. When several symbols share the name, framework members included, only the first one
-        found is described, with no indication that others exist. Qualified names return 'Symbol not found.' Field
-        types and attributes are not reported.
+        documentation comment. Only source declarations are matched (never framework or package members); nested
+        types and their members are included. Exact-case matches win over case-insensitive ones, and without type
+        arguments a non-generic type wins over generic ones. If several declarations still match (for example
+        overloads, or the same name in different types), nothing is described and the candidates are listed with
+        names to call again with. An unknown name returns 'Symbol not found.'
         """)]
     public static async Task<string> GetSymbolInfo(
-        [Description("Simple (unqualified) symbol name, matched case-insensitively; qualified names are not supported. When several symbols share the name, the first one found is used.")] string symbolName,
+        [Description("Simple ('Save'), qualified ('UserService.Save', 'App.Services.UserService.Save'), or nested-type ('Outer.Inner') name, matched case-insensitively. Add type arguments ('Result<T>') to select a generic type and a parameter list ('Save(User, bool)', 'Save()') to select an overload.")] string symbolName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Detail level: summary (minimal), basic (balanced), full (comprehensive). Default: basic")]
         string detailLevel = "basic",
@@ -272,6 +274,10 @@ public class NavigationTools
                 "full" => FormatSymbolInfoFull(info),
                 _ => FormatSymbolInfoBasic(info)
             };
+        }
+        catch (SymbolResolutionException ex)
+        {
+            return ex.Message;
         }
         catch (Exception ex)
         {
@@ -362,16 +368,17 @@ public class NavigationTools
     }
 
     [McpServerTool, Description("""
-        Find source types that implement an interface (directly, through a base class, or through an inherited
+        Find the source types that implement an interface (directly, through a base class, or through an inherited
         interface) or derive from an abstract class at any depth, including through constructed generics (IRepo<int>
         counts for IRepo<T>); depending on format it returns names only, names with the declaring project, file, and
-        line, or full details including implemented interfaces. Each type is listed once. The target is the first
-        source type (nested types included) whose simple name matches, ignoring case; referenced types such as
-        IDisposable are used only when no source type matches. A concrete class, an unknown name, and no matches all
-        return the same no-implementations message.
+        line, or full details including implemented interfaces. Each type is listed once. The target must be an
+        interface or abstract class declared in the solution's source, so framework types such as IDisposable cannot
+        be the target. Exact-case matches win over case-insensitive ones; if several interfaces or abstract classes
+        still match, the candidates are listed instead. An unknown name, and a name that only matches other kinds of
+        declaration (such as a concrete class), are reported as such rather than as 'no implementations'.
         """)]
     public static async Task<string> FindImplementations(
-        [Description("Simple (unqualified) name of an interface or abstract class, without generic arguments, matched case-insensitively; source types are searched before referenced assemblies and the first match is used.")] string typeName,
+        [Description("Simple ('IRepository'), qualified ('App.Data.IRepository'), or nested-type ('Outer.IInner') name of an interface or abstract class, matched case-insensitively. Add type arguments ('IRepository<T>') to select a generic type.")] string typeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (names only), normal (balanced), detailed (comprehensive). Default: normal")]
         string format = "normal",
@@ -399,6 +406,10 @@ public class NavigationTools
                 "normal" => FormatImplementationResults(results, typeName),
                 _ => FormatImplementationResults(results, typeName)
             };
+        }
+        catch (SymbolResolutionException ex)
+        {
+            return ex.Message;
         }
         catch (Exception ex)
         {

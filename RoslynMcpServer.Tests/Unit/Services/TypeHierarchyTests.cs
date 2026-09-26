@@ -163,16 +163,6 @@ public class TypeHierarchyTests : IDisposable
         results[0].ProjectName.Should().Be("Core");
     }
 
-    [Fact]
-    public async Task FindImplementations_FrameworkInterface_StillSupported()
-    {
-        var results = await _service.FindImplementationsAsync("IDisposable", SolutionPath);
-
-        results.Should().ContainSingle();
-        results[0].ImplementingTypeName.Should().Be("Resource");
-        results[0].ProjectName.Should().Be("App");
-    }
-
     #endregion
 
     #region GetClassHierarchy
