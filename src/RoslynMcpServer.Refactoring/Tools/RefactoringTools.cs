@@ -20,10 +20,14 @@ public class RefactoringTools
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Preview only (true) or execute rename (false). Default: true")] bool previewOnly = true,
         Phase1AnalysisService phase1Service = null!,
+        SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
     {
         try
         {
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
+
             var results = await phase1Service.RenameSymbolAsync(solutionPath, symbolName, newName, previewOnly);
             return FormatRenameResults(results);
         }
@@ -40,10 +44,14 @@ public class RefactoringTools
         [Description("Interface name to generate (default: I{ClassName})")] string? interfaceName = null,
         [Description("Target namespace for the interface (default: same as class)")] string? targetNamespace = null,
         Phase2AnalysisService phase2Service = null!,
+        SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
     {
         try
         {
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
+
             var results = await phase2Service.ExtractInterfaceAsync(solutionPath, className, interfaceName, targetNamespace);
             return FormatInterfaceExtractionResults(results);
         }
@@ -59,7 +67,7 @@ public class RefactoringTools
         planned change. The name matches a type or a member of a top-level type by exact, case-sensitive simple name
         or full display name such as Ns.Type.Method(int); the first match wins and can be a framework symbol, so
         prefer the full name. Indirect references are currently always 0, and an unknown name returns an empty
-        report rather than an error.
+        report with a symbol-not-found warning rather than an error.
         """)]
     public static async Task<string> GetChangeImpact(
         [Description("Type or member name: exact, case-sensitive simple name, or full display name (Ns.Type, Ns.Type.Member, Ns.Type.Method(int, string)). The first match wins.")] string symbolName,
@@ -98,12 +106,16 @@ public class RefactoringTools
         [Description("Output format: summary (counts only), normal (grouped list), detailed (with recommendations). Default: normal")]
         string format = "normal",
         Phase1AnalysisService phase1Service = null!,
+        SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
     {
         try
         {
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
+
             var results = await phase1Service.AnalyzeLayerViolationsAsync(solutionPath, layerDefinitionsJson);
-            return FormatLayerViolationResults(results, format);
+            return FormatLayerViolationResults(results, format.ToLowerInvariant());
         }
         catch (Exception ex)
         {
@@ -235,7 +247,7 @@ public class RefactoringTools
         output.AppendLine($"  Indirect references: {results.IndirectReferences}");
         output.AppendLine($"  Impacted projects: {results.ImpactedProjects}");
         output.AppendLine($"  Impacted files: {results.ImpactedFiles}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatChangeImpactNormal(ChangeImpactResults results)
@@ -259,7 +271,7 @@ public class RefactoringTools
                 output.AppendLine($"  - {rec}");
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatChangeImpactDetailed(ChangeImpactResults results)
@@ -289,13 +301,13 @@ public class RefactoringTools
             }
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatLayerViolationResults(LayerViolationResults results, string format)
     {
         if (!results.Violations.Any())
-            return $"No layer violations found. Compliance: {results.ComplianceScore:F1}%";
+            return $"No layer violations found. Compliance: {results.ComplianceScore:F1}%".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
 
@@ -305,7 +317,7 @@ public class RefactoringTools
             output.AppendLine($"  Total violations: {results.TotalViolations}");
             output.AppendLine($"  Critical: {results.CriticalViolations}");
             output.AppendLine($"  Compliance: {results.ComplianceScore:F1}%");
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         output.AppendLine($"# Layer Violation Analysis");
@@ -327,7 +339,7 @@ public class RefactoringTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static int SrcGenSeverityOrder(string severity) => severity switch
@@ -370,12 +382,7 @@ public class RefactoringTools
         else if (score >= 50) output.AppendLine("  Fair — meaningful boilerplate reduction possible.");
         else output.AppendLine("  Poor — significant source generator adoption opportunities.");
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine();
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -387,7 +394,7 @@ public class RefactoringTools
             var ok = new StringBuilder();
             ok.AppendLine("No source generator opportunities found.");
             ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-            return ok.ToString();
+            return ok.AppendWarnings(results.Warnings).ToString();
         }
 
         var output = new StringBuilder();
@@ -411,9 +418,7 @@ public class RefactoringTools
             output.AppendLine();
         }
 
-        if (results.Warnings.Count > 0)
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -421,7 +426,7 @@ public class RefactoringTools
     private static string FormatSrcGenDetailed(SourceGeneratorAnalysisResults results)
     {
         if (results.TotalOpportunities == 0)
-            return $"No source generator opportunities found. Analyzed {results.AnalyzedProjects} project(s).";
+            return $"No source generator opportunities found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine("# Source Generator Opportunities — Detailed Report");
@@ -467,12 +472,7 @@ public class RefactoringTools
             }
         }
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine("## Warnings");
-            foreach (var w in results.Warnings)
-                output.AppendLine($"- {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }

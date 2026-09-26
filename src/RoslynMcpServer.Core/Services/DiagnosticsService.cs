@@ -54,6 +54,20 @@ namespace RoslynMcpServer.Core.Services
             workspace.RegisterWorkspaceFailedHandler((args) =>
             {
                 _logger.LogWarning("Workspace failed: {Diagnostic}", args.Diagnostic.Message);
+
+                // A project that fails to load contributes no diagnostics, so surface the failure
+                // instead of letting the result read as a clean build
+                if (args.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
+                {
+                    lock (errorResults.Warnings)
+                    {
+                        errorResults.Warnings.Add(new OperationWarning
+                        {
+                            Context = "Workspace load",
+                            Message = args.Diagnostic.Message
+                        });
+                    }
+                }
             });
 
             _logger.LogInformation("Loading solution...");

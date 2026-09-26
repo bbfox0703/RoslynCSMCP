@@ -6,6 +6,8 @@ This document details the core MCP tools provided by RoslynCSMCP server for C# c
 > **Total Tools**: 51 (34 detailed below; see the [README](../README.md) for the full tool list including the Interop, performance, and modernization tools)
 >
 > **Recent Additions**: FindTODOComments, FindLargeFiles, FindDeprecatedAPIs, GetFileStatistics, AnalyzePackages, GetTestCoverage, GetChangeImpact, FindPerformanceIssues, AnalyzeNamingConventions, AnalyzeAPIChanges
+>
+> **Solution paths**: every `solutionPath` must be an existing absolute path to a `.sln` or `.slnx` file; project files (`.csproj`) are rejected. When projects fail to load or analysis fails partway, tools append a `⚠️ Warnings` section instead of reporting a clean result.
 
 ---
 
@@ -163,7 +165,7 @@ Use FindReferences tool with:
 
 **Parameters**:
 - `solutionPath` (string): Path to solution file (.sln)
-- `groupBy` (string, optional): Group by: project, namespace, type (default: project)
+- `groupBy` (string, optional): Breakdowns to append, comma-separated: project, namespace, type, or none (default: project)
 
 ---
 

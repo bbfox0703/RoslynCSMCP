@@ -91,17 +91,21 @@ public class QualityTools
         string smellTypes = "all",
         [Description("Return only findings of exactly this severity (case-insensitive): High, Medium, Low, or All (default: All)")] string severity = "All",
         Phase1AnalysisService phase1Service = null!,
+        SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
     {
         try
         {
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
+
             var smellTypeArray = smellTypes.Equals("all", StringComparison.OrdinalIgnoreCase)
                 ? new[] { "LongMethod", "LargeClass", "LongParameterList", "FeatureEnvy", "DataClumps", "PrimitiveObsession", "SwitchStatements", "SpeculativeGenerality", "MessageChains", "MiddleMan" }
                 : smellTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
             var results = await phase1Service.FindCodeSmellsAsync(solutionPath, smellTypeArray, severity);
 
-            return FormatCodeSmellResults(results, format);
+            return FormatCodeSmellResults(results, format.ToLowerInvariant());
         }
         catch (Exception ex)
         {
@@ -193,17 +197,21 @@ public class QualityTools
         [Description("Include numeric literals (default: true)")] bool includeNumbers = true,
         [Description("Minimum string length to consider (default: 3)")] int minStringLength = 3,
         Phase1AnalysisService phase1Service = null!,
+        SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
     {
         try
         {
+            var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
+            if (pathError != null) return pathError;
+
             var results = await phase1Service.FindMagicNumbersAsync(
                 solutionPath,
                 includeStrings,
                 includeNumbers,
                 minStringLength);
 
-            return FormatMagicNumberResults(results, format);
+            return FormatMagicNumberResults(results, format.ToLowerInvariant());
         }
         catch (Exception ex)
         {
@@ -305,7 +313,7 @@ public class QualityTools
     private static string FormatCodeSmellResults(CodeSmellResults results, string format)
     {
         if (!results.Smells.Any())
-            return "No code smells detected.";
+            return "No code smells detected.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
 
@@ -316,7 +324,7 @@ public class QualityTools
             output.AppendLine($"  High severity: {results.HighSeverity}");
             output.AppendLine($"  Medium severity: {results.MediumSeverity}");
             output.AppendLine($"  Low severity: {results.LowSeverity}");
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         output.AppendLine($"Found {results.TotalSmells} code smells:\n");
@@ -339,7 +347,7 @@ public class QualityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatUnusedCodeSummary(UnusedCodeResults results)
@@ -351,13 +359,13 @@ public class QualityTools
         output.AppendLine($"  Methods: {results.MethodCount}");
         output.AppendLine($"  Properties: {results.PropertyCount}");
         output.AppendLine($"  Fields: {results.FieldCount}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatUnusedCodeNormal(UnusedCodeResults results)
     {
         if (!results.UnusedItems.Any())
-            return "No unused code found.";
+            return "No unused code found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"Found {results.UnusedItems.Count} unused code items:\n");
@@ -375,13 +383,13 @@ public class QualityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatUnusedCodeDetailed(UnusedCodeResults results)
     {
         if (!results.UnusedItems.Any())
-            return "No unused code found.";
+            return "No unused code found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"# Unused Code Analysis");
@@ -396,7 +404,7 @@ public class QualityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatDuplicateCodeSummary(DuplicateCodeResults results)
@@ -407,13 +415,13 @@ public class QualityTools
         output.AppendLine($"  Total instances: {results.TotalDuplicateInstances}");
         output.AppendLine($"  High similarity (95%+): {results.HighSimilarityCount}");
         output.AppendLine($"  Medium similarity (85-94%): {results.MediumSimilarityCount}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatDuplicateCodeNormal(DuplicateCodeResults results)
     {
         if (!results.DuplicateBlocks.Any())
-            return "No duplicate code found.";
+            return "No duplicate code found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"Found {results.TotalDuplicateBlocks} duplicate code blocks:\n");
@@ -428,13 +436,13 @@ public class QualityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatDuplicateCodeDetailed(DuplicateCodeResults results)
     {
         if (!results.DuplicateBlocks.Any())
-            return "No duplicate code found.";
+            return "No duplicate code found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"# Duplicate Code Analysis");
@@ -455,13 +463,13 @@ public class QualityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatMagicNumberResults(MagicNumberResults results, string format)
     {
         if (!results.MagicNumbers.Any())
-            return "No magic numbers found.";
+            return "No magic numbers found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
 
@@ -471,7 +479,7 @@ public class QualityTools
             output.AppendLine($"  Total: {results.TotalMagicNumbers}");
             output.AppendLine($"  Numeric literals: {results.NumericLiterals}");
             output.AppendLine($"  String literals: {results.StringLiterals}");
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         output.AppendLine($"Found {results.TotalMagicNumbers} magic numbers:\n");
@@ -491,7 +499,7 @@ public class QualityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatNamingConventionsSummary(NamingConventionResults results)
@@ -504,13 +512,13 @@ public class QualityTools
         output.AppendLine($"  High severity: {results.HighSeverityViolations}");
         output.AppendLine($"  Medium severity: {results.MediumSeverityViolations}");
         output.AppendLine($"  Low severity: {results.LowSeverityViolations}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatNamingConventionsNormal(NamingConventionResults results)
     {
         if (!results.Violations.Any())
-            return $"No naming convention violations found. Compliance: {results.ComplianceScore:F1}%";
+            return $"No naming convention violations found. Compliance: {results.ComplianceScore:F1}%".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"Found {results.TotalViolations} naming violations (Compliance: {results.ComplianceScore:F1}%):\n");
@@ -529,13 +537,13 @@ public class QualityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatNamingConventionsDetailed(NamingConventionResults results)
     {
         if (!results.Violations.Any())
-            return $"No naming convention violations found. Compliance: {results.ComplianceScore:F1}%";
+            return $"No naming convention violations found. Compliance: {results.ComplianceScore:F1}%".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"# Naming Convention Analysis");
@@ -553,7 +561,7 @@ public class QualityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     [McpServerTool, Description("""
@@ -657,12 +665,7 @@ public class QualityTools
         else if (score >= 50) output.AppendLine("  Fair — several concurrency issues to address.");
         else output.AppendLine("  Poor — significant concurrency risks requiring attention.");
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine();
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -674,7 +677,7 @@ public class QualityTools
             var ok = new StringBuilder();
             ok.AppendLine("No concurrency issues found.");
             ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-            return ok.ToString();
+            return ok.AppendWarnings(results.Warnings).ToString();
         }
 
         var output = new StringBuilder();
@@ -699,9 +702,7 @@ public class QualityTools
             output.AppendLine();
         }
 
-        if (results.Warnings.Count > 0)
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -709,7 +710,7 @@ public class QualityTools
     private static string FormatConcurrencyDetailed(ConcurrencyAnalysisResults results)
     {
         if (results.TotalIssues == 0)
-            return $"No concurrency issues found. Analyzed {results.AnalyzedProjects} project(s).";
+            return $"No concurrency issues found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine("# Concurrency Pattern Analysis — Detailed Report");
@@ -756,12 +757,7 @@ public class QualityTools
             }
         }
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine("## Warnings");
-            foreach (var w in results.Warnings)
-                output.AppendLine($"- {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -864,12 +860,7 @@ public class QualityTools
         else if (score >= 50) output.AppendLine("  Fair — several magic numbers to address.");
         else output.AppendLine("  Poor — many magic numbers reduce maintainability.");
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine();
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -881,7 +872,7 @@ public class QualityTools
             var ok = new StringBuilder();
             ok.AppendLine("No magic numbers found.");
             ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-            return ok.ToString();
+            return ok.AppendWarnings(results.Warnings).ToString();
         }
 
         var output = new StringBuilder();
@@ -905,9 +896,7 @@ public class QualityTools
             output.AppendLine();
         }
 
-        if (results.Warnings.Count > 0)
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -915,7 +904,7 @@ public class QualityTools
     private static string FormatMagicDetailed(MagicNumberAnalysisResults results)
     {
         if (results.TotalIssues == 0)
-            return $"No magic numbers found. Analyzed {results.AnalyzedProjects} project(s).";
+            return $"No magic numbers found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine("# Magic Number Analysis — Detailed Report");
@@ -954,12 +943,7 @@ public class QualityTools
             }
         }
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine("## Warnings");
-            foreach (var w in results.Warnings)
-                output.AppendLine($"- {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }

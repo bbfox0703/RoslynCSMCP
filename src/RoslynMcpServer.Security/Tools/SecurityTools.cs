@@ -150,13 +150,13 @@ public class SecurityTools
         output.AppendLine($"  High: {results.HighCount}");
         output.AppendLine($"  Medium: {results.MediumCount}");
         output.AppendLine($"  Low: {results.LowCount}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatSecurityIssuesNormal(SecurityIssueResults results)
     {
         if (!results.Issues.Any())
-            return "No security issues found.";
+            return "No security issues found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"Found {results.TotalIssues} security issues:\n");
@@ -175,13 +175,13 @@ public class SecurityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatSecurityIssuesDetailed(SecurityIssueResults results)
     {
         if (!results.Issues.Any())
-            return "No security issues found.";
+            return "No security issues found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"# Security Issue Analysis");
@@ -198,7 +198,7 @@ public class SecurityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatThreadSafetyIssuesSummary(ThreadSafetyResults results)
@@ -210,13 +210,13 @@ public class SecurityTools
         output.AppendLine($"  High: {results.HighCount}");
         output.AppendLine($"  Medium: {results.MediumCount}");
         output.AppendLine($"  Low: {results.LowCount}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatThreadSafetyIssuesNormal(ThreadSafetyResults results)
     {
         if (!results.Issues.Any())
-            return "No thread safety issues found.";
+            return "No thread safety issues found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"Found {results.TotalIssues} thread safety issues:\n");
@@ -235,13 +235,13 @@ public class SecurityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatThreadSafetyIssuesDetailed(ThreadSafetyResults results)
     {
         if (!results.Issues.Any())
-            return "No thread safety issues found.";
+            return "No thread safety issues found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"# Thread Safety Analysis");
@@ -258,7 +258,7 @@ public class SecurityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatExceptionHandlingSummary(ExceptionHandlingResults results)
@@ -269,13 +269,13 @@ public class SecurityTools
         output.AppendLine($"  Empty catch: {results.EmptyCatchCount}");
         output.AppendLine($"  Swallowed: {results.SwallowedExceptionCount}");
         output.AppendLine($"  Generic catch: {results.GenericCatchCount}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatExceptionHandlingNormal(ExceptionHandlingResults results)
     {
         if (!results.Issues.Any())
-            return "No exception handling issues found.";
+            return "No exception handling issues found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"Found {results.TotalIssues} exception handling issues:\n");
@@ -294,13 +294,13 @@ public class SecurityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatExceptionHandlingDetailed(ExceptionHandlingResults results)
     {
         if (!results.Issues.Any())
-            return "No exception handling issues found.";
+            return "No exception handling issues found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"# Exception Handling Analysis");
@@ -317,7 +317,7 @@ public class SecurityTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     #endregion

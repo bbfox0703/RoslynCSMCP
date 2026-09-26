@@ -264,6 +264,10 @@ namespace RoslynMcpServer.Core.Services
 
             if (!validator.ValidateSolutionPath(solutionPath))
             {
+                if (!SecurityValidator.HasSolutionExtension(solutionPath))
+                {
+                    return errorHandler.InvalidPathError(solutionPath, "Expected a solution file (.sln or .slnx); project files and other file types are not supported");
+                }
                 if (!File.Exists(solutionPath))
                 {
                     return errorHandler.SolutionNotFoundError(solutionPath);

@@ -114,12 +114,7 @@ namespace RoslynMcpServer.Tools
             else if (score >= 50) output.AppendLine("  Fair — several concurrency issues to address.");
             else output.AppendLine("  Poor — significant concurrency risks requiring attention.");
 
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine();
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }
@@ -131,7 +126,7 @@ namespace RoslynMcpServer.Tools
                 var ok = new StringBuilder();
                 ok.AppendLine("No concurrency issues found.");
                 ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-                return ok.ToString();
+                return ok.AppendWarnings(results.Warnings).ToString();
             }
 
             var output = new StringBuilder();
@@ -156,9 +151,7 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine();
             }
 
-            if (results.Warnings.Count > 0)
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }
@@ -166,7 +159,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatConcurrencyDetailed(ConcurrencyAnalysisResults results)
         {
             if (results.TotalIssues == 0)
-                return $"No concurrency issues found. Analyzed {results.AnalyzedProjects} project(s).";
+                return $"No concurrency issues found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine("# Concurrency Pattern Analysis — Detailed Report");
@@ -213,12 +206,7 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine("## Warnings");
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"- {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }
@@ -322,12 +310,7 @@ namespace RoslynMcpServer.Tools
             else if (score >= 75) output.AppendLine("  Good — minor naming improvements possible.");
             else if (score >= 50) output.AppendLine("  Fair — several magic numbers to address.");
             else output.AppendLine("  Poor — many magic numbers reduce maintainability.");
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine();
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
             return output.ToString();
         }
 
@@ -338,7 +321,7 @@ namespace RoslynMcpServer.Tools
                 var ok = new StringBuilder();
                 ok.AppendLine("No magic numbers found.");
                 ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-                return ok.ToString();
+                return ok.AppendWarnings(results.Warnings).ToString();
             }
             var output = new StringBuilder();
             output.AppendLine($"Found {results.TotalIssues} magic number(s) " +
@@ -359,16 +342,14 @@ namespace RoslynMcpServer.Tools
                     output.AppendLine($"  ... and {group.Count() - 10} more (use format=detailed to see all)");
                 output.AppendLine();
             }
-            if (results.Warnings.Count > 0)
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
+            output.AppendWarnings(results.Warnings);
             return output.ToString();
         }
 
         private static string FormatMagicDetailed(MagicNumberAnalysisResults results)
         {
             if (results.TotalIssues == 0)
-                return $"No magic numbers found. Analyzed {results.AnalyzedProjects} project(s).";
+                return $"No magic numbers found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
             var output = new StringBuilder();
             output.AppendLine("# Magic Number Analysis — Detailed Report");
             output.AppendLine();
@@ -402,12 +383,7 @@ namespace RoslynMcpServer.Tools
                     output.AppendLine();
                 }
             }
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine("## Warnings");
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"- {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
             return output.ToString();
         }
 
