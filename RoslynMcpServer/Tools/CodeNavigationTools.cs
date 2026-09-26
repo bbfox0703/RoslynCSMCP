@@ -8633,12 +8633,25 @@ namespace RoslynMcpServer.Tools
         // AnalyzeDIContainer - Analyze dependency injection configuration
         // ============================================================================
 
-        [McpServerTool, Description("Analyze dependency injection container configuration for common issues (unregistered dependencies, lifetime mismatches)")]
+        [McpServerTool, Description("""
+            Statically compare dependency-injection registrations with constructor parameters, one container per
+            application: each executable project, and each library that registers services but is not part of an
+            application, together with the libraries it references transitively (a referenced executable, e.g. from a
+            test project, keeps its own container). Only generic AddSingleton, AddScoped, AddTransient, and TryAdd*
+            calls count as registrations; non-generic, keyed, AddHostedService, AddDbContext, and similar forms are
+            ignored. Reports duplicate registrations, lifetime mismatches, and captive-lifetime and circular
+            dependencies within each application (the last two follow each service to its registered implementation,
+            AddScoped<IService, Impl>), plus unregistered constructor-parameter types (ILogger, IOptions,
+            IConfiguration, and System.* excepted): a registered class is checked against each application that
+            registers it, any other class only fails when no application containing it registers the type. An issue
+            found in several applications is listed once, naming them. Issues are grouped by type, up to 10 each, with
+            locations; expect false positives for classes the container does not create.
+            """)]
         public static async Task<string> AnalyzeDIContainer(
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Check service lifetime issues (default: true)")] bool checkLifetimes = true,
+            [Description("Report a service registered again with a different lifetime in the same application, and an implementation registered under several services with different lifetimes (default: true)")] bool checkLifetimes = true,
             [Description("Check circular dependencies (default: true)")] bool checkCircular = true,
-            [Description("Check captive dependencies (default: true)")] bool checkCaptive = true,
+            [Description("Report a Singleton depending on a Scoped or Transient service, or a Scoped service depending on a Transient one, following interface registrations to their implementations. Default: true")] bool checkCaptive = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -8994,6 +9007,7 @@ namespace RoslynMcpServer.Tools
 
             // Summary
             output.AppendLine($"## 📊 Summary\n");
+            output.AppendLine($"- **Applications analyzed:** {results.Applications.Count}{(results.Applications.Any() ? $" ({string.Join(", ", results.Applications)})" : string.Empty)}");
             output.AppendLine($"- **Services analyzed:** {results.AnalyzedServices}");
             output.AppendLine($"- **Constructors analyzed:** {results.AnalyzedConstructors}");
             output.AppendLine($"- **Total issues found:** {results.TotalIssues}");
@@ -9084,6 +9098,11 @@ namespace RoslynMcpServer.Tools
                         if (issue.DependencyChain != null && issue.DependencyChain.Any())
                         {
                             output.AppendLine($"   - **Dependency Chain:** {string.Join(" → ", issue.DependencyChain)}");
+                        }
+
+                        if (results.Applications.Count > 1 && issue.Applications.Any())
+                        {
+                            output.AppendLine($"   - **Applications:** {string.Join(", ", issue.Applications)}");
                         }
 
                         if (!string.IsNullOrEmpty(issue.FilePath) && issue.FilePath != "Multiple Files")
