@@ -158,13 +158,17 @@ public class DependencyTools
     }
 
     [McpServerTool, Description("""
-        Statically compare dependency-injection registrations with constructor parameters across all projects. Only
-        generic AddSingleton, AddScoped, AddTransient, and TryAdd* calls count as registrations; non-generic, keyed,
-        AddHostedService, AddDbContext, and similar forms are ignored. Reports unregistered constructor-parameter
-        types for every class (ILogger, IOptions, IConfiguration, and System.* excepted), duplicate registrations,
-        lifetime mismatches, and captive-lifetime and circular dependencies; the last two follow each service to the
-        implementation it is registered with (AddScoped<IService, Impl>). Expect false positives for classes the
-        container does not create.
+        Statically compare dependency-injection registrations with constructor parameters, one container per
+        application: each executable project, and each library that registers services but is not part of an
+        application, together with the libraries it references transitively (a referenced executable, e.g. from a
+        test project, keeps its own container). Only generic AddSingleton, AddScoped, AddTransient, and TryAdd* calls
+        count as registrations; non-generic, keyed, AddHostedService, AddDbContext, and similar forms are ignored.
+        Reports duplicate registrations, lifetime mismatches, and captive-lifetime and circular dependencies within
+        each application (the last two follow each service to its registered implementation, AddScoped<IService, Impl>),
+        plus unregistered constructor-parameter types (ILogger, IOptions, IConfiguration, and System.* excepted): a
+        registered class is checked against each application that registers it, any other class only fails when no
+        application containing it registers the type. An issue found in several applications is listed once, naming
+        them. Expect false positives for classes the container does not create.
         """)]
     public static async Task<string> AnalyzeDIContainer(
         [Description("Path to solution file (.sln)")] string solutionPath,
@@ -403,6 +407,7 @@ public class DependencyTools
     {
         var output = new StringBuilder();
         output.AppendLine("DI Container Analysis Summary:");
+        output.AppendLine($"  Applications: {results.Applications.Count}");
         output.AppendLine($"  Total issues: {results.TotalIssues}");
         output.AppendLine($"  Unregistered: {results.UnregisteredCount}");
         output.AppendLine($"  Lifetime mismatches: {results.LifetimeMismatchCount}");
@@ -416,7 +421,7 @@ public class DependencyTools
             return "No DI container issues found.";
 
         var output = new StringBuilder();
-        output.AppendLine($"Found {results.TotalIssues} DI container issues:\n");
+        output.AppendLine($"Found {results.TotalIssues} DI container issues in {results.Applications.Count} applications:\n");
 
         var grouped = results.Issues.GroupBy(i => i.IssueType);
         foreach (var group in grouped)
@@ -424,7 +429,10 @@ public class DependencyTools
             output.AppendLine($"**{group.Key}** ({group.Count()}):");
             foreach (var issue in group.Take(10))
             {
-                output.AppendLine($"  - [{issue.Severity}] {issue.ServiceType}");
+                var applications = results.Applications.Count > 1 && issue.Applications.Any()
+                    ? $" ({string.Join(", ", issue.Applications)})"
+                    : string.Empty;
+                output.AppendLine($"  - [{issue.Severity}] {issue.ServiceType}{applications}");
             }
             output.AppendLine();
         }
@@ -439,6 +447,7 @@ public class DependencyTools
 
         var output = new StringBuilder();
         output.AppendLine($"# DI Container Analysis");
+        output.AppendLine($"Applications: {string.Join(", ", results.Applications)}");
         output.AppendLine($"Total: {results.TotalIssues} issues\n");
 
         foreach (var issue in results.Issues)
@@ -447,6 +456,7 @@ public class DependencyTools
             output.AppendLine($"  Service: {issue.ServiceType}");
             output.AppendLine($"  Implementation: {issue.ImplementationType}");
             output.AppendLine($"  Lifetime: {issue.ServiceLifetime}");
+            output.AppendLine($"  Applications: {string.Join(", ", issue.Applications)}");
             output.AppendLine($"  Description: {issue.Description}");
             output.AppendLine($"  Recommendation: {issue.Recommendation}");
             output.AppendLine();

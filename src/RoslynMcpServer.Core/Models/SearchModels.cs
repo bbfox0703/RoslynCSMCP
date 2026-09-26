@@ -1414,6 +1414,7 @@ namespace RoslynMcpServer.Core.Models
         public string FilePath { get; set; } = string.Empty;
         public int LineNumber { get; set; }
         public List<string> DependencyChain { get; set; } = new();  // For circular dependencies
+        public List<string> Applications { get; set; } = new();  // Applications (DI containers) the issue occurs in
     }
 
     /// <summary>
@@ -1422,6 +1423,7 @@ namespace RoslynMcpServer.Core.Models
     public class DIContainerResults
     {
         public List<DIContainerIssue> Issues { get; set; } = new();
+        public List<string> Applications { get; set; } = new();  // Applications analyzed, each with its own DI container
         public int AnalyzedServices { get; set; }
         public int AnalyzedConstructors { get; set; }
         public List<OperationWarning> Warnings { get; set; } = new();
