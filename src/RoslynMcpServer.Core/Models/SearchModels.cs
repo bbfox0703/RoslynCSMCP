@@ -31,12 +31,21 @@ namespace RoslynMcpServer.Core.Models
         public string SymbolName { get; set; } = string.Empty;
         public string DocumentPath { get; set; } = string.Empty;
         public string ProjectName { get; set; } = string.Empty;
+        /// <summary>Solution the reference was found in (the first listed one for cross-solution searches).</summary>
+        public string SolutionPath { get; set; } = string.Empty;
         public int LineNumber { get; set; }
         public int ColumnNumber { get; set; }
         public string LineText { get; set; } = string.Empty;
         public List<string> Context { get; set; } = new();
         public bool IsDefinition { get; set; }
         public string ReferenceKind { get; set; } = string.Empty;
+    }
+
+    public class ReferenceSearchResult
+    {
+        /// <summary>Number of declared symbols that matched the requested name; 0 means no such symbol.</summary>
+        public int MatchedSymbolCount { get; set; }
+        public List<ReferenceResult> References { get; set; } = new();
     }
 
     public class SymbolInfo

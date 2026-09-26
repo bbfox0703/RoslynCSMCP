@@ -1,10 +1,12 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.FindSymbols;
+using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using RoslynMcpServer.Core.Models;
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.RegularExpressions;
 using MsSymbolInfo = Microsoft.CodeAnalysis.SymbolInfo;
 using SymbolInfo = RoslynMcpServer.Core.Models.SymbolInfo;
@@ -224,42 +226,45 @@ namespace RoslynMcpServer.Core.Services
             return score;
         }
 
+        #region Find References
+
+        // Qualified form compared against names such as 'Type.Member' or 'Ns.Type.Member':
+        // namespaces and containing types, without generic arguments or parameter lists.
+        private static readonly SymbolDisplayFormat QualifiedNameFormat = new(
+            globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+            typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+            genericsOptions: SymbolDisplayGenericsOptions.None,
+            memberOptions: SymbolDisplayMemberOptions.IncludeContainingType);
+
+        /// <summary>A symbol resolved from the requested name, with the projects that declare it.</summary>
+        private sealed record ReferenceTarget(ISymbol Symbol, IReadOnlySet<ProjectId> DeclaringProjects);
+
+        /// <summary>One reference or declaration location, kept with what the filters need.</summary>
+        private sealed record ReferenceHit(ReferenceResult Result, Document Document, TextSpan Span, ReferenceTarget Target);
+
         public async Task<IEnumerable<ReferenceResult>> FindReferencesAsync(
             string symbolName, string solutionPath, bool includeDefinition)
         {
+            var search = await SearchReferencesAsync(symbolName, solutionPath, includeDefinition);
+            return search.References;
+        }
+
+        /// <summary>
+        /// Finds references like <see cref="FindReferencesAsync"/> and also reports how many declared
+        /// symbols matched the name, so callers can tell "no such symbol" from "no references".
+        /// </summary>
+        public async Task<ReferenceSearchResult> SearchReferencesAsync(
+            string symbolName, string solutionPath, bool includeDefinition)
+        {
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
-            var targetSymbols = await FindSymbolsByNameAsync(solution, symbolName);
+            var targets = await ResolveReferenceTargetsAsync(solution, symbolName);
+            var hits = await CollectReferenceHitsAsync(solution, solutionPath, targets, includeDefinition);
 
-            var allReferences = new List<ReferenceResult>();
-
-            foreach (var symbol in targetSymbols)
+            return new ReferenceSearchResult
             {
-                var references = await SymbolFinder.FindReferencesAsync(symbol, solution);
-
-                foreach (var referencedSymbol in references)
-                {
-                    foreach (var location in referencedSymbol.Locations)
-                    {
-                        // Check if this location is a definition by comparing with the symbol's definition locations
-                        var isDefinition = referencedSymbol.Definition.Locations.Any(defLoc =>
-                            defLoc.SourceTree == location.Location.SourceTree &&
-                            defLoc.SourceSpan == location.Location.SourceSpan);
-
-                        if (!includeDefinition && isDefinition)
-                            continue;
-
-                        var reference = await CreateReferenceResultAsync(location, symbol, isDefinition);
-                        if (reference != null)
-                            allReferences.Add(reference);
-                    }
-                }
-            }
-
-            return allReferences
-                .GroupBy(r => $"{r.DocumentPath}:{r.LineNumber}")
-                .Select(g => g.First()) // Remove duplicates
-                .OrderBy(r => r.DocumentPath)
-                .ThenBy(r => r.LineNumber);
+                MatchedSymbolCount = targets.Count,
+                References = DeduplicateByLine(hits.Select(h => h.Result)).ToList()
+            };
         }
 
         public async Task<IEnumerable<ReferenceResult>> FindReferencesFilteredAsync(
@@ -272,66 +277,54 @@ namespace RoslynMcpServer.Core.Services
             bool writesOnly = false,
             string? projectFilter = null)
         {
-            // Get all references first
-            var allReferences = await FindReferencesAsync(symbolName, solutionPath, includeDefinition);
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
-            var targetSymbols = await FindSymbolsByNameAsync(solution, symbolName);
-            var targetSymbol = targetSymbols.FirstOrDefault();
+            var targets = await ResolveReferenceTargetsAsync(solution, symbolName);
+            IEnumerable<ReferenceHit> hits = await CollectReferenceHitsAsync(solution, solutionPath, targets, includeDefinition);
 
-            // Apply filters
-            var filteredReferences = allReferences.AsEnumerable();
-
-            // Filter: Exclude test projects
+            // Filters run per location, before lines are deduplicated, so a line that both reads
+            // and writes the symbol still survives writesOnly.
             if (excludeTests)
             {
-                filteredReferences = filteredReferences.Where(r =>
-                    !IsTestProject(r.ProjectName));
+                hits = hits.Where(h => !IsTestProject(h.Result.ProjectName));
             }
 
-            // Filter: Cross-project only
-            if (crossProjectOnly && targetSymbol != null)
-            {
-                var definitionProjectName = targetSymbol.ContainingAssembly?.Name ?? "";
-                filteredReferences = filteredReferences.Where(r =>
-                    !r.ProjectName.Equals(definitionProjectName, StringComparison.OrdinalIgnoreCase) &&
-                    !r.IsDefinition);
-            }
-
-            // Filter: Public API only
-            if (publicOnly && targetSymbol != null)
-            {
-                // Only show references where the symbol being accessed is public
-                var isPublicSymbol = targetSymbol.DeclaredAccessibility == Accessibility.Public;
-                if (!isPublicSymbol)
-                {
-                    // If the symbol itself is not public, return empty
-                    return Enumerable.Empty<ReferenceResult>();
-                }
-            }
-
-            // Filter: Project name pattern
             if (!string.IsNullOrWhiteSpace(projectFilter))
             {
                 var regex = CreateWildcardRegex(projectFilter, ignoreCase: true);
-                filteredReferences = filteredReferences.Where(r =>
-                    regex.IsMatch(r.ProjectName));
+                hits = hits.Where(h => regex.IsMatch(h.Result.ProjectName));
             }
 
-            // Filter: Writes only (requires syntax analysis)
+            // Declaration sites always sit in the declaring project, so they are dropped too.
+            if (crossProjectOnly)
+            {
+                hits = hits.Where(h => !h.Result.IsDefinition &&
+                    !h.Target.DeclaringProjects.Contains(h.Document.Project.Id));
+            }
+
+            // Declarations are not writes; only reference locations are classified.
             if (writesOnly)
             {
-                var writeReferences = new List<ReferenceResult>();
-                foreach (var reference in filteredReferences)
+                var writes = new List<ReferenceHit>();
+                foreach (var hit in hits.Where(h => !h.Result.IsDefinition))
                 {
-                    if (await IsWriteOperationAsync(reference, solution))
-                    {
-                        writeReferences.Add(reference);
-                    }
+                    if (await IsWriteAsync(hit))
+                        writes.Add(hit);
                 }
-                filteredReferences = writeReferences;
+                hits = writes;
             }
 
-            return filteredReferences;
+            if (publicOnly)
+            {
+                var publicHits = new List<ReferenceHit>();
+                foreach (var hit in hits)
+                {
+                    if (await IsInPublicApiContextAsync(hit))
+                        publicHits.Add(hit);
+                }
+                hits = publicHits;
+            }
+
+            return DeduplicateByLine(hits.Select(h => h.Result)).ToList();
         }
 
         /// <summary>
@@ -363,17 +356,10 @@ namespace RoslynMcpServer.Core.Services
                 }
             });
 
+            // Task.WhenAll keeps input order, so a line found in several solutions (shared files)
+            // is attributed to the first listed solution that contains it.
             var solutionResults = await Task.WhenAll(searchTasks);
-
-            // Merge and deduplicate results
-            var allReferences = solutionResults
-                .SelectMany(r => r)
-                .GroupBy(r => $"{r.DocumentPath}:{r.LineNumber}:{r.ColumnNumber}")
-                .Select(g => g.First()) // Deduplicate by location
-                .OrderBy(r => r.DocumentPath)
-                .ThenBy(r => r.LineNumber)
-                .ThenBy(r => r.ColumnNumber)
-                .ToList();
+            var allReferences = DeduplicateByLine(solutionResults.SelectMany(r => r)).ToList();
 
             _logger.LogInformation("Found {TotalCount} unique references across all solutions",
                 allReferences.Count);
@@ -389,53 +375,176 @@ namespace RoslynMcpServer.Core.Services
                 projectName.Contains(pattern, StringComparison.OrdinalIgnoreCase));
         }
 
-        private async Task<bool> IsWriteOperationAsync(ReferenceResult reference, Solution solution)
+        /// <summary>
+        /// Resolves a requested name to the symbols declared in the solution's source. Accepts a simple
+        /// name ('Save') or a name qualified by containing types and/or namespaces ('UserService.Save',
+        /// 'App.Services.UserService.Save'); generic arguments and parameter lists are ignored.
+        /// Symbols from referenced assemblies are never matched. Exact-case matches win; when there
+        /// are none, case is ignored.
+        /// </summary>
+        private async Task<List<ReferenceTarget>> ResolveReferenceTargetsAsync(Solution solution, string symbolName)
+        {
+            var requested = NormalizeRequestedName(symbolName);
+            if (requested.Length == 0)
+                return new List<ReferenceTarget>();
+
+            var lastDot = requested.LastIndexOf('.');
+            var isQualified = lastDot >= 0;
+            var simpleName = isQualified ? requested[(lastDot + 1)..] : requested;
+
+            var candidates = new List<(ISymbol Symbol, Project Project)>();
+            foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
+            {
+                var compilation = await project.GetCompilationAsync();
+                if (compilation == null) continue;
+
+                // compilation.Assembly is this project's own source; referenced assemblies, including
+                // other projects of the solution (searched as their own project), are not walked.
+                candidates.AddRange(GetSourceSymbolsRecursive(compilation.Assembly.GlobalNamespace)
+                    .Where(s => s.Name.Equals(simpleName, StringComparison.OrdinalIgnoreCase) &&
+                                (!isQualified || QualifiedNameMatches(s, requested, StringComparison.OrdinalIgnoreCase)))
+                    .Select(s => (s, project)));
+            }
+
+            var exactCase = candidates
+                .Where(c => isQualified
+                    ? QualifiedNameMatches(c.Symbol, requested, StringComparison.Ordinal)
+                    : c.Symbol.Name.Equals(simpleName, StringComparison.Ordinal))
+                .ToList();
+            var matches = exactCase.Count > 0 ? exactCase : candidates;
+
+            return matches
+                .Select(c => new ReferenceTarget(c.Symbol, GetDeclaringProjects(solution, c.Symbol, c.Project)))
+                .ToList();
+        }
+
+        /// <summary>
+        /// Normalizes a requested symbol name: drops 'global::', a parameter list, generic arguments
+        /// and arity suffixes, and whitespace, and turns nested-type '+' separators into '.'.
+        /// </summary>
+        internal static string NormalizeRequestedName(string symbolName)
+        {
+            var name = symbolName.Trim();
+            if (name.StartsWith("global::", StringComparison.Ordinal))
+                name = name["global::".Length..];
+
+            var parameterListStart = name.IndexOf('(');
+            if (parameterListStart >= 0)
+                name = name[..parameterListStart];
+
+            var builder = new StringBuilder(name.Length);
+            var genericDepth = 0;
+            for (var i = 0; i < name.Length; i++)
+            {
+                var c = name[i];
+                if (c == '<') { genericDepth++; continue; }
+                if (c == '>') { genericDepth = Math.Max(0, genericDepth - 1); continue; }
+                if (genericDepth > 0 || char.IsWhiteSpace(c)) continue;
+                if (c == '`')
+                {
+                    while (i + 1 < name.Length && char.IsDigit(name[i + 1])) i++;
+                    continue;
+                }
+                builder.Append(c == '+' ? '.' : c);
+            }
+
+            return builder.ToString().Trim('.');
+        }
+
+        private static bool QualifiedNameMatches(ISymbol symbol, string requested, StringComparison comparison)
+        {
+            var qualifiedName = symbol.ToDisplayString(QualifiedNameFormat);
+            return qualifiedName.Equals(requested, comparison) ||
+                   qualifiedName.EndsWith("." + requested, comparison);
+        }
+
+        /// <summary>Namespaces, types at any nesting depth, and their members.</summary>
+        private static IEnumerable<ISymbol> GetSourceSymbolsRecursive(INamespaceOrTypeSymbol container)
+        {
+            foreach (var member in container.GetMembers())
+            {
+                yield return member;
+
+                if (member is INamespaceOrTypeSymbol nested)
+                {
+                    foreach (var inner in GetSourceSymbolsRecursive(nested))
+                        yield return inner;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The project the symbol was found in plus every project that compiles one of its declaring
+        /// files (linked files, other target frameworks of a multi-targeted project).
+        /// </summary>
+        private static IReadOnlySet<ProjectId> GetDeclaringProjects(Solution solution, ISymbol symbol, Project foundIn)
+        {
+            var projects = new HashSet<ProjectId> { foundIn.Id };
+            foreach (var location in symbol.Locations.Where(l => l.IsInSource))
+            {
+                var filePath = location.SourceTree?.FilePath;
+                if (string.IsNullOrEmpty(filePath)) continue;
+
+                foreach (var documentId in solution.GetDocumentIdsWithFilePath(filePath))
+                    projects.Add(documentId.ProjectId);
+            }
+            return projects;
+        }
+
+        private static async Task<List<ReferenceHit>> CollectReferenceHitsAsync(
+            Solution solution, string solutionPath, IReadOnlyList<ReferenceTarget> targets, bool includeDefinition)
+        {
+            var hits = new List<ReferenceHit>();
+
+            foreach (var target in targets)
+            {
+                if (includeDefinition)
+                {
+                    foreach (var location in target.Symbol.Locations.Where(l => l.IsInSource))
+                    {
+                        var document = solution.GetDocument(location.SourceTree);
+                        if (document != null)
+                            hits.Add(await CreateReferenceHitAsync(document, location, target, solutionPath, isDefinition: true));
+                    }
+                }
+
+                var referencedSymbols = await SymbolFinder.FindReferencesAsync(target.Symbol, solution);
+                foreach (var referencedSymbol in referencedSymbols)
+                {
+                    foreach (var location in referencedSymbol.Locations)
+                    {
+                        hits.Add(await CreateReferenceHitAsync(
+                            location.Document, location.Location, target, solutionPath, isDefinition: false));
+                    }
+                }
+            }
+
+            return hits;
+        }
+
+        /// <summary>
+        /// One entry per file line, sorted by file and line. A declaration wins over a reference on
+        /// the same line; otherwise the leftmost reference (then the first solution) is kept.
+        /// </summary>
+        private static IEnumerable<ReferenceResult> DeduplicateByLine(IEnumerable<ReferenceResult> references)
+        {
+            return references
+                .GroupBy(r => (r.DocumentPath, r.LineNumber))
+                .Select(g => g.OrderByDescending(r => r.IsDefinition).ThenBy(r => r.ColumnNumber).First())
+                .OrderBy(r => r.DocumentPath)
+                .ThenBy(r => r.LineNumber);
+        }
+
+        private async Task<bool> IsWriteAsync(ReferenceHit hit)
         {
             try
             {
-                // Find the document
-                var document = solution.Projects
-                    .SelectMany(p => p.Documents)
-                    .FirstOrDefault(d => d.FilePath == reference.DocumentPath);
-
-                if (document == null)
+                var root = await hit.Document.GetSyntaxRootAsync();
+                if (root == null)
                     return false;
 
-                var syntaxTree = await document.GetSyntaxTreeAsync();
-                if (syntaxTree == null)
-                    return false;
-
-                var semanticModel = await document.GetSemanticModelAsync();
-                if (semanticModel == null)
-                    return false;
-
-                // Get the syntax node at the reference location
-                var position = syntaxTree.GetText().Lines[reference.LineNumber - 1].Start + reference.ColumnNumber - 1;
-                var node = syntaxTree.GetRoot().FindNode(new Microsoft.CodeAnalysis.Text.TextSpan(position, 1));
-
-                // Check if this is an assignment operation
-                // Simple heuristic: check if the node or its parent is an assignment expression
-                var currentNode = node;
-                while (currentNode != null)
-                {
-                    var kind = currentNode.Kind().ToString();
-                    if (kind.Contains("Assignment") ||
-                        kind.Contains("PostIncrement") ||
-                        kind.Contains("PostDecrement") ||
-                        kind.Contains("PreIncrement") ||
-                        kind.Contains("PreDecrement"))
-                    {
-                        return true;
-                    }
-
-                    currentNode = currentNode.Parent;
-
-                    // Don't traverse too far up
-                    if (currentNode?.Kind().ToString().Contains("Statement") == true)
-                        break;
-                }
-
-                return false;
+                var node = root.FindNode(hit.Span, getInnermostNodeForTie: true);
+                return ReferenceSyntaxClassifier.IsWrittenTo(node);
             }
             catch (Exception ex)
             {
@@ -445,10 +554,79 @@ namespace RoslynMcpServer.Core.Services
             }
         }
 
+        private async Task<bool> IsInPublicApiContextAsync(ReferenceHit hit)
+        {
+            try
+            {
+                var root = await hit.Document.GetSyntaxRootAsync();
+                var semanticModel = await hit.Document.GetSemanticModelAsync();
+                if (root == null || semanticModel == null)
+                    return false;
+
+                var node = root.FindNode(hit.Span, getInnermostNodeForTie: true);
+                return ReferenceSyntaxClassifier.IsInPublicApiContext(node, semanticModel);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not determine the accessibility context of a reference, excluding it");
+                return false;
+            }
+        }
+
+        private static async Task<ReferenceHit> CreateReferenceHitAsync(
+            Document document, Location location, ReferenceTarget target, string solutionPath, bool isDefinition)
+        {
+            var sourceText = await document.GetTextAsync();
+            var lineSpan = location.GetLineSpan();
+
+            // Get surrounding context
+            var lineNumber = lineSpan.StartLinePosition.Line;
+            var line = sourceText.Lines[lineNumber];
+            var contextStart = Math.Max(0, lineNumber - 2);
+            var contextEnd = Math.Min(sourceText.Lines.Count - 1, lineNumber + 2);
+
+            var context = sourceText.Lines
+                .Skip(contextStart)
+                .Take(contextEnd - contextStart + 1)
+                .Select((l, i) => $"{contextStart + i + 1,4}: {l}")
+                .ToList();
+
+            var result = new ReferenceResult
+            {
+                SymbolName = target.Symbol.Name,
+                DocumentPath = document.FilePath ?? "",
+                ProjectName = document.Project.Name,
+                SolutionPath = solutionPath,
+                LineNumber = lineNumber + 1,
+                ColumnNumber = lineSpan.StartLinePosition.Character + 1,
+                LineText = line.ToString(),
+                Context = context,
+                IsDefinition = isDefinition,
+                ReferenceKind = isDefinition ? "Definition" : DetermineReferenceKind(target.Symbol)
+            };
+
+            return new ReferenceHit(result, document, location.SourceSpan, target);
+        }
+
+        private static string DetermineReferenceKind(ISymbol symbol)
+        {
+            // Kind of the referenced symbol, not of the individual usage
+            return symbol.Kind switch
+            {
+                SymbolKind.Method => "Method Call",
+                SymbolKind.Property => "Property Access",
+                SymbolKind.Field => "Field Access",
+                SymbolKind.NamedType => "Type Reference",
+                _ => "Reference"
+            };
+        }
+
+        #endregion
+
         private async Task<IEnumerable<ISymbol>> FindSymbolsByNameAsync(Solution solution, string symbolName)
         {
             var symbols = new List<ISymbol>();
-            
+
             foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
             {
                 var compilation = await project.GetCompilationAsync();
@@ -459,57 +637,8 @@ namespace RoslynMcpServer.Core.Services
                     symbols.AddRange(projectSymbols);
                 }
             }
-            
+
             return symbols;
-        }
-
-        private async Task<ReferenceResult?> CreateReferenceResultAsync(
-            ReferenceLocation location, ISymbol symbol, bool isDefinition)
-        {
-            if (location.Document == null) return null;
-            
-            var document = location.Document;
-            var sourceText = await document.GetTextAsync();
-            var lineSpan = location.Location.GetLineSpan();
-            
-            // Get surrounding context
-            var lineNumber = lineSpan.StartLinePosition.Line;
-            var line = sourceText.Lines[lineNumber];
-            var contextStart = Math.Max(0, lineNumber - 2);
-            var contextEnd = Math.Min(sourceText.Lines.Count - 1, lineNumber + 2);
-            
-            var context = sourceText.Lines
-                .Skip(contextStart)
-                .Take(contextEnd - contextStart + 1)
-                .Select((l, i) => $"{contextStart + i + 1,4}: {l}")
-                .ToList();
-            
-            return new ReferenceResult
-            {
-                SymbolName = symbol.Name,
-                DocumentPath = document.FilePath ?? "",
-                ProjectName = document.Project.Name,
-                LineNumber = lineNumber + 1,
-                ColumnNumber = lineSpan.StartLinePosition.Character + 1,
-                LineText = line.ToString(),
-                Context = context,
-                IsDefinition = isDefinition,
-                ReferenceKind = DetermineReferenceKind(location.Location, symbol)
-            };
-        }
-
-        private string DetermineReferenceKind(Location location, ISymbol symbol)
-        {
-            // This is a simplified implementation
-            // A more sophisticated version would analyze the syntax context
-            return symbol.Kind switch
-            {
-                SymbolKind.Method => "Method Call",
-                SymbolKind.Property => "Property Access",
-                SymbolKind.Field => "Field Access",
-                SymbolKind.NamedType => "Type Reference",
-                _ => "Reference"
-            };
         }
 
         public async Task<SymbolInfo?> GetSymbolInfoAsync(string symbolName, string solutionPath)

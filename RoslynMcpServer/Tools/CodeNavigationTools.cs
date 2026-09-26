@@ -69,13 +69,20 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find all references to a specific symbol with configurable detail level")]
+        [McpServerTool, Description("""
+            Find source references to the symbols declared in the solution that match symbolName, plus their
+            declaration sites when includeDefinition is true. A simple name combines every match (overloads and
+            same-named members of different types); qualify it with the containing type or namespace to narrow it.
+            Members of referenced assemblies such as the .NET framework are never matched. References are grouped by
+            file, one entry per line, with declarations marked; a name that matches no declared symbol returns a
+            'not found' message.
+            """)]
         public static async Task<string> FindReferences(
-            [Description("Exact symbol name to find references for")] string symbolName,
+            [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
             string detailLevel = "locations",
-            [Description("Include symbol definition in results")] bool includeDefinition = true,
+            [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -92,7 +99,13 @@ namespace RoslynMcpServer.Tools
                     return "Error: Symbol search service not available.";
                 }
 
-                var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
+                var search = await searchService.SearchReferencesAsync(symbolName, solutionPath, includeDefinition);
+                if (search.MatchedSymbolCount == 0)
+                {
+                    return $"Symbol '{symbolName}' not found: no symbol with that name is declared in the solution.";
+                }
+
+                var results = search.References;
 
                 // Format based on detail level
                 return detailLevel.ToLower() switch
@@ -111,13 +124,19 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find all references to a symbol across multiple solutions")]
+        [McpServerTool, Description("""
+            Run the FindReferences search in each listed solution and merge the results into one entry per file line,
+            so a line in a file shared by several solutions appears once. symbolName is resolved in each solution the
+            same way as in FindReferences. Output lists the solutions searched, then references grouped by file
+            without saying which solution each came from, with declarations marked. A solution that fails to load
+            contributes nothing, without an error.
+            """)]
         public static async Task<string> FindReferencesAcrossSolutions(
-            [Description("Exact symbol name to find references for")] string symbolName,
+            [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
             [Description("Comma-separated list of solution file paths (.sln)")] string solutionPaths,
             [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
             string detailLevel = "locations",
-            [Description("Include symbol definition in results")] bool includeDefinition = true,
+            [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -1004,18 +1023,24 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find references with advanced filtering options to reduce noise and focus on specific usage patterns")]
+        [McpServerTool, Description("""
+            Find references the way FindReferences does, then narrow them by project name pattern, test-project
+            exclusion, cross-project usage, write access, or public API context. Filters are applied to each reference
+            before lines are merged, so a line that both reads and writes the symbol counts as a write. Declaration
+            sites (includeDefinition) are subject to projectFilter, excludeTests, and publicOnly, and are dropped by
+            crossProjectOnly and writesOnly. Output lists the active filters, then references grouped by file.
+            """)]
         public static async Task<string> FindReferencesFiltered(
-            [Description("Exact symbol name to find references for")] string symbolName,
+            [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
             string detailLevel = "locations",
-            [Description("Include symbol definition in results")] bool includeDefinition = true,
-            [Description("Only show references in public API contexts (excludes private/internal usage)")] bool publicOnly = false,
-            [Description("Exclude test projects (projects with 'Test', 'Tests', 'Testing', 'Spec' in name)")] bool excludeTests = false,
-            [Description("Only show cross-project references (exclude same-project usage)")] bool crossProjectOnly = false,
-            [Description("Only show write operations (assignments, increments, etc.)")] bool writesOnly = false,
-            [Description("Filter by project name pattern (supports wildcards: * and ?)")] string? projectFilter = null,
+            [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
+            [Description("Keep only locations inside a type or member visible outside its assembly: it and every containing type are public, protected, or protected internal, and an accessor's own modifier counts (e.g. a private setter). Code in private or internal members, top-level statements, and using directives is dropped.")] bool publicOnly = false,
+            [Description("Drop references in projects whose name contains 'test' or 'spec' (case-insensitive substring).")] bool excludeTests = false,
+            [Description("Keep only references located in a project other than the one declaring the referenced symbol (checked per symbol when several match); declaration sites are dropped.")] bool crossProjectOnly = false,
+            [Description("Keep only references that write the symbol: assignment or compound-assignment target (including object initializers and deconstruction), ++/-- operand, or out/ref argument. Reads, including right-hand-side reads inside an assignment, and declaration sites are dropped.")] bool writesOnly = false,
+            [Description("Project name wildcard pattern (* and ?), matched case-insensitively against the whole name.")] string? projectFilter = null,
             IServiceProvider? serviceProvider = null)
         {
             try

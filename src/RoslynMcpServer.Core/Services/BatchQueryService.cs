@@ -206,7 +206,7 @@ namespace RoslynMcpServer.Core.Services
                 builder.AppendLine($"📄 {fileName} ({fileGroup.Count()} references):");
                 foreach (var reference in fileGroup.Take(10))
                 {
-                    builder.AppendLine($"  Line {reference.LineNumber}: {reference.LineText}");
+                    builder.AppendLine($"  Line {reference.LineNumber}: {reference.LineText}{(reference.IsDefinition ? " [definition]" : "")}");
                 }
                 if (fileGroup.Count() > 10)
                     builder.AppendLine($"  ... and {fileGroup.Count() - 10} more");

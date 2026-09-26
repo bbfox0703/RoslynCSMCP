@@ -77,13 +77,21 @@ public class NavigationTools
         }
     }
 
-    [McpServerTool, Description("Find all references to a specific symbol with configurable detail level")]
+    [McpServerTool, Description("""
+        Find source references to the symbols declared in the solution that match symbolName, plus their
+        declaration sites when includeDefinition is true. A simple name combines every match (overloads and
+        same-named members of different types); qualify it with the containing type or namespace to narrow it.
+        Members of referenced assemblies such as the .NET framework are never matched. References are grouped by
+        file, one entry per line, and returned one page at a time with a nextCursor. A name that matches no
+        declared symbol returns a symbol-not-found error; a declared symbol with no references returns a
+        'No references found' message.
+        """)]
     public static async Task<string> FindReferences(
-        [Description("Exact symbol name to find references for")] string symbolName,
+        [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
         string detailLevel = "locations",
-        [Description("Include symbol definition in results")] bool includeDefinition = true,
+        [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
         [Description("Number of results per page (default: 20, max: 100)")] int pageSize = 20,
         [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
         SymbolSearchService searchService = null!,
@@ -104,10 +112,15 @@ public class NavigationTools
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
+            var search = await searchService.SearchReferencesAsync(symbolName, solutionPath, includeDefinition);
 
-            if (!results.Any())
+            if (search.MatchedSymbolCount == 0)
                 return McpError.SymbolNotFound(symbolName, solutionPath).ToToolResponse();
+
+            if (search.References.Count == 0)
+                return $"No references found for '{symbolName}'; it is declared in the solution but never referenced.";
+
+            var results = search.References;
 
             var queryHash = paginationRequest.ComputeQueryHash(symbolName, solutionPath, detailLevel, includeDefinition.ToString());
             var paginatedResults = PaginatedResult<ReferenceResult>.FromCursor(
@@ -139,18 +152,25 @@ public class NavigationTools
         }
     }
 
-    [McpServerTool, Description("Find references with advanced filtering options to reduce noise and focus on specific usage patterns")]
+    [McpServerTool, Description("""
+        Find references the way FindReferences does, then narrow them by project name pattern, test-project
+        exclusion, cross-project usage, write access, or public API context. Filters are applied to each
+        reference before lines are merged, so a line that both reads and writes the symbol counts as a write.
+        Declaration sites (includeDefinition) are subject to projectFilter, excludeTests, and publicOnly, and
+        are dropped by crossProjectOnly and writesOnly. Results are grouped by file and returned one page at a
+        time with a nextCursor; an empty result returns 'No references found.'
+        """)]
     public static async Task<string> FindReferencesFiltered(
-        [Description("Exact symbol name to find references for")] string symbolName,
+        [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
         string detailLevel = "locations",
-        [Description("Include symbol definition in results")] bool includeDefinition = true,
-        [Description("Filter by project name pattern (supports wildcards: * and ?)")] string? projectFilter = null,
-        [Description("Exclude test projects (projects with 'Test', 'Tests', 'Testing', 'Spec' in name)")] bool excludeTests = false,
-        [Description("Only show cross-project references (exclude same-project usage)")] bool crossProjectOnly = false,
-        [Description("Only show write operations (assignments, increments, etc.)")] bool writesOnly = false,
-        [Description("Only show references in public API contexts (excludes private/internal usage)")] bool publicOnly = false,
+        [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
+        [Description("Project name wildcard pattern (* and ?), matched case-insensitively against the whole name.")] string? projectFilter = null,
+        [Description("Drop references in projects whose name contains 'test' or 'spec' (case-insensitive substring).")] bool excludeTests = false,
+        [Description("Keep only references located in a project other than the one declaring the referenced symbol (checked per symbol when several match); declaration sites are dropped.")] bool crossProjectOnly = false,
+        [Description("Keep only references that write the symbol: assignment or compound-assignment target (including object initializers and deconstruction), ++/-- operand, or out/ref argument. Reads, including right-hand-side reads inside an assignment, and declaration sites are dropped.")] bool writesOnly = false,
+        [Description("Keep only locations inside a type or member visible outside its assembly: it and every containing type are public, protected, or protected internal, and an accessor's own modifier counts (e.g. a private setter). Code in private or internal members, top-level statements, and using directives is dropped.")] bool publicOnly = false,
         [Description("Number of results per page (default: 20, max: 100)")] int pageSize = 20,
         [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
         SymbolSearchService searchService = null!,
@@ -171,42 +191,15 @@ public class NavigationTools
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
-
-            // Apply filters
-            var filteredResults = results.AsEnumerable();
-
-            if (!string.IsNullOrEmpty(projectFilter))
-            {
-                var filterPattern = "^" + System.Text.RegularExpressions.Regex.Escape(projectFilter)
-                    .Replace("\\*", ".*").Replace("\\?", ".") + "$";
-                var filterRegex = new System.Text.RegularExpressions.Regex(filterPattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                filteredResults = filteredResults.Where(r => filterRegex.IsMatch(r.ProjectName));
-            }
-
-            if (excludeTests)
-            {
-                var testPatterns = new[] { "test", "tests", "testing", "spec", "specs" };
-                filteredResults = filteredResults.Where(r =>
-                    !testPatterns.Any(p => r.ProjectName.Contains(p, StringComparison.OrdinalIgnoreCase)));
-            }
-
-            if (crossProjectOnly)
-            {
-                var definitionProject = results.FirstOrDefault(r => r.IsDefinition)?.ProjectName;
-                if (!string.IsNullOrEmpty(definitionProject))
-                {
-                    filteredResults = filteredResults.Where(r =>
-                        !r.ProjectName.Equals(definitionProject, StringComparison.OrdinalIgnoreCase) || r.IsDefinition);
-                }
-            }
-
-            if (writesOnly)
-            {
-                var writeKinds = new[] { "assignment", "increment", "decrement", "compound", "out", "ref" };
-                filteredResults = filteredResults.Where(r =>
-                    writeKinds.Any(k => r.ReferenceKind.Contains(k, StringComparison.OrdinalIgnoreCase)) || r.IsDefinition);
-            }
+            var filteredResults = await searchService.FindReferencesFilteredAsync(
+                symbolName,
+                solutionPath,
+                includeDefinition,
+                publicOnly: publicOnly,
+                excludeTests: excludeTests,
+                crossProjectOnly: crossProjectOnly,
+                writesOnly: writesOnly,
+                projectFilter: projectFilter);
 
             var queryHash = paginationRequest.ComputeQueryHash(
                 symbolName, solutionPath, detailLevel, includeDefinition.ToString(),
@@ -505,8 +498,8 @@ public class NavigationTools
             output.AppendLine($"**{Path.GetFileName(fileGroup.Key)}** ({fileGroup.Count()} references):");
             foreach (var reference in fileGroup.OrderBy(r => r.LineNumber))
             {
-                var icon = reference.IsDefinition ? "[DEFINITION]" : "";
-                output.AppendLine($"  Line {reference.LineNumber}: {reference.ReferenceKind} {icon}");
+                var kind = reference.IsDefinition ? "[DEFINITION]" : reference.ReferenceKind;
+                output.AppendLine($"  Line {reference.LineNumber}: {kind}");
                 if (reference.Context != null && reference.Context.Any())
                 {
                     foreach (var line in reference.Context)
@@ -619,8 +612,8 @@ public class NavigationTools
             output.AppendLine($"**{Path.GetFileName(fileGroup.Key)}** ({fileGroup.Count()} references):");
             foreach (var reference in fileGroup.OrderBy(r => r.LineNumber))
             {
-                var icon = reference.IsDefinition ? "[DEFINITION]" : "";
-                output.AppendLine($"  Line {reference.LineNumber}: {reference.ReferenceKind} {icon}");
+                var kind = reference.IsDefinition ? "[DEFINITION]" : reference.ReferenceKind;
+                output.AppendLine($"  Line {reference.LineNumber}: {kind}");
                 if (reference.Context != null && reference.Context.Any())
                 {
                     foreach (var line in reference.Context)
