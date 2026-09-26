@@ -19,7 +19,8 @@ namespace RoslynMcpServer.Core.Services
             _workspaceLock = new SemaphoreSlim(1, 1);
         }
 
-        public async Task<Solution> GetSolutionAsync(string solutionPath)
+        // Virtual so tests can supply in-memory solutions without MSBuild
+        public virtual async Task<Solution> GetSolutionAsync(string solutionPath)
         {
             await _workspaceLock.WaitAsync();
             try

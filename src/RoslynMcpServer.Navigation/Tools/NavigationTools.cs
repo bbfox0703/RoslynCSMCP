@@ -21,7 +21,7 @@ public class NavigationTools
         wildcard pattern (* and ?, matched against the whole name). Symbols from referenced assemblies such as the
         .NET framework are included, and a symbol visible to several projects is listed once per project. Results
         are ranked with exact and prefix matches first and returned one page at a time, with a nextCursor when more
-        remain. Members of nested types are not searched.
+        remain. Nested types and their members are searched at any depth.
         """)]
     public static async Task<string> SearchSymbols(
         [Description("Wildcard pattern (* and ?) matched against the whole simple name or fully qualified name, e.g. 'User*', '*Service', 'MyApp.Services.*'.")] string pattern,
@@ -381,14 +381,15 @@ public class NavigationTools
 
     [McpServerTool, Description("""
         Find source types that implement an interface (directly, through a base class, or through an inherited
-        interface) or derive from an abstract class at any depth; depending on format it returns names only, names
-        with project, file, and line, or full details including implemented interfaces. The target is the first type
-        whose simple name matches, ignoring case, and can be a framework type such as IDisposable. A concrete class,
-        an unknown name, and no matches all return the same no-implementations message, and the same type can be
-        listed more than once.
+        interface) or derive from an abstract class at any depth, including through constructed generics (IRepo<int>
+        counts for IRepo<T>); depending on format it returns names only, names with the declaring project, file, and
+        line, or full details including implemented interfaces. Each type is listed once. The target is the first
+        source type (nested types included) whose simple name matches, ignoring case; referenced types such as
+        IDisposable are used only when no source type matches. A concrete class, an unknown name, and no matches all
+        return the same no-implementations message.
         """)]
     public static async Task<string> FindImplementations(
-        [Description("Simple (unqualified) name of an interface or abstract class, matched case-insensitively; the first matching type is used.")] string typeName,
+        [Description("Simple (unqualified) name of an interface or abstract class, without generic arguments, matched case-insensitively; source types are searched before referenced assemblies and the first match is used.")] string typeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (names only), normal (balanced), detailed (comprehensive). Default: normal")]
         string format = "normal",
