@@ -13,9 +13,15 @@ namespace RoslynMcpServer.Testing.Tools;
 [McpServerToolType]
 public class TestingTools
 {
-    [McpServerTool, Description("Find test classes and methods for a given type")]
+    [McpServerTool, Description("""
+        Find test classes for a type by naming convention, searching only projects whose names contain Test or Spec.
+        A class matches when its name is <Type>Test or <Type>Tests, starts with Test<Type> or <Type>_, or contains
+        <Type> followed later by Test (case-insensitive), and it needs a method marked [Fact], [Theory], [Test],
+        [TestCase], [TestMethod], or [DataTestMethod]. Matching does not check that the tests reference the type, so
+        short names can match unrelated classes. Normal lists up to 10 methods per class; detailed lists all.
+        """)]
     public static async Task<string> FindTestsForType(
-        [Description("Type name to find tests for")] string typeName,
+        [Description("Simple type name without namespace or generic arguments, e.g. OrderService")] string typeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
@@ -28,7 +34,7 @@ public class TestingTools
             var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
             if (pathError != null) return pathError;
 
-            var results = await discoveryService.FindTestsForTypeAsync(solutionPath, typeName);
+            var results = await discoveryService.FindTestsForTypeAsync(typeName: typeName, solutionPath: solutionPath);
 
             return format.ToLowerInvariant() switch
             {
@@ -43,13 +49,19 @@ public class TestingTools
         }
     }
 
-    [McpServerTool, Description("Analyze test coverage for all types in solution - identify untested code, coverage percentages, and high-risk areas")]
+    [McpServerTool, Description("""
+        Estimate test coverage statically: no tests are run and no line or branch coverage is measured. A class or
+        interface counts as tested when a test class matches its name by convention (as in FindTestsForType), and a
+        public method, property, or event counts as tested when any code in a test project references it. Analyzes
+        top-level types in projects whose names do not contain Test or Spec and ranks untested types by
+        complexity-based risk. It reloads the solution for each type, so it is slow on large solutions.
+        """)]
     public static async Task<string> GetTestCoverage(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+        [Description("Output format: summary (coverage percentages and risk counts), normal (up to 20 Critical/High-risk types and per-project statistics), detailed (up to 50 types with no matching test class, with file, complexity, and risk). Default: normal")]
         string format = "normal",
-        [Description("Scope filter: public (public only), all (all types). Default: public")] string scope = "public",
-        [Description("Group by: project, namespace. Default: project")] string groupBy = "project",
+        [Description("Which top-level classes and interfaces to include: public, or all (any accessibility). Only public members are counted either way. Default: public")] string scope = "public",
+        [Description("Grouping for the statistics section; only project statistics are printed in this module. Default: project")] string groupBy = "project",
         TestCoverageAnalyzer coverageAnalyzer = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)

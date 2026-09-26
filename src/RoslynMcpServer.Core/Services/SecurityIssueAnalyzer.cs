@@ -96,6 +96,9 @@ namespace RoslynMcpServer.Core.Services
                 // Process projects in parallel
                 var securityIssues = new ConcurrentBag<SecurityIssue>();
 
+                int analyzedFiles = 0;
+                int failedProjects = 0;
+
                 var projectTasks = solution.Projects
                     .Where(p => p.SupportsCompilation)
                     .Select(async project =>
@@ -113,7 +116,7 @@ namespace RoslynMcpServer.Core.Services
                                 var filePath = syntaxTree.FilePath;
                                 var fileName = Path.GetFileName(filePath);
 
-                                results.AnalyzedFiles++;
+                                Interlocked.Increment(ref analyzedFiles);
 
                                 // Check each category
                                 if (categoriesToCheck.Contains("sql-injection"))
@@ -155,11 +158,14 @@ namespace RoslynMcpServer.Core.Services
                         catch (Exception ex)
                         {
                             _logger.LogWarning(ex, "Failed to analyze project: {ProjectName}", project.Name);
-                            results.FailedProjects++;
+                            Interlocked.Increment(ref failedProjects);
                         }
                     });
 
                 await Task.WhenAll(projectTasks);
+
+                results.AnalyzedFiles = analyzedFiles;
+                results.FailedProjects = failedProjects;
 
                 results.Issues = securityIssues.ToList();
                 CalculateStatistics(results);

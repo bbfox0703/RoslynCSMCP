@@ -260,7 +260,7 @@ public class Phase2AnalysisService
 
     #endregion
 
-    #region AnalyzeExceptionHandling (Framework - To be implemented)
+    #region AnalyzeExceptionHandling
 
     /// <summary>
     /// Analyze exception handling patterns and detect anti-patterns
@@ -269,15 +269,20 @@ public class Phase2AnalysisService
         string solutionPath,
         bool checkEmptyCatch = true,
         bool checkSwallowedExceptions = true,
-        bool checkMissingUsing = true)
+        bool checkMissingUsing = true,
+        bool checkGenericCatch = true)
     {
         var results = new ExceptionHandlingResults();
+        var options = new ExceptionHandlingOptions(checkEmptyCatch, checkSwallowedExceptions, checkMissingUsing, checkGenericCatch);
 
         try
         {
             // Load solution
             using var workspace = MSBuildWorkspace.Create();
             var solution = await workspace.OpenSolutionAsync(solutionPath);
+
+            // A file compiled into several projects (multi-targeting, linked files) is analyzed once.
+            var analyzedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // Analyze each project
             foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
@@ -289,87 +294,14 @@ public class Phase2AnalysisService
 
                 foreach (var tree in compilation.SyntaxTrees)
                 {
-                    var semanticModel = compilation.GetSemanticModel(tree);
-                    var root = await tree.GetRootAsync();
+                    if (!string.IsNullOrEmpty(tree.FilePath) && !analyzedFiles.Add(tree.FilePath))
+                        continue;
 
-                    // 1. Find all try-catch-finally blocks
-                    var tryStatements = root.DescendantNodes().OfType<TryStatementSyntax>();
-                    results.TotalTryBlocks += tryStatements.Count();
-
-                    foreach (var tryStatement in tryStatements)
-                    {
-                        var filePath = tree.FilePath ?? "Unknown";
-                        var lineNumber = tryStatement.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-
-                        // Analyze each catch clause
-                        foreach (var catchClause in tryStatement.Catches)
-                        {
-                            results.TotalCatchBlocks++;
-
-                            // 2. Check for empty catch blocks
-                            if (checkEmptyCatch && IsEmptyCatchBlock(catchClause))
-                            {
-                                results.Issues.Add(new ExceptionHandlingIssue
-                                {
-                                    IssueType = "EmptyCatch",
-                                    Severity = "High",
-                                    Description = "Empty catch block found. This silently swallows exceptions and makes debugging difficult.",
-                                    Recommendation = "Add logging, rethrowing, or appropriate error handling. Consider using specific exception types.",
-                                    FilePath = filePath,
-                                    LineNumber = lineNumber,
-                                    CodeSnippet = catchClause.ToString()
-                                });
-                                results.EmptyCatchCount++;
-                            }
-
-                            // 3. Check for swallowed exceptions (no logging, no rethrowing)
-                            if (checkSwallowedExceptions && IsSwallowedException(catchClause, semanticModel))
-                            {
-                                results.Issues.Add(new ExceptionHandlingIssue
-                                {
-                                    IssueType = "SwallowedException",
-                                    Severity = "Medium",
-                                    Description = "Exception is caught but not logged or rethrown. This hides errors and makes debugging difficult.",
-                                    Recommendation = "Add logging (e.g., _logger.LogError) or rethrow the exception if it cannot be handled.",
-                                    FilePath = filePath,
-                                    LineNumber = lineNumber,
-                                    CodeSnippet = catchClause.ToString()
-                                });
-                                results.SwallowedExceptionCount++;
-                            }
-
-                            // 4. Check for generic Exception catches
-                            if (IsGenericExceptionCatch(catchClause, semanticModel))
-                            {
-                                results.Issues.Add(new ExceptionHandlingIssue
-                                {
-                                    IssueType = "GenericException",
-                                    Severity = "Low",
-                                    Description = "Catching generic 'Exception' type. This can catch unexpected exceptions and hide programming errors.",
-                                    Recommendation = "Catch specific exception types (e.g., IOException, ArgumentException) when possible.",
-                                    FilePath = filePath,
-                                    LineNumber = lineNumber,
-                                    CodeSnippet = catchClause.Declaration?.Type.ToString() ?? "catch"
-                                });
-                                results.GenericExceptionCount++;
-                            }
-                        }
-                    }
-
-                    // 5. Check for missing using statements with IDisposable
-                    if (checkMissingUsing)
-                    {
-                        var missingUsingIssues = FindMissingUsingStatements(root, semanticModel, tree.FilePath ?? "Unknown");
-                        results.Issues.AddRange(missingUsingIssues);
-                        results.MissingUsingCount += missingUsingIssues.Count;
-                    }
+                    AnalyzeExceptionHandlingInTree(tree, compilation.GetSemanticModel(tree), project.Name, options, results);
                 }
             }
 
-            // Calculate severity counts
-            results.HighCount = results.Issues.Count(i => i.Severity == "High");
-            results.MediumCount = results.Issues.Count(i => i.Severity == "Medium");
-            results.LowCount = results.Issues.Count(i => i.Severity == "Low");
+            FinalizeExceptionHandlingCounts(results);
 
             _logger.LogInformation($"AnalyzeExceptionHandling completed: {results.TotalIssues} issues found in {results.AnalyzedProjects} projects");
         }
@@ -386,20 +318,157 @@ public class Phase2AnalysisService
         return results;
     }
 
-    private bool IsEmptyCatchBlock(CatchClauseSyntax catchClause)
+    internal readonly record struct ExceptionHandlingOptions(
+        bool CheckEmptyCatch,
+        bool CheckSwallowedExceptions,
+        bool CheckMissingUsing,
+        bool CheckGenericCatch);
+
+    /// <summary>
+    /// Runs the exception-handling checks over one syntax tree and appends issues and raw counts to results.
+    /// Call <see cref="FinalizeExceptionHandlingCounts"/> once all trees are analyzed.
+    /// </summary>
+    internal static void AnalyzeExceptionHandlingInTree(
+        SyntaxTree tree,
+        SemanticModel semanticModel,
+        string projectName,
+        ExceptionHandlingOptions options,
+        ExceptionHandlingResults results)
+    {
+        var root = tree.GetRoot();
+        var filePath = string.IsNullOrEmpty(tree.FilePath) ? "Unknown" : tree.FilePath;
+        var fileName = Path.GetFileName(filePath);
+
+        ExceptionHandlingIssue CreateIssue(string issueType, string severity, SyntaxNode node, string description, string recommendation, string codeSnippet, string exceptionType = "") =>
+            new()
+            {
+                IssueType = issueType,
+                Severity = severity,
+                Description = description,
+                Recommendation = recommendation,
+                MethodName = DisposableUsageAnalysis.GetEnclosingMemberName(node),
+                FilePath = filePath,
+                FileName = fileName,
+                LineNumber = node.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+                CodeSnippet = codeSnippet,
+                ExceptionType = exceptionType,
+                ProjectName = projectName
+            };
+
+        // 1. Find all try-catch-finally blocks
+        var tryStatements = root.DescendantNodes().OfType<TryStatementSyntax>().ToList();
+        results.TotalTryBlocks += tryStatements.Count;
+        results.AnalyzedTryBlocks += tryStatements.Count;
+
+        foreach (var tryStatement in tryStatements)
+        {
+            // Analyze each catch clause
+            foreach (var catchClause in tryStatement.Catches)
+            {
+                results.TotalCatchBlocks++;
+                var exceptionType = GetCaughtExceptionType(catchClause, semanticModel);
+
+                // 2. Check for empty catch blocks
+                if (options.CheckEmptyCatch && IsEmptyCatchBlock(catchClause))
+                {
+                    results.Issues.Add(CreateIssue(
+                        "EmptyCatch",
+                        "High",
+                        catchClause,
+                        "Empty catch block found. This silently swallows exceptions and makes debugging difficult.",
+                        "Add logging, rethrowing, or appropriate error handling. Consider using specific exception types.",
+                        catchClause.ToString(),
+                        exceptionType));
+                    results.EmptyCatchCount++;
+                }
+
+                // 3. Check for swallowed exceptions (no logging, no rethrowing)
+                if (options.CheckSwallowedExceptions && IsSwallowedException(catchClause))
+                {
+                    results.Issues.Add(CreateIssue(
+                        "SwallowedException",
+                        "Medium",
+                        catchClause,
+                        "Exception is caught but not logged or rethrown. This hides errors and makes debugging difficult.",
+                        "Add logging (e.g., _logger.LogError) or rethrow the exception if it cannot be handled.",
+                        catchClause.ToString(),
+                        exceptionType));
+                    results.SwallowedExceptionCount++;
+                }
+
+                // 4. Check for catch-all clauses: catch (Exception) or a bare catch, without an exception filter
+                if (options.CheckGenericCatch && IsGenericExceptionCatch(catchClause, semanticModel))
+                {
+                    results.Issues.Add(CreateIssue(
+                        "GenericException",
+                        "Low",
+                        catchClause,
+                        catchClause.Declaration == null
+                            ? "Bare 'catch' clause catches every exception. This can catch unexpected exceptions and hide programming errors."
+                            : "Catching generic 'Exception' type. This can catch unexpected exceptions and hide programming errors.",
+                        "Catch specific exception types (e.g., IOException, ArgumentException) when possible, or add an exception filter.",
+                        catchClause.Declaration?.Type.ToString() ?? "catch",
+                        exceptionType));
+                    results.GenericExceptionCount++;
+                }
+            }
+        }
+
+        // 5. Check for IDisposable locals that are created but never disposed or handed off
+        if (options.CheckMissingUsing)
+        {
+            foreach (var declaration in root.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
+            {
+                foreach (var (variable, local) in DisposableUsageAnalysis.FindUndisposedLocals(declaration, semanticModel))
+                {
+                    results.Issues.Add(CreateIssue(
+                        "MissingUsing",
+                        "Medium",
+                        declaration,
+                        $"Variable '{variable.Identifier.Text}' of type '{local.Type.Name}' implements IDisposable but is never disposed, returned, stored, or passed on.",
+                        "Wrap in a using statement or using declaration to ensure proper resource disposal.",
+                        declaration.ToString()));
+                    results.MissingUsingCount++;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fills the alias and severity counters from the collected issues.
+    /// </summary>
+    internal static void FinalizeExceptionHandlingCounts(ExceptionHandlingResults results)
+    {
+        results.GenericCatchCount = results.GenericExceptionCount;
+
+        results.HighCount = results.HighSeverityCount = results.Issues.Count(i => i.Severity == "High");
+        results.MediumCount = results.MediumSeverityCount = results.Issues.Count(i => i.Severity == "Medium");
+        results.LowCount = results.LowSeverityCount = results.Issues.Count(i => i.Severity == "Low");
+    }
+
+    private static string GetCaughtExceptionType(CatchClauseSyntax catchClause, SemanticModel semanticModel)
+    {
+        if (catchClause.Declaration == null)
+            return "(all exceptions)";
+
+        return semanticModel.GetTypeInfo(catchClause.Declaration.Type).Type?.ToDisplayString()
+            ?? catchClause.Declaration.Type.ToString();
+    }
+
+    private static bool IsEmptyCatchBlock(CatchClauseSyntax catchClause)
     {
         // A catch block is empty if it has no statements
         return !catchClause.Block.Statements.Any();
     }
 
-    private bool IsSwallowedException(CatchClauseSyntax catchClause, SemanticModel semanticModel)
+    private static bool IsSwallowedException(CatchClauseSyntax catchClause)
     {
         // If it's empty, it's already flagged by IsEmptyCatchBlock
         if (!catchClause.Block.Statements.Any())
             return false;
 
-        // Check if there's a throw statement (rethrowing is good)
-        var hasThrow = catchClause.Block.DescendantNodes().OfType<ThrowStatementSyntax>().Any();
+        // Check if there's a throw statement or throw expression (rethrowing is good)
+        var hasThrow = catchClause.Block.DescendantNodes().Any(n => n is ThrowStatementSyntax or ThrowExpressionSyntax);
         if (hasThrow)
             return false;
 
@@ -428,20 +497,26 @@ public class Phase2AnalysisService
         return true;
     }
 
-    private string? GetInvocationMethodName(InvocationExpressionSyntax invocation)
+    private static string? GetInvocationMethodName(InvocationExpressionSyntax invocation)
     {
         return invocation.Expression switch
         {
             IdentifierNameSyntax identifier => identifier.Identifier.Text,
+            GenericNameSyntax generic => generic.Identifier.Text,
             MemberAccessExpressionSyntax memberAccess => memberAccess.Name.Identifier.Text,
             _ => null
         };
     }
 
-    private bool IsGenericExceptionCatch(CatchClauseSyntax catchClause, SemanticModel semanticModel)
+    private static bool IsGenericExceptionCatch(CatchClauseSyntax catchClause, SemanticModel semanticModel)
     {
+        // An exception filter narrows a catch-all clause to what it can handle.
+        if (catchClause.Filter != null)
+            return false;
+
+        // A bare catch catches everything
         if (catchClause.Declaration == null)
-            return false; // catch without type (catch-all)
+            return true;
 
         var exceptionType = semanticModel.GetTypeInfo(catchClause.Declaration.Type).Type;
         if (exceptionType == null)
@@ -451,63 +526,9 @@ public class Phase2AnalysisService
         return exceptionType.ToDisplayString() == "System.Exception";
     }
 
-    private List<ExceptionHandlingIssue> FindMissingUsingStatements(
-        SyntaxNode root,
-        SemanticModel semanticModel,
-        string filePath)
-    {
-        var issues = new List<ExceptionHandlingIssue>();
-
-        // Find all local variable declarations
-        var localDeclarations = root.DescendantNodes().OfType<LocalDeclarationStatementSyntax>();
-
-        foreach (var declaration in localDeclarations)
-        {
-            // Skip if it's already in a using statement
-            if (declaration.Parent is UsingStatementSyntax)
-                continue;
-
-            // Check each variable declarator
-            foreach (var variable in declaration.Declaration.Variables)
-            {
-                var variableSymbol = semanticModel.GetDeclaredSymbol(variable);
-                if (variableSymbol is not ILocalSymbol localSymbol)
-                    continue;
-
-                // Check if the type implements IDisposable
-                var type = localSymbol.Type;
-                if (ImplementsIDisposable(type))
-                {
-                    var lineNumber = declaration.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-                    issues.Add(new ExceptionHandlingIssue
-                    {
-                        IssueType = "MissingUsing",
-                        Severity = "Medium",
-                        Description = $"Variable '{variable.Identifier.Text}' of type '{type.Name}' implements IDisposable but is not wrapped in a using statement.",
-                        Recommendation = "Wrap in a using statement or using declaration to ensure proper resource disposal.",
-                        FilePath = filePath,
-                        LineNumber = lineNumber,
-                        CodeSnippet = declaration.ToString()
-                    });
-                }
-            }
-        }
-
-        return issues;
-    }
-
-    private bool ImplementsIDisposable(ITypeSymbol? type)
-    {
-        if (type == null)
-            return false;
-
-        // Check if the type or any of its base types/interfaces implement IDisposable
-        return type.AllInterfaces.Any(i => i.ToDisplayString() == "System.IDisposable");
-    }
-
     #endregion
 
-    #region AnalyzeDIContainer (Framework - To be implemented)
+    #region AnalyzeDIContainer
 
     /// <summary>
     /// Analyze dependency injection configuration for common issues
@@ -526,162 +547,15 @@ public class Phase2AnalysisService
             using var workspace = MSBuildWorkspace.Create();
             var solution = await workspace.OpenSolutionAsync(solutionPath);
 
-            // Step 1: Build service registration map
-            var serviceRegistrations = new Dictionary<string, ServiceRegistration>();
-
+            var compilations = new List<Compilation>();
             foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
             {
                 var compilation = await project.GetCompilationAsync();
-                if (compilation == null) continue;
-
-                foreach (var tree in compilation.SyntaxTrees)
-                {
-                    var semanticModel = compilation.GetSemanticModel(tree);
-                    var root = await tree.GetRootAsync();
-
-                    // Find DI registration calls
-                    var invocations = root.DescendantNodes().OfType<InvocationExpressionSyntax>();
-
-                    foreach (var invocation in invocations)
-                    {
-                        var registration = ParseDIRegistration(invocation, semanticModel, tree.FilePath ?? "Unknown");
-                        if (registration != null)
-                        {
-                            results.AnalyzedServices++;
-                            var key = registration.ServiceType;
-
-                            // Check for multiple registrations
-                            if (serviceRegistrations.ContainsKey(key))
-                            {
-                                results.Issues.Add(new DIContainerIssue
-                                {
-                                    IssueType = "MultipleRegistration",
-                                    Severity = "Low",
-                                    ServiceType = registration.ServiceType,
-                                    ImplementationType = registration.ImplementationType,
-                                    ServiceLifetime = registration.Lifetime,
-                                    Description = $"Service '{registration.ServiceType}' is registered multiple times. Last registration wins.",
-                                    Recommendation = "Review if multiple registrations are intentional. Consider using TryAdd* methods or removing duplicate registrations.",
-                                    FilePath = registration.FilePath,
-                                    LineNumber = registration.LineNumber
-                                });
-                            }
-
-                            serviceRegistrations[key] = registration;
-                        }
-                    }
-                }
+                if (compilation != null)
+                    compilations.Add(compilation);
             }
 
-            // Step 2: Find constructor injection points and validate
-            foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
-            {
-                var compilation = await project.GetCompilationAsync();
-                if (compilation == null) continue;
-
-                foreach (var tree in compilation.SyntaxTrees)
-                {
-                    var semanticModel = compilation.GetSemanticModel(tree);
-                    var root = await tree.GetRootAsync();
-
-                    // Find all class constructors
-                    var constructors = root.DescendantNodes().OfType<ConstructorDeclarationSyntax>();
-
-                    foreach (var constructor in constructors)
-                    {
-                        results.AnalyzedConstructors++;
-
-                        var containingClass = constructor.Parent as ClassDeclarationSyntax;
-                        if (containingClass == null) continue;
-
-                        var classSymbol = semanticModel.GetDeclaredSymbol(containingClass);
-                        if (classSymbol == null) continue;
-
-                        var className = classSymbol.ToDisplayString();
-
-                        // Analyze constructor parameters (dependencies)
-                        foreach (var parameter in constructor.ParameterList.Parameters)
-                        {
-                            var parameterSymbol = semanticModel.GetDeclaredSymbol(parameter);
-                            if (parameterSymbol == null) continue;
-
-                            var dependencyType = parameterSymbol.Type.ToDisplayString();
-
-                            // Check if dependency is registered
-                            if (!serviceRegistrations.ContainsKey(dependencyType))
-                            {
-                                // Check if it's a framework type (skip these)
-                                if (IsFrameworkType(dependencyType))
-                                    continue;
-
-                                results.Issues.Add(new DIContainerIssue
-                                {
-                                    IssueType = "UnregisteredDependency",
-                                    Severity = "High",
-                                    ServiceType = dependencyType,
-                                    ImplementationType = className,
-                                    Description = $"Constructor of '{className}' depends on '{dependencyType}', which is not registered in the DI container.",
-                                    Recommendation = $"Register '{dependencyType}' in the DI container using AddScoped, AddSingleton, or AddTransient.",
-                                    FilePath = tree.FilePath ?? "Unknown",
-                                    LineNumber = parameter.GetLocation().GetLineSpan().StartLinePosition.Line + 1
-                                });
-                                results.UnregisteredCount++;
-                            }
-                            else if (checkCaptive && serviceRegistrations.ContainsKey(className))
-                            {
-                                // Check for captive dependencies
-                                var consumerLifetime = serviceRegistrations[className].Lifetime;
-                                var dependencyLifetime = serviceRegistrations[dependencyType].Lifetime;
-
-                                if (IsCaptiveDependency(consumerLifetime, dependencyLifetime))
-                                {
-                                    results.Issues.Add(new DIContainerIssue
-                                    {
-                                        IssueType = "CaptiveDependency",
-                                        Severity = "High",
-                                        ServiceType = className,
-                                        ImplementationType = dependencyType,
-                                        ServiceLifetime = consumerLifetime,
-                                        Description = $"Captive dependency detected: {consumerLifetime} service '{className}' depends on {dependencyLifetime} service '{dependencyType}'.",
-                                        Recommendation = $"Change '{className}' to {dependencyLifetime} or '{dependencyType}' to {consumerLifetime}. A longer-lived service should not depend on a shorter-lived service.",
-                                        FilePath = tree.FilePath ?? "Unknown",
-                                        LineNumber = parameter.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
-                                        DependencyChain = new List<string> { className, dependencyType }
-                                    });
-                                    results.CaptiveDependencyCount++;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Step 3: Detect circular dependencies
-            if (checkCircular)
-            {
-                var circularDeps = DetectCircularDependencies(serviceRegistrations, solution);
-                foreach (var cycle in circularDeps)
-                {
-                    results.Issues.Add(new DIContainerIssue
-                    {
-                        IssueType = "CircularDependency",
-                        Severity = "Critical",
-                        ServiceType = cycle.First(),
-                        Description = $"Circular dependency detected: {string.Join(" → ", cycle)} → {cycle.First()}",
-                        Recommendation = "Break the circular dependency by introducing an interface, using a factory pattern, or refactoring the design.",
-                        FilePath = "Multiple Files",
-                        LineNumber = 0,
-                        DependencyChain = cycle
-                    });
-                    results.CircularDependencyCount++;
-                }
-            }
-
-            // Calculate severity counts
-            results.CriticalCount = results.Issues.Count(i => i.Severity == "Critical");
-            results.HighCount = results.Issues.Count(i => i.Severity == "High");
-            results.MediumCount = results.Issues.Count(i => i.Severity == "Medium");
-            results.LowCount = results.Issues.Count(i => i.Severity == "Low");
+            AnalyzeDIContainer(compilations, checkLifetimes, checkCircular, checkCaptive, results);
 
             _logger.LogInformation($"AnalyzeDIContainer completed: {results.TotalIssues} issues found, {results.AnalyzedServices} services, {results.AnalyzedConstructors} constructors");
         }
@@ -698,6 +572,246 @@ public class Phase2AnalysisService
         return results;
     }
 
+    /// <summary>
+    /// Core DI analysis over already-built compilations.
+    /// Registrations are keyed by service type; the implementation type of each registration
+    /// (AddScoped&lt;IService, Impl&gt;) is what the captive and cycle checks follow.
+    /// </summary>
+    internal static void AnalyzeDIContainer(
+        IReadOnlyList<Compilation> compilations,
+        bool checkLifetimes,
+        bool checkCircular,
+        bool checkCaptive,
+        DIContainerResults results)
+    {
+        // A file compiled into several projects (multi-targeting, linked files) is analyzed once.
+        var trees = new List<(SyntaxTree Tree, SemanticModel Model)>();
+        var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var compilation in compilations)
+        {
+            foreach (var tree in compilation.SyntaxTrees)
+            {
+                if (!string.IsNullOrEmpty(tree.FilePath) && !seenFiles.Add(tree.FilePath))
+                    continue;
+                trees.Add((tree, compilation.GetSemanticModel(tree)));
+            }
+        }
+
+        // Step 1: Build service registration map (service type -> registrations in source order)
+        var registrationsByService = new Dictionary<string, List<ServiceRegistration>>();
+
+        foreach (var (tree, semanticModel) in trees)
+        {
+            var root = tree.GetRoot();
+            var filePath = string.IsNullOrEmpty(tree.FilePath) ? "Unknown" : tree.FilePath;
+
+            foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                var registration = ParseDIRegistration(invocation, semanticModel, filePath);
+                if (registration == null)
+                    continue;
+
+                results.AnalyzedServices++;
+
+                if (!registrationsByService.TryGetValue(registration.ServiceType, out var previous))
+                {
+                    registrationsByService[registration.ServiceType] = new List<ServiceRegistration> { registration };
+                    continue;
+                }
+
+                var conflicting = previous.FirstOrDefault(p => p.Lifetime != registration.Lifetime);
+                if (checkLifetimes && conflicting != null)
+                {
+                    results.Issues.Add(new DIContainerIssue
+                    {
+                        IssueType = "LifetimeMismatch",
+                        Severity = "Medium",
+                        ServiceType = registration.ServiceType,
+                        ImplementationType = registration.ImplementationType,
+                        ServiceLifetime = registration.Lifetime,
+                        Description = $"Service '{registration.ServiceType}' is registered as {conflicting.Lifetime} ({conflicting.FilePath}:{conflicting.LineNumber}) and again as {registration.Lifetime}. The last registration wins, so the effective lifetime depends on registration order.",
+                        Recommendation = "Register the service once with a single lifetime, or use TryAdd* so the first registration is kept.",
+                        FilePath = registration.FilePath,
+                        LineNumber = registration.LineNumber
+                    });
+                    results.LifetimeMismatchCount++;
+                }
+                else
+                {
+                    results.Issues.Add(new DIContainerIssue
+                    {
+                        IssueType = "MultipleRegistration",
+                        Severity = "Low",
+                        ServiceType = registration.ServiceType,
+                        ImplementationType = registration.ImplementationType,
+                        ServiceLifetime = registration.Lifetime,
+                        Description = $"Service '{registration.ServiceType}' is registered multiple times. Last registration wins.",
+                        Recommendation = "Review if multiple registrations are intentional. Consider using TryAdd* methods or removing duplicate registrations.",
+                        FilePath = registration.FilePath,
+                        LineNumber = registration.LineNumber
+                    });
+                }
+
+                previous.Add(registration);
+            }
+        }
+
+        // The registration the container resolves for each service type (last one wins).
+        var effectiveRegistrations = registrationsByService.ToDictionary(kv => kv.Key, kv => kv.Value[^1]);
+
+        // Implementation type -> the effective registrations that construct it.
+        var registrationsByImplementation = effectiveRegistrations.Values
+            .GroupBy(r => r.ImplementationType)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // One implementation registered under several services with different lifetimes gets one
+        // instance per registration, each living by a different rule.
+        if (checkLifetimes)
+        {
+            foreach (var (implementation, registrations) in registrationsByImplementation)
+            {
+                var lifetimes = registrations.Select(r => r.Lifetime).Distinct().ToList();
+                if (lifetimes.Count < 2)
+                    continue;
+
+                var first = registrations.OrderBy(r => r.FilePath).ThenBy(r => r.LineNumber).First();
+                results.Issues.Add(new DIContainerIssue
+                {
+                    IssueType = "LifetimeMismatch",
+                    Severity = "Medium",
+                    ServiceType = string.Join(", ", registrations.Select(r => r.ServiceType)),
+                    ImplementationType = implementation,
+                    ServiceLifetime = string.Join("/", lifetimes),
+                    Description = $"Implementation '{implementation}' is registered with different lifetimes: {string.Join(", ", registrations.Select(r => $"{r.ServiceType} as {r.Lifetime}"))}. Each registration creates its own instance, so the services do not share state as they may appear to.",
+                    Recommendation = $"Register '{implementation}' once with one lifetime and forward the other services to it, e.g. services.AddSingleton<IB>(sp => (Impl)sp.GetRequiredService<IA>()).",
+                    FilePath = first.FilePath,
+                    LineNumber = first.LineNumber
+                });
+                results.LifetimeMismatchCount++;
+            }
+        }
+
+        // Step 2: Find constructor injection points and validate
+        var constructorDependencies = new Dictionary<string, HashSet<string>>();
+        var reportedCaptives = new HashSet<(string Service, string Dependency)>();
+
+        foreach (var (tree, semanticModel) in trees)
+        {
+            var root = tree.GetRoot();
+            var filePath = string.IsNullOrEmpty(tree.FilePath) ? "Unknown" : tree.FilePath;
+
+            foreach (var constructor in root.DescendantNodes().OfType<ConstructorDeclarationSyntax>())
+            {
+                results.AnalyzedConstructors++;
+
+                if (constructor.Parent is not TypeDeclarationSyntax containingType)
+                    continue;
+
+                if (semanticModel.GetDeclaredSymbol(containingType) is not INamedTypeSymbol classSymbol)
+                    continue;
+
+                var className = classSymbol.ToDisplayString();
+                registrationsByImplementation.TryGetValue(className, out var consumerRegistrations);
+
+                if (!constructorDependencies.TryGetValue(className, out var dependencies))
+                    constructorDependencies[className] = dependencies = new HashSet<string>();
+
+                // Analyze constructor parameters (dependencies)
+                foreach (var parameter in constructor.ParameterList.Parameters)
+                {
+                    var parameterSymbol = semanticModel.GetDeclaredSymbol(parameter);
+                    if (parameterSymbol == null) continue;
+
+                    var dependencyType = parameterSymbol.Type.ToDisplayString();
+                    var lineNumber = parameter.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+
+                    // Check if dependency is registered
+                    if (!effectiveRegistrations.TryGetValue(dependencyType, out var dependencyRegistration))
+                    {
+                        // Check if it's a framework type (skip these)
+                        if (IsFrameworkType(dependencyType))
+                            continue;
+
+                        results.Issues.Add(new DIContainerIssue
+                        {
+                            IssueType = "UnregisteredDependency",
+                            Severity = "High",
+                            ServiceType = dependencyType,
+                            ImplementationType = className,
+                            Description = $"Constructor of '{className}' depends on '{dependencyType}', which is not registered in the DI container.",
+                            Recommendation = $"Register '{dependencyType}' in the DI container using AddScoped, AddSingleton, or AddTransient.",
+                            FilePath = filePath,
+                            LineNumber = lineNumber
+                        });
+                        results.UnregisteredCount++;
+                        continue;
+                    }
+
+                    dependencies.Add(dependencyType);
+
+                    if (!checkCaptive || consumerRegistrations == null)
+                        continue;
+
+                    // Check for captive dependencies, once per registration that constructs this class
+                    foreach (var consumer in consumerRegistrations)
+                    {
+                        if (!IsCaptiveDependency(consumer.Lifetime, dependencyRegistration.Lifetime))
+                            continue;
+
+                        if (!reportedCaptives.Add((consumer.ServiceType, dependencyType)))
+                            continue;
+
+                        var consumerName = consumer.ServiceType == className ? className : $"{consumer.ServiceType} ({className})";
+                        var dependencyName = dependencyRegistration.ImplementationType == dependencyType
+                            ? dependencyType
+                            : $"{dependencyType} ({dependencyRegistration.ImplementationType})";
+
+                        results.Issues.Add(new DIContainerIssue
+                        {
+                            IssueType = "CaptiveDependency",
+                            Severity = "High",
+                            ServiceType = consumer.ServiceType,
+                            ImplementationType = className,
+                            ServiceLifetime = consumer.Lifetime,
+                            Description = $"Captive dependency detected: {consumer.Lifetime} service '{consumerName}' depends on {dependencyRegistration.Lifetime} service '{dependencyName}'.",
+                            Recommendation = $"Change '{consumer.ServiceType}' to {dependencyRegistration.Lifetime} or '{dependencyType}' to {consumer.Lifetime}. A longer-lived service should not depend on a shorter-lived service.",
+                            FilePath = filePath,
+                            LineNumber = lineNumber,
+                            DependencyChain = new List<string> { consumer.ServiceType, dependencyType }
+                        });
+                        results.CaptiveDependencyCount++;
+                    }
+                }
+            }
+        }
+
+        // Step 3: Detect circular dependencies
+        if (checkCircular)
+        {
+            foreach (var cycle in DetectCircularDependencies(effectiveRegistrations, constructorDependencies))
+            {
+                results.Issues.Add(new DIContainerIssue
+                {
+                    IssueType = "CircularDependency",
+                    Severity = "Critical",
+                    ServiceType = cycle.First(),
+                    Description = $"Circular dependency detected: {string.Join(" → ", cycle)} → {cycle.First()}",
+                    Recommendation = "Break the circular dependency by introducing an interface, using a factory pattern, or refactoring the design.",
+                    FilePath = "Multiple Files",
+                    LineNumber = 0,
+                    DependencyChain = cycle
+                });
+                results.CircularDependencyCount++;
+            }
+        }
+
+        // Calculate severity counts
+        results.CriticalCount = results.Issues.Count(i => i.Severity == "Critical");
+        results.HighCount = results.Issues.Count(i => i.Severity == "High");
+        results.MediumCount = results.Issues.Count(i => i.Severity == "Medium");
+        results.LowCount = results.Issues.Count(i => i.Severity == "Low");
+    }
+
     private class ServiceRegistration
     {
         public string ServiceType { get; set; } = string.Empty;
@@ -707,7 +821,7 @@ public class Phase2AnalysisService
         public int LineNumber { get; set; }
     }
 
-    private ServiceRegistration? ParseDIRegistration(
+    private static ServiceRegistration? ParseDIRegistration(
         InvocationExpressionSyntax invocation,
         SemanticModel semanticModel,
         string filePath)
@@ -768,7 +882,7 @@ public class Phase2AnalysisService
         };
     }
 
-    private bool IsCaptiveDependency(string consumerLifetime, string dependencyLifetime)
+    private static bool IsCaptiveDependency(string consumerLifetime, string dependencyLifetime)
     {
         // Singleton can depend on Singleton only
         // Scoped can depend on Singleton or Scoped
@@ -787,7 +901,7 @@ public class Phase2AnalysisService
         return false; // Transient can depend on anything
     }
 
-    private bool IsFrameworkType(string typeName)
+    private static bool IsFrameworkType(string typeName)
     {
         // Skip common framework types that don't need DI registration
         return typeName.StartsWith("Microsoft.Extensions.Logging.ILogger") ||
@@ -799,129 +913,64 @@ public class Phase2AnalysisService
                typeName == "bool";
     }
 
-    private List<List<string>> DetectCircularDependencies(
-        Dictionary<string, ServiceRegistration> registrations,
-        Solution solution)
+    /// <summary>
+    /// Finds cycles in the service graph. Each service points to the services its registered
+    /// implementation's constructors depend on, so IA → Impl(IB) → Impl(IA) is a cycle IA → IB.
+    /// Each cycle is reported once, starting from its alphabetically first service.
+    /// </summary>
+    private static List<List<string>> DetectCircularDependencies(
+        Dictionary<string, ServiceRegistration> effectiveRegistrations,
+        Dictionary<string, HashSet<string>> constructorDependencies)
     {
+        var graph = new Dictionary<string, List<string>>();
+        foreach (var (service, registration) in effectiveRegistrations)
+        {
+            graph[service] = constructorDependencies.TryGetValue(registration.ImplementationType, out var dependencies)
+                ? dependencies.Where(effectiveRegistrations.ContainsKey).OrderBy(d => d, StringComparer.Ordinal).ToList()
+                : new List<string>();
+        }
+
         var cycles = new List<List<string>>();
-        var dependencyGraph = BuildDependencyGraph(registrations, solution).Result;
-
-        // Use DFS to detect cycles
+        var seenCycles = new HashSet<string>();
         var visited = new HashSet<string>();
-        var recursionStack = new HashSet<string>();
-        var currentPath = new List<string>();
+        var onPath = new HashSet<string>();
+        var path = new List<string>();
 
-        foreach (var service in dependencyGraph.Keys)
+        void Visit(string node)
+        {
+            visited.Add(node);
+            onPath.Add(node);
+            path.Add(node);
+
+            foreach (var neighbor in graph[node])
+            {
+                if (onPath.Contains(neighbor))
+                {
+                    var cycle = path.Skip(path.IndexOf(neighbor)).ToList();
+
+                    // Rotate so the cycle starts at its smallest member, then dedupe.
+                    var start = cycle.IndexOf(cycle.Min(StringComparer.Ordinal)!);
+                    cycle = cycle.Skip(start).Concat(cycle.Take(start)).ToList();
+                    if (seenCycles.Add(string.Join("\u0000", cycle)))
+                        cycles.Add(cycle);
+                }
+                else if (!visited.Contains(neighbor))
+                {
+                    Visit(neighbor);
+                }
+            }
+
+            onPath.Remove(node);
+            path.RemoveAt(path.Count - 1);
+        }
+
+        foreach (var service in graph.Keys.OrderBy(k => k, StringComparer.Ordinal))
         {
             if (!visited.Contains(service))
-            {
-                FindCycles(service, dependencyGraph, visited, recursionStack, currentPath, cycles);
-            }
+                Visit(service);
         }
 
         return cycles;
-    }
-
-    private async Task<Dictionary<string, List<string>>> BuildDependencyGraph(
-        Dictionary<string, ServiceRegistration> registrations,
-        Solution solution)
-    {
-        var graph = new Dictionary<string, List<string>>();
-
-        // Initialize graph with registered services
-        foreach (var service in registrations.Keys)
-        {
-            graph[service] = new List<string>();
-        }
-
-        // Build dependency edges
-        foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
-        {
-            var compilation = await project.GetCompilationAsync();
-            if (compilation == null) continue;
-
-            foreach (var tree in compilation.SyntaxTrees)
-            {
-                var semanticModel = compilation.GetSemanticModel(tree);
-                var root = await tree.GetRootAsync();
-
-                var constructors = root.DescendantNodes().OfType<ConstructorDeclarationSyntax>();
-
-                foreach (var constructor in constructors)
-                {
-                    var containingClass = constructor.Parent as ClassDeclarationSyntax;
-                    if (containingClass == null) continue;
-
-                    var classSymbol = semanticModel.GetDeclaredSymbol(containingClass);
-                    if (classSymbol == null) continue;
-
-                    var className = classSymbol.ToDisplayString();
-
-                    // Only track if this class is registered as a service
-                    if (!registrations.ContainsKey(className))
-                        continue;
-
-                    if (!graph.ContainsKey(className))
-                        graph[className] = new List<string>();
-
-                    foreach (var parameter in constructor.ParameterList.Parameters)
-                    {
-                        var parameterSymbol = semanticModel.GetDeclaredSymbol(parameter);
-                        if (parameterSymbol == null) continue;
-
-                        var dependencyType = parameterSymbol.Type.ToDisplayString();
-
-                        // Only track dependencies that are registered services
-                        if (registrations.ContainsKey(dependencyType))
-                        {
-                            graph[className].Add(dependencyType);
-                        }
-                    }
-                }
-            }
-        }
-
-        return graph;
-    }
-
-    private bool FindCycles(
-        string node,
-        Dictionary<string, List<string>> graph,
-        HashSet<string> visited,
-        HashSet<string> recursionStack,
-        List<string> currentPath,
-        List<List<string>> cycles)
-    {
-        visited.Add(node);
-        recursionStack.Add(node);
-        currentPath.Add(node);
-
-        if (graph.ContainsKey(node))
-        {
-            foreach (var neighbor in graph[node])
-            {
-                if (!visited.Contains(neighbor))
-                {
-                    if (FindCycles(neighbor, graph, visited, recursionStack, currentPath, cycles))
-                    {
-                        recursionStack.Remove(node);
-                        currentPath.RemoveAt(currentPath.Count - 1);
-                        return true;
-                    }
-                }
-                else if (recursionStack.Contains(neighbor))
-                {
-                    // Found a cycle
-                    var cycleStartIndex = currentPath.IndexOf(neighbor);
-                    var cycle = currentPath.Skip(cycleStartIndex).ToList();
-                    cycles.Add(cycle);
-                }
-            }
-        }
-
-        recursionStack.Remove(node);
-        currentPath.RemoveAt(currentPath.Count - 1);
-        return false;
     }
 
     #endregion

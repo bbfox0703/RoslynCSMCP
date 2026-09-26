@@ -704,9 +704,11 @@ namespace RoslynMcpServer.Core.Models
         public string PackageName { get; set; } = string.Empty;
         public string AffectedVersion { get; set; } = string.Empty;
         public string Severity { get; set; } = string.Empty;  // Critical, High, Medium, Low
-        public string VulnerabilityId { get; set; } = string.Empty;  // CVE ID or similar
+        public string VulnerabilityId { get; set; } = string.Empty;  // Advisory ID (e.g. GHSA-xxxx-xxxx-xxxx)
+        public string AdvisoryUrl { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
-        public string RecommendedVersion { get; set; } = string.Empty;  // Minimum safe version
+        public string RecommendedVersion { get; set; } = string.Empty;  // Minimum safe version, when known
+        public bool IsTransitive { get; set; }  // Only reached through other packages, in every affected project
         public List<string> AffectedProjects { get; set; } = new();  // Projects using this vulnerable version
     }
 

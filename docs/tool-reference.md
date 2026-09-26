@@ -188,13 +188,18 @@ Use FindReferences tool with:
 ---
 
 ### 15. FindDuplicateCode
-**Description**: Find duplicate code blocks across the solution
+**Description**: Find methods whose bodies are copies or near-copies across the solution
 
 **Parameters**:
 - `solutionPath` (string): Path to solution file (.sln)
 - `format` (string, optional): Output format: summary, normal, detailed (default: normal)
-- `minLines` (int, optional): Minimum lines to consider duplicate (default: 5)
-- `similarity` (int, optional): Similarity threshold percentage 70-100 (default: 90)
+- `minLines` (int, optional): Minimum line span of a method declaration to compare; values below 3 become 5 (default: 5)
+- `similarity` (int, optional): Minimum body similarity percentage 70-100; 100 finds only exact copies after normalization (default: 90)
+
+**Detection notes**:
+- Only method **bodies** are compared, as token sequences: comments, whitespace, literal values, and names declared inside the method (parameters, locals, loop/catch/lambda variables) are normalized away, so a copy with a different method name, signature, or local names still matches. Called methods, members, and types must agree.
+- Similarity is `2 × LCS / (tokens of both bodies)`. Each group collects the methods at or above the threshold around its largest member and reports the lowest similarity in the group.
+- Files compiled into several projects (multi-targeting, linked files) are analyzed once. Duplicated fragments inside otherwise different methods are not detected.
 
 ---
 
@@ -234,6 +239,11 @@ Use FindReferences tool with:
 - `includeNuGetPackages` (bool, optional): Include NuGet package analysis (default: true)
 - `includeProjectReferences` (bool, optional): Include project reference analysis (default: true)
 
+**Detection notes** (the package rule is shared with `AnalyzePackages`):
+- A package counts as used when a `using` directive — global usings included, such as `global using global::X;` generated from csproj `<Using>` items — imports the package ID, the ID minus its last segment (for IDs with three or more segments), or a sub-namespace of either.
+- Packages without compile assets (`IncludeAssets` without `compile`, or `ExcludeAssets` with `compile`) and known build, test, and analyzer packages are never flagged. Packages whose namespaces differ from their IDs can still be false positives.
+- A project reference counts as used when any identifier binds to a symbol from that project in any target framework.
+
 ---
 
 ### 19. AnalyzePackages
@@ -243,8 +253,9 @@ Use FindReferences tool with:
 - `solutionPath` (string): Path to solution file (.sln)
 - `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
 - `checkUpdates` (bool, optional): Check for available package updates (default: true)
-- `checkVulnerabilities` (bool, optional): Check for security vulnerabilities (default: true)
+- `checkVulnerabilities` (bool, optional): Report known advisories, direct and transitive, via `dotnet list package --vulnerable` (network access; the solution must already be restored) (default: true)
 - `analyzeUsage` (bool, optional): Analyze package usage to detect unused packages (default: true)
+- `checkConflicts` (bool, optional, split Dependencies module only): Report packages referenced at different versions across projects (default: true)
 
 **Example Usage**:
 ```
@@ -258,8 +269,8 @@ Use AnalyzePackages tool with:
 - Lists all NuGet packages across all projects
 - Detects outdated packages and available updates
 - Identifies version conflicts between projects
-- Finds unused packages (packages with no namespace usage)
-- Checks for security vulnerabilities (placeholder - requires external API)
+- Finds unused packages with the same heuristic as `FindUnusedDependencies`
+- Checks for known vulnerabilities by running `dotnet list <solution> package --vulnerable --include-transitive --format json --no-restore`; problems (for example an unrestored project) are reported as warnings
 - Recommends version standardization
 
 ---
@@ -418,13 +429,14 @@ Use GetChangeImpact tool with:
 ## 🚀 Utility Tools
 
 ### 27. FindTODOComments
-**Description**: Find all TODO, FIXME, HACK, and NOTE comments across the solution
+**Description**: Find TODO, FIXME, HACK, NOTE, BUG, XXX, OPTIMIZE, and REFACTOR markers in comments across the solution
 
 **Parameters**:
 - `solutionPath` (string): Path to solution file (.sln)
 - `format` (string, optional): Output format: summary, normal, detailed (default: normal)
-- `commentTypes` (string, optional): Comment types to find (comma-separated): TODO, FIXME, HACK, NOTE, BUG, XXX (default: all)
-- `includeFilePath` (bool, optional): Include file paths in results (default: true)
+- `types` (string, optional): Marker types to find (comma-separated): TODO, FIXME, HACK, NOTE, BUG, XXX, OPTIMIZE, REFACTOR (default: all)
+
+**Detection notes**: Markers must be whole words (`debug` is not BUG, `notes` is not NOTE). A marker in any case is accepted at the start of a comment line; elsewhere only upper case counts, so prose such as "works around a bug" is ignored. Each comment line yields at most one marker, the first one of a requested type.
 
 ---
 
@@ -506,8 +518,8 @@ Use FindPerformanceIssues tool with:
 - Detects LINQ misuse patterns (Count() vs Any(), multiple ToList() calls, unnecessary materialization)
 - Identifies string concatenation in loops (recommends StringBuilder)
 - Finds sync-over-async anti-patterns (.Result, .Wait() in async methods)
-- Detects IDisposable objects not properly disposed
-- Identifies exception handling anti-patterns (empty catch blocks, catching base Exception)
+- Detects IDisposable objects the code creates and then loses (locals and owned fields)
+- Identifies empty catch blocks (each reported once)
 - Provides severity levels (Critical, High, Medium, Low)
 - Estimates performance impact (0-10 scale)
 - Includes fix recommendations and code examples
@@ -516,10 +528,10 @@ Use FindPerformanceIssues tool with:
 
 **Issue Types**:
 - **LinqMisuse**: Inefficient LINQ patterns that enumerate collections unnecessarily
-- **StringConcatenation**: String += in loops creating many intermediate objects
+- **StringConcatenation**: `s += x` or `s = s + x` on a string (checked by type) inside a loop, reported once per assignment; strings declared inside the loop are skipped
 - **SyncOverAsync**: Blocking calls (.Result, .Wait) in async methods causing deadlocks
-- **DisposableNotDisposed**: IDisposable objects without using statements causing resource leaks
-- **ExceptionHandling**: Empty catch blocks and improper exception handling hiding bugs
+- **DisposableNotDisposed**: Locals created with `new`, a static factory, or a Create/Open/Begin call that are never disposed, returned, stored, or passed on (using declarations are fine), and instance fields a type creates but never disposes
+- **ExceptionHandling**: Empty catch blocks hiding bugs
 
 **Output Formats**:
 - **summary**: Key metrics, issue counts by severity, top issue types

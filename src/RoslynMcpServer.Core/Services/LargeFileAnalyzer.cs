@@ -67,6 +67,9 @@ namespace RoslynMcpServer.Core.Services
                 // Collect all large files
                 var allLargeFiles = new ConcurrentBag<LargeFile>();
 
+                int analyzedFiles = 0;
+                int failedProjects = 0;
+
                 var projectTasks = solution.Projects
                     .Where(p => p.SupportsCompilation)
                     .Select(async project =>
@@ -81,7 +84,7 @@ namespace RoslynMcpServer.Core.Services
                                 var filePath = syntaxTree.FilePath;
                                 var fileName = Path.GetFileName(filePath);
 
-                                results.AnalyzedFiles++;
+                                Interlocked.Increment(ref analyzedFiles);
 
                                 // Skip generated files
                                 if (fileName.EndsWith(".g.cs") ||
@@ -143,11 +146,14 @@ namespace RoslynMcpServer.Core.Services
                         catch (Exception ex)
                         {
                             _logger.LogWarning(ex, "Failed to analyze project: {ProjectName}", project.Name);
-                            results.FailedProjects++;
+                            Interlocked.Increment(ref failedProjects);
                         }
                     });
 
                 await Task.WhenAll(projectTasks);
+
+                results.AnalyzedFiles = analyzedFiles;
+                results.FailedProjects = failedProjects;
 
                 // Sort by line count (largest first)
                 results.LargeFiles = allLargeFiles
