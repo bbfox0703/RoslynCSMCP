@@ -149,17 +149,20 @@ public class QualityTools
     }
 
     [McpServerTool, Description("""
-        Find whole methods whose entire declaration (signature and body, including comments) is textually identical
-        after whitespace normalization. Copies with a different name or signature, near-duplicates, and duplicated
-        fragments inside methods are not detected, and a multi-targeted project reports each method as a duplicate
-        of itself. Returns up to 20 groups, largest first, with file, line range, and method name per instance.
+        Find methods whose bodies are copies or near-copies. Bodies are compared as token sequences with comments,
+        whitespace, literal values, and names declared inside the method (parameters, locals, loop, catch, and lambda
+        variables) normalized away, so a copy with a different method name, signature, or local names still matches;
+        called methods, members, and types must agree. Similarity is 2 x LCS / (tokens of both bodies), and each
+        group collects the methods at or above the threshold around its largest member. Duplicated fragments inside
+        otherwise different methods are not detected. Returns up to 20 groups, most similar first, with file, line
+        range, and method name per instance.
         """)]
     public static async Task<string> FindDuplicateCode(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
         [Description("Minimum line span of a method's whole declaration for it to be compared; values below 3 are replaced with 5 (default: 5)")] int minLines = 5,
-        [Description("Currently has no effect: only exact matches are found (default: 90)")] int similarity = 90,
+        [Description("Minimum body similarity in percent, 70-100; 100 finds only exact copies after normalization, and values outside the range are replaced with 90 (default: 90)")] int similarity = 90,
         DuplicateCodeAnalyzer analyzer = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)

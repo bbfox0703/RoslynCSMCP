@@ -151,6 +151,18 @@ public class IntegrationTestHelper : IDisposable
             sb.AppendLine("  </ItemGroup>");
         }
 
+        // Add package references
+        if (project.PackageReferences.Any())
+        {
+            sb.AppendLine();
+            sb.AppendLine("  <ItemGroup>");
+            foreach (var (name, version) in project.PackageReferences)
+            {
+                sb.AppendLine($"    <PackageReference Include=\"{name}\" Version=\"{version}\" />");
+            }
+            sb.AppendLine("  </ItemGroup>");
+        }
+
         sb.AppendLine();
         sb.AppendLine("</Project>");
 
@@ -191,6 +203,7 @@ public class ProjectDefinition
     public string Name { get; set; } = string.Empty;
     public List<SourceFile> SourceFiles { get; set; } = new();
     public List<string> ProjectReferences { get; set; } = new();
+    public List<(string Name, string Version)> PackageReferences { get; set; } = new();
 
     public ProjectDefinition(string name)
     {
@@ -206,6 +219,16 @@ public class ProjectDefinition
     public ProjectDefinition AddReference(string projectName)
     {
         ProjectReferences.Add(projectName);
+        return this;
+    }
+
+    /// <summary>
+    /// Adds a NuGet PackageReference. Prefer versions already in the local package cache so the
+    /// solution restore does not need the network.
+    /// </summary>
+    public ProjectDefinition AddPackageReference(string packageName, string version)
+    {
+        PackageReferences.Add((packageName, version));
         return this;
     }
 }

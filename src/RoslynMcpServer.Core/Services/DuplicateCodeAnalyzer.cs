@@ -11,10 +11,21 @@ using System.Text;
 namespace RoslynMcpServer.Core.Services
 {
     /// <summary>
-    /// Service for detecting duplicate code blocks across the solution
+    /// Service for detecting duplicate code blocks across the solution.
+    ///
+    /// Each method body is reduced to a token sequence: comments and whitespace disappear, names
+    /// declared inside the method (parameters, locals, loop and catch variables, lambda parameters,
+    /// local functions, type parameters) become a placeholder, and literals become a placeholder per
+    /// kind. The method name and signature are not part of the sequence, so renamed copies match.
+    /// Similarity between two methods is 2 × LCS / (|a| + |b|) over those token sequences.
     /// </summary>
     public class DuplicateCodeAnalyzer
     {
+        private const string DeclaredNameToken = "$id";
+        private const int ShingleLength = 5;
+        private const int MaxShinglePostings = 64;
+        private const long MaxLcsCells = 10_000_000;
+
         private readonly ILogger<DuplicateCodeAnalyzer> _logger;
 
         public DuplicateCodeAnalyzer(ILogger<DuplicateCodeAnalyzer> logger)
@@ -78,8 +89,9 @@ namespace RoslynMcpServer.Core.Services
                 var solution = await workspace.OpenSolutionAsync(solutionPath);
                 results.AnalyzedProjects = solution.Projects.Count();
 
-                // Extract all code blocks
-                var allCodeBlocks = new ConcurrentBag<CodeBlockInfo>();
+                // Collect all methods with a body
+                var allMethods = new ConcurrentBag<(MethodDeclarationSyntax Method, string ProjectName)>();
+                int failedProjects = 0;
 
                 var projectTasks = solution.Projects
                     .Where(p => p.SupportsCompilation)
@@ -93,97 +105,41 @@ namespace RoslynMcpServer.Core.Services
                             foreach (var syntaxTree in compilation.SyntaxTrees)
                             {
                                 var root = await syntaxTree.GetRootAsync();
-                                var filePath = syntaxTree.FilePath;
-                                var fileName = Path.GetFileName(filePath);
 
-                                results.AnalyzedFiles++;
-
-                                // Extract methods
-                                var methods = root.DescendantNodes()
-                                    .OfType<MethodDeclarationSyntax>()
-                                    .Where(m => m.Body != null || m.ExpressionBody != null);
-
-                                foreach (var method in methods)
+                                foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
                                 {
-                                    results.AnalyzedMethods++;
-
-                                    var lineSpan = method.GetLocation().GetLineSpan();
-                                    var lineCount = lineSpan.EndLinePosition.Line - lineSpan.StartLinePosition.Line + 1;
-
-                                    // Only analyze methods with sufficient lines
-                                    if (lineCount >= minLines)
-                                    {
-                                        var normalizedCode = NormalizeCode(method);
-                                        var hash = ComputeHash(normalizedCode);
-
-                                        allCodeBlocks.Add(new CodeBlockInfo
-                                        {
-                                            MethodName = method.Identifier.Text,
-                                            FileName = fileName,
-                                            FilePath = filePath,
-                                            StartLine = lineSpan.StartLinePosition.Line + 1,
-                                            EndLine = lineSpan.EndLinePosition.Line + 1,
-                                            LineCount = lineCount,
-                                            ProjectName = project.Name,
-                                            NormalizedCode = normalizedCode,
-                                            Hash = hash,
-                                            OriginalNode = method
-                                        });
-                                    }
+                                    if (method.Body != null || method.ExpressionBody != null)
+                                        allMethods.Add((method, project.Name));
                                 }
                             }
                         }
                         catch (Exception ex)
                         {
                             _logger.LogWarning(ex, "Failed to analyze project: {ProjectName}", project.Name);
-                            results.FailedProjects++;
+                            Interlocked.Increment(ref failedProjects);
                         }
                     });
 
                 await Task.WhenAll(projectTasks);
 
-                // Group by hash to find potential duplicates
-                var groupedByHash = allCodeBlocks
-                    .GroupBy(b => b.Hash)
-                    .Where(g => g.Count() > 1)  // Only groups with 2+ instances
+                results.FailedProjects = failedProjects;
+
+                // A file compiled into several projects (multi-targeting, linked files) must not
+                // report each of its methods as a duplicate of itself: keep one copy per location.
+                var distinctMethods = allMethods
+                    .GroupBy(m => (m.Method.SyntaxTree.FilePath, m.Method.SpanStart))
+                    .Select(g => g.OrderBy(m => m.ProjectName, StringComparer.Ordinal).First())
                     .ToList();
 
-                int groupId = 1;
-                foreach (var group in groupedByHash)
-                {
-                    var blocks = group.ToList();
+                results.AnalyzedFiles = distinctMethods.Select(m => m.Method.SyntaxTree.FilePath).Distinct().Count();
+                results.AnalyzedMethods = distinctMethods.Count;
 
-                    // Calculate similarity for each pair
-                    var instances = blocks.Select(b => new CodeBlockInstance
-                    {
-                        MethodName = b.MethodName,
-                        FileName = b.FileName,
-                        FilePath = b.FilePath,
-                        StartLine = b.StartLine,
-                        EndLine = b.EndLine,
-                        LineCount = b.LineCount,
-                        ProjectName = b.ProjectName,
-                        CodeSnippet = GetCodeSnippet(b.OriginalNode, 3)
-                    }).ToList();
-
-                    // Since they have the same hash, they are 100% similar (after normalization)
-                    var duplicateBlock = new DuplicateCodeBlock
-                    {
-                        GroupId = groupId++,
-                        Instances = instances,
-                        SimilarityPercentage = 100,
-                        LineCount = blocks.First().LineCount,
-                        Hash = group.Key
-                    };
-
-                    results.DuplicateBlocks.Add(duplicateBlock);
-                }
-
-                // Sort by line count (larger duplicates first)
-                results.DuplicateBlocks = results.DuplicateBlocks
-                    .OrderByDescending(b => b.LineCount)
-                    .ThenByDescending(b => b.Instances.Count)
+                var blocks = distinctMethods
+                    .Select(m => CreateCodeBlock(m.Method, m.ProjectName))
+                    .Where(b => b.LineCount >= minLines && b.Tokens.Length > 0)
                     .ToList();
+
+                results.DuplicateBlocks = FindDuplicateBlocks(blocks, similarityThreshold);
 
                 CalculateStatistics(results);
 
@@ -206,46 +162,300 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Normalizes code by removing whitespace, comments, and standardizing identifiers
+        /// Builds the comparison unit for a method: location, line span of the whole declaration,
+        /// and the normalized token sequence of its body.
         /// </summary>
-        private string NormalizeCode(SyntaxNode node)
+        internal static CodeBlockInfo CreateCodeBlock(MethodDeclarationSyntax method, string projectName)
         {
-            // Clone the node and normalize it
-            var normalized = node.NormalizeWhitespace();
+            var filePath = method.SyntaxTree.FilePath;
+            var lineSpan = method.GetLocation().GetLineSpan();
+            var tokens = NormalizeBody(method);
 
-            // Remove all trivia (comments, whitespace)
-            normalized = normalized.WithoutTrivia();
+            return new CodeBlockInfo
+            {
+                MethodName = method.Identifier.Text,
+                FileName = Path.GetFileName(filePath),
+                FilePath = filePath,
+                StartLine = lineSpan.StartLinePosition.Line + 1,
+                EndLine = lineSpan.EndLinePosition.Line + 1,
+                LineCount = lineSpan.EndLinePosition.Line - lineSpan.StartLinePosition.Line + 1,
+                ProjectName = projectName,
+                Tokens = tokens,
+                Hash = ComputeHash(string.Join(" ", tokens)),
+                OriginalNode = method
+            };
+        }
 
-            // Get the string representation
-            var code = normalized.ToFullString();
+        /// <summary>
+        /// Token sequence of the method body with comments, whitespace, declared names, and literal
+        /// values normalized away. Names that are not declared in the method (types, members,
+        /// called methods) are kept, so two methods only match if they do the same things.
+        /// </summary>
+        internal static string[] NormalizeBody(MethodDeclarationSyntax method)
+        {
+            SyntaxNode? body = (SyntaxNode?)method.Body ?? method.ExpressionBody?.Expression;
+            if (body == null)
+                return Array.Empty<string>();
 
-            // Further normalization: remove extra whitespace
-            code = System.Text.RegularExpressions.Regex.Replace(code, @"\s+", " ");
+            var declaredNames = CollectDeclaredNames(method);
+            var tokens = new List<string>();
 
-            return code.Trim();
+            foreach (var token in body.DescendantTokens())
+            {
+                if (token.IsMissing || token.Span.IsEmpty)
+                    continue;
+
+                switch (token.Kind())
+                {
+                    case SyntaxKind.IdentifierToken:
+                        tokens.Add(declaredNames.Contains(token.ValueText) ? DeclaredNameToken : token.ValueText);
+                        break;
+
+                    case SyntaxKind.NumericLiteralToken:
+                        tokens.Add("$num");
+                        break;
+
+                    case SyntaxKind.CharacterLiteralToken:
+                        tokens.Add("$char");
+                        break;
+
+                    case SyntaxKind.StringLiteralToken:
+                    case SyntaxKind.Utf8StringLiteralToken:
+                    case SyntaxKind.SingleLineRawStringLiteralToken:
+                    case SyntaxKind.MultiLineRawStringLiteralToken:
+                    case SyntaxKind.Utf8SingleLineRawStringLiteralToken:
+                    case SyntaxKind.Utf8MultiLineRawStringLiteralToken:
+                    case SyntaxKind.InterpolatedStringTextToken:
+                        tokens.Add("$str");
+                        break;
+
+                    default:
+                        tokens.Add(token.Text);
+                        break;
+                }
+            }
+
+            return tokens.ToArray();
+        }
+
+        private static HashSet<string> CollectDeclaredNames(MethodDeclarationSyntax method)
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var node in method.DescendantNodes())
+            {
+                var identifier = node switch
+                {
+                    ParameterSyntax parameter => parameter.Identifier,
+                    TypeParameterSyntax typeParameter => typeParameter.Identifier,
+                    VariableDeclaratorSyntax variable => variable.Identifier,
+                    ForEachStatementSyntax forEach => forEach.Identifier,
+                    CatchDeclarationSyntax catchDeclaration => catchDeclaration.Identifier,
+                    SingleVariableDesignationSyntax designation => designation.Identifier,
+                    LocalFunctionStatementSyntax localFunction => localFunction.Identifier,
+                    FromClauseSyntax from => from.Identifier,
+                    LetClauseSyntax let => let.Identifier,
+                    JoinClauseSyntax join => join.Identifier,
+                    JoinIntoClauseSyntax joinInto => joinInto.Identifier,
+                    QueryContinuationSyntax continuation => continuation.Identifier,
+                    _ => default
+                };
+
+                if (identifier.IsKind(SyntaxKind.IdentifierToken) && identifier.ValueText.Length > 0)
+                    names.Add(identifier.ValueText);
+            }
+
+            return names;
+        }
+
+        /// <summary>
+        /// Groups blocks into duplicate sets.
+        /// Blocks with identical normalized bodies form one unit (100% similar). When the threshold
+        /// is below 100, units are clustered around seeds, largest first: each seed collects every
+        /// unassigned unit whose similarity to it reaches the threshold, and the group reports the
+        /// lowest of those similarities. Candidates are found through shared 5-token shingles.
+        /// </summary>
+        internal static List<DuplicateCodeBlock> FindDuplicateBlocks(IReadOnlyList<CodeBlockInfo> blocks, int similarityThreshold)
+        {
+            // Exact units, largest first, deterministic order
+            var units = blocks
+                .GroupBy(b => b.Hash)
+                .Select(g => g
+                    .OrderBy(b => b.FilePath, StringComparer.Ordinal)
+                    .ThenBy(b => b.StartLine)
+                    .ToList())
+                .OrderByDescending(g => g[0].Tokens.Length)
+                .ThenBy(g => g[0].FilePath, StringComparer.Ordinal)
+                .ThenBy(g => g[0].StartLine)
+                .ToList();
+
+            var clusters = new List<(List<List<CodeBlockInfo>> Units, int Similarity)>();
+
+            if (similarityThreshold >= 100)
+            {
+                clusters.AddRange(units.Select(u => (new List<List<CodeBlockInfo>> { u }, 100)));
+            }
+            else
+            {
+                var shingles = units.Select(u => GetShingles(u[0].Tokens)).ToList();
+                var postings = new Dictionary<int, List<int>>();
+                for (int i = 0; i < units.Count; i++)
+                {
+                    foreach (var shingle in shingles[i])
+                    {
+                        if (!postings.TryGetValue(shingle, out var list))
+                            postings[shingle] = list = new List<int>();
+                        list.Add(i);
+                    }
+                }
+
+                var assigned = new bool[units.Count];
+                for (int seed = 0; seed < units.Count; seed++)
+                {
+                    if (assigned[seed])
+                        continue;
+                    assigned[seed] = true;
+
+                    // Shingles shared by very many methods (boilerplate) do not narrow anything down.
+                    var candidates = new SortedSet<int>();
+                    foreach (var shingle in shingles[seed])
+                    {
+                        var list = postings[shingle];
+                        if (list.Count > MaxShinglePostings)
+                            continue;
+                        foreach (var other in list)
+                        {
+                            if (!assigned[other])
+                                candidates.Add(other);
+                        }
+                    }
+
+                    var members = new List<List<CodeBlockInfo>> { units[seed] };
+                    var groupSimilarity = 100;
+                    foreach (var candidate in candidates)
+                    {
+                        var similarity = ComputeSimilarity(units[seed][0].Tokens, units[candidate][0].Tokens, similarityThreshold);
+                        if (similarity < similarityThreshold)
+                            continue;
+
+                        members.Add(units[candidate]);
+                        assigned[candidate] = true;
+                        groupSimilarity = Math.Min(groupSimilarity, similarity);
+                    }
+
+                    clusters.Add((members, groupSimilarity));
+                }
+            }
+
+            var duplicateBlocks = new List<DuplicateCodeBlock>();
+            foreach (var (clusterUnits, similarity) in clusters)
+            {
+                var clusterBlocks = clusterUnits.SelectMany(u => u).ToList();
+                if (clusterBlocks.Count < 2)
+                    continue;
+
+                duplicateBlocks.Add(new DuplicateCodeBlock
+                {
+                    Instances = clusterBlocks.Select(b => new CodeBlockInstance
+                    {
+                        MethodName = b.MethodName,
+                        FileName = b.FileName,
+                        FilePath = b.FilePath,
+                        StartLine = b.StartLine,
+                        EndLine = b.EndLine,
+                        LineCount = b.LineCount,
+                        ProjectName = b.ProjectName,
+                        CodeSnippet = GetCodeSnippet(b.OriginalNode, 3)
+                    }).ToList(),
+                    SimilarityPercentage = similarity,
+                    LineCount = clusterBlocks.Max(b => b.LineCount),
+                    Hash = clusterUnits[0][0].Hash
+                });
+            }
+
+            // Sort by line count (larger duplicates first)
+            duplicateBlocks = duplicateBlocks
+                .OrderByDescending(b => b.LineCount)
+                .ThenByDescending(b => b.Instances.Count)
+                .ThenByDescending(b => b.SimilarityPercentage)
+                .ToList();
+
+            for (int i = 0; i < duplicateBlocks.Count; i++)
+                duplicateBlocks[i].GroupId = i + 1;
+
+            return duplicateBlocks;
+        }
+
+        /// <summary>
+        /// Similarity in percent (rounded down): 2 × LCS / (|a| + |b|) over the token sequences.
+        /// Returns 0 early when the length difference alone rules out reaching the threshold.
+        /// </summary>
+        internal static int ComputeSimilarity(string[] a, string[] b, int threshold = 0)
+        {
+            if (a.Length == 0 || b.Length == 0)
+                return 0;
+
+            var total = a.Length + b.Length;
+            if (200L * Math.Min(a.Length, b.Length) < (long)threshold * total)
+                return 0;
+
+            if ((long)a.Length * b.Length > MaxLcsCells)
+                return a.SequenceEqual(b) ? 100 : 0;
+
+            // Classic two-row LCS
+            var previous = new int[b.Length + 1];
+            var current = new int[b.Length + 1];
+            for (int i = 1; i <= a.Length; i++)
+            {
+                for (int j = 1; j <= b.Length; j++)
+                {
+                    current[j] = a[i - 1] == b[j - 1]
+                        ? previous[j - 1] + 1
+                        : Math.Max(previous[j], current[j - 1]);
+                }
+                (previous, current) = (current, previous);
+            }
+
+            return (int)(200L * previous[b.Length] / total);
+        }
+
+        private static HashSet<int> GetShingles(string[] tokens)
+        {
+            var shingles = new HashSet<int>();
+            for (int i = 0; i + ShingleLength <= tokens.Length; i++)
+            {
+                var hash = new HashCode();
+                for (int j = 0; j < ShingleLength; j++)
+                    hash.Add(tokens[i + j], StringComparer.Ordinal);
+                shingles.Add(hash.ToHashCode());
+            }
+
+            // Bodies shorter than one shingle still need a key to be compared at all.
+            if (shingles.Count == 0 && tokens.Length > 0)
+                shingles.Add(string.Join(" ", tokens).GetHashCode());
+
+            return shingles;
         }
 
         /// <summary>
         /// Computes SHA256 hash of the code
         /// </summary>
-        private string ComputeHash(string code)
+        private static string ComputeHash(string code)
         {
-            using var sha256 = SHA256.Create();
             var bytes = Encoding.UTF8.GetBytes(code);
-            var hash = sha256.ComputeHash(bytes);
-            return Convert.ToBase64String(hash);
+            return Convert.ToBase64String(SHA256.HashData(bytes));
         }
 
         /// <summary>
         /// Gets a code snippet (first N lines) for preview
         /// </summary>
-        private string GetCodeSnippet(SyntaxNode node, int maxLines)
+        private static string GetCodeSnippet(SyntaxNode node, int maxLines)
         {
-            var lines = node.ToFullString()
+            var lines = node.ToString()
                 .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                .Take(maxLines)
                 .Select(l => l.Trim())
-                .Where(l => !string.IsNullOrWhiteSpace(l));
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .Take(maxLines);
 
             return string.Join("\n", lines);
         }
@@ -268,7 +478,7 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Internal class to hold code block information during analysis
         /// </summary>
-        private class CodeBlockInfo
+        internal class CodeBlockInfo
         {
             public string MethodName { get; set; } = string.Empty;
             public string FileName { get; set; } = string.Empty;
@@ -277,7 +487,7 @@ namespace RoslynMcpServer.Core.Services
             public int EndLine { get; set; }
             public int LineCount { get; set; }
             public string ProjectName { get; set; } = string.Empty;
-            public string NormalizedCode { get; set; } = string.Empty;
+            public string[] Tokens { get; set; } = Array.Empty<string>();
             public string Hash { get; set; } = string.Empty;
             public SyntaxNode OriginalNode { get; set; } = null!;
         }

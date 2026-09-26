@@ -96,16 +96,18 @@ public class SecurityTools
 
     [McpServerTool, Description("""
         Check every catch clause in the solution: EmptyCatch (no statements, High), SwallowedException (no throw and
-        no logging-like call, Medium), and GenericException for catching exactly System.Exception (Low, always
-        reported). MissingUsing (Medium) flags every local of an IDisposable type, including using var declarations
-        and returned objects, so it is noisy. Line numbers point to the enclosing try statement. Returns findings
-        grouped by issue type, up to 10 per type; only detailed format includes file paths.
+        no logging-like call, Medium), and GenericException (catch (System.Exception) or a bare catch, without an
+        exception filter, Low). MissingUsing (Medium) flags IDisposable locals the method creates (new, a static
+        factory, or a Create/Open/Begin call) and never disposes, returns, stores, or passes on; using declarations
+        are not flagged. Each file is analyzed once, and line numbers point to the catch clause or declaration.
+        Returns findings grouped by issue type, up to 10 per type, with method and file:line; detailed adds full
+        paths and the caught exception type.
         """)]
     public static async Task<string> AnalyzeExceptionHandling(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
-        [Description("Comma-separated, case-insensitive: EmptyCatch, SwallowedException, MissingUsing, or all. GenericException findings are always included; GenericCatch is accepted as an alias for SwallowedException. Default: all")]
+        [Description("Comma-separated, case-insensitive: EmptyCatch, SwallowedException, GenericException (alias GenericCatch), MissingUsing, or all. Default: all")]
         string issueTypes = "all",
         Phase2AnalysisService analyzer = null!,
         SecurityValidator validator = null!,
@@ -116,15 +118,16 @@ public class SecurityTools
             var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
             if (pathError != null) return pathError;
 
-            var checkEmptyCatch = issueTypes.Contains("EmptyCatch", StringComparison.OrdinalIgnoreCase) ||
-                                 issueTypes.Equals("all", StringComparison.OrdinalIgnoreCase);
-            var checkSwallowedExceptions = issueTypes.Contains("SwallowedException", StringComparison.OrdinalIgnoreCase) ||
-                                          issueTypes.Contains("GenericCatch", StringComparison.OrdinalIgnoreCase) ||
-                                          issueTypes.Equals("all", StringComparison.OrdinalIgnoreCase);
-            var checkMissingUsing = issueTypes.Contains("MissingUsing", StringComparison.OrdinalIgnoreCase) ||
-                                   issueTypes.Equals("all", StringComparison.OrdinalIgnoreCase);
+            var requested = issueTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var all = requested.Count == 0 || requested.Contains("all");
 
-            var results = await analyzer.AnalyzeExceptionHandlingAsync(solutionPath, checkEmptyCatch, checkSwallowedExceptions, checkMissingUsing);
+            var results = await analyzer.AnalyzeExceptionHandlingAsync(
+                solutionPath,
+                checkEmptyCatch: all || requested.Contains("EmptyCatch"),
+                checkSwallowedExceptions: all || requested.Contains("SwallowedException"),
+                checkMissingUsing: all || requested.Contains("MissingUsing"),
+                checkGenericCatch: all || requested.Contains("GenericException") || requested.Contains("GenericCatch"));
 
             return format.ToLowerInvariant() switch
             {
@@ -269,6 +272,7 @@ public class SecurityTools
         output.AppendLine($"  Empty catch: {results.EmptyCatchCount}");
         output.AppendLine($"  Swallowed: {results.SwallowedExceptionCount}");
         output.AppendLine($"  Generic catch: {results.GenericCatchCount}");
+        output.AppendLine($"  Missing using: {results.MissingUsingCount}");
         return output.ToString();
     }
 

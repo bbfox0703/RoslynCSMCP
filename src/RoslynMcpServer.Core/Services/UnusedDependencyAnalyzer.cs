@@ -4,7 +4,6 @@ using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.Extensions.Logging;
 using RoslynMcpServer.Core.Models;
 using System.Collections.Concurrent;
-using System.Xml.Linq;
 
 namespace RoslynMcpServer.Core.Services
 {
@@ -55,13 +54,18 @@ namespace RoslynMcpServer.Core.Services
                 var solution = await workspace.OpenSolutionAsync(solutionPath);
                 results.AnalyzedProjects = solution.Projects.Count();
 
-                // Process projects in parallel
+                // Process projects in parallel. A multi-targeted project appears once per target
+                // framework; it is judged once, over all of its target frameworks.
                 var unusedDependencies = new ConcurrentBag<UnusedDependency>();
+                int failedProjects = 0;
 
                 var projectTasks = solution.Projects
                     .Where(p => p.SupportsCompilation)
-                    .Select(async project =>
+                    .GroupBy(p => p.FilePath ?? p.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(async projectGroup =>
                     {
+                        var targetFrameworkProjects = projectGroup.ToList();
+                        var project = targetFrameworkProjects[0];
                         try
                         {
                             var projectUnused = new List<UnusedDependency>();
@@ -69,14 +73,14 @@ namespace RoslynMcpServer.Core.Services
                             // Analyze NuGet packages
                             if (includeNuGetPackages)
                             {
-                                var packageDeps = await AnalyzeNuGetPackagesAsync(project);
+                                var packageDeps = await AnalyzeNuGetPackagesAsync(project, targetFrameworkProjects);
                                 projectUnused.AddRange(packageDeps);
                             }
 
                             // Analyze project references
                             if (includeProjectReferences)
                             {
-                                var projectDeps = await AnalyzeProjectReferencesAsync(project, solution);
+                                var projectDeps = await AnalyzeProjectReferencesAsync(targetFrameworkProjects, solution);
                                 projectUnused.AddRange(projectDeps);
                             }
 
@@ -88,13 +92,18 @@ namespace RoslynMcpServer.Core.Services
                         catch (Exception ex)
                         {
                             _logger.LogWarning(ex, "Failed to analyze project: {ProjectName}", project.Name);
-                            results.FailedProjects++;
+                            Interlocked.Increment(ref failedProjects);
                         }
                     });
 
                 await Task.WhenAll(projectTasks);
 
-                results.UnusedDependencies = unusedDependencies.ToList();
+                results.FailedProjects = failedProjects;
+                results.UnusedDependencies = unusedDependencies
+                    .OrderBy(d => d.ProjectName, StringComparer.Ordinal)
+                    .ThenBy(d => d.Type, StringComparer.Ordinal)
+                    .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
                 CalculateStatistics(results);
 
                 _logger.LogInformation(
@@ -116,9 +125,10 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Analyzes NuGet package references for a project
+        /// Analyzes NuGet package references for a project file, using the same heuristic as
+        /// AnalyzePackages (see <see cref="PackageUsageHeuristics"/>).
         /// </summary>
-        private async Task<List<UnusedDependency>> AnalyzeNuGetPackagesAsync(Project project)
+        private async Task<List<UnusedDependency>> AnalyzeNuGetPackagesAsync(Project project, IReadOnlyList<Project> targetFrameworkProjects)
         {
             var unusedPackages = new List<UnusedDependency>();
 
@@ -128,50 +138,23 @@ namespace RoslynMcpServer.Core.Services
                 if (project.FilePath == null || !File.Exists(project.FilePath))
                     return unusedPackages;
 
-                var projectXml = await File.ReadAllTextAsync(project.FilePath);
-                var doc = XDocument.Parse(projectXml);
-
-                var packageReferences = doc.Descendants("PackageReference")
-                    .Select(pr => new
-                    {
-                        Name = pr.Attribute("Include")?.Value ?? string.Empty,
-                        Version = pr.Attribute("Version")?.Value ?? pr.Element("Version")?.Value ?? string.Empty
-                    })
-                    .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
-                    .ToList();
-
+                var packageReferences = PackageUsageHeuristics.ReadPackageReferences(project.FilePath);
                 if (!packageReferences.Any())
                     return unusedPackages;
 
-                // Get all using directives in the project
-                var compilation = await project.GetCompilationAsync();
-                if (compilation == null)
-                    return unusedPackages;
-
-                var allUsings = new HashSet<string>();
-                foreach (var syntaxTree in compilation.SyntaxTrees)
+                // Get all using directives (including global usings) in every target framework
+                var importedNamespaces = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var targetProject in targetFrameworkProjects)
                 {
-                    var root = await syntaxTree.GetRootAsync();
-                    var usingDirectives = root.DescendantNodes()
-                        .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.UsingDirectiveSyntax>()
-                        .Select(u => u.Name?.ToString() ?? string.Empty)
-                        .Where(n => !string.IsNullOrWhiteSpace(n));
-
-                    foreach (var usingDir in usingDirectives)
-                    {
-                        allUsings.Add(usingDir);
-                    }
+                    var compilation = await targetProject.GetCompilationAsync();
+                    if (compilation != null)
+                        importedNamespaces.UnionWith(PackageUsageHeuristics.CollectImportedNamespaces(compilation.SyntaxTrees));
                 }
 
                 // Check each package
                 foreach (var package in packageReferences)
                 {
-                    // Map common package names to their namespaces
-                    var expectedNamespaces = GetExpectedNamespaces(package.Name);
-
-                    // Check if any expected namespace is used
-                    bool isUsed = expectedNamespaces.Any(ns =>
-                        allUsings.Any(u => u.StartsWith(ns, StringComparison.OrdinalIgnoreCase)));
+                    var (isUsed, expectedNamespaces, _) = PackageUsageHeuristics.Evaluate(package, importedNamespaces);
 
                     if (!isUsed)
                     {
@@ -180,9 +163,9 @@ namespace RoslynMcpServer.Core.Services
                             Name = package.Name,
                             Version = package.Version,
                             Type = "NuGetPackage",
-                            ProjectName = project.Name,
+                            ProjectName = GetProjectDisplayName(project),
                             ProjectPath = project.FilePath,
-                            Reason = "No using directives found for expected namespaces",
+                            Reason = "No using directive (including global usings) imports an expected namespace",
                             ExpectedNamespaces = expectedNamespaces
                         });
                     }
@@ -197,84 +180,54 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Analyzes project references for a project
+        /// Project name without the "(net8.0)" suffix MSBuildWorkspace adds for multi-targeting.
         /// </summary>
-        private async Task<List<UnusedDependency>> AnalyzeProjectReferencesAsync(Project project, Solution solution)
+        private static string GetProjectDisplayName(Project project)
+        {
+            return project.FilePath != null
+                ? Path.GetFileNameWithoutExtension(project.FilePath)
+                : project.Name;
+        }
+
+        /// <summary>
+        /// Analyzes project references for a project file. A reference is reported only when no
+        /// target framework of the project uses it.
+        /// </summary>
+        private async Task<List<UnusedDependency>> AnalyzeProjectReferencesAsync(IReadOnlyList<Project> targetFrameworkProjects, Solution solution)
         {
             var unusedReferences = new List<UnusedDependency>();
+            var project = targetFrameworkProjects[0];
 
             try
             {
-                var compilation = await project.GetCompilationAsync();
-                if (compilation == null)
-                    return unusedReferences;
+                Dictionary<string, Project>? unusedInAll = null;
 
-                // Get all referenced projects
-                var referencedProjects = project.ProjectReferences
-                    .Select(pr => solution.GetProject(pr.ProjectId))
-                    .Where(p => p != null)
-                    .ToList();
-
-                foreach (var referencedProject in referencedProjects)
+                foreach (var targetProject in targetFrameworkProjects)
                 {
-                    if (referencedProject == null)
-                        continue;
-
-                    // Check if any types from the referenced project are used
-                    var referencedCompilation = await referencedProject.GetCompilationAsync();
-                    if (referencedCompilation == null)
-                        continue;
-
-                    var referencedTypes = referencedCompilation.Assembly.GlobalNamespace
-                        .GetNamespaceMembers()
-                        .SelectMany(ns => GetAllTypes(ns))
-                        .Select(t => t.ToDisplayString())
-                        .ToHashSet();
-
-                    // Check if any referenced type is used in the project
-                    bool isUsed = false;
-                    foreach (var syntaxTree in compilation.SyntaxTrees)
+                    var unused = await FindUnusedProjectReferencesAsync(targetProject, solution);
+                    if (unusedInAll == null)
                     {
-                        var semanticModel = compilation.GetSemanticModel(syntaxTree);
-                        var root = await syntaxTree.GetRootAsync();
-
-                        var identifiers = root.DescendantNodes()
-                            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>();
-
-                        foreach (var identifier in identifiers)
-                        {
-                            var symbolInfo = semanticModel.GetSymbolInfo(identifier);
-                            var symbol = symbolInfo.Symbol;
-
-                            if (symbol != null)
-                            {
-                                var containingAssembly = symbol.ContainingAssembly;
-                                if (containingAssembly != null &&
-                                    containingAssembly.Name == referencedCompilation.AssemblyName)
-                                {
-                                    isUsed = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (isUsed)
-                            break;
+                        unusedInAll = unused;
                     }
-
-                    if (!isUsed)
+                    else
                     {
-                        unusedReferences.Add(new UnusedDependency
-                        {
-                            Name = referencedProject.Name,
-                            Version = string.Empty,
-                            Type = "ProjectReference",
-                            ProjectName = project.Name,
-                            ProjectPath = project.FilePath ?? string.Empty,
-                            Reason = "No types from this project are used",
-                            ExpectedNamespaces = new List<string>()
-                        });
+                        foreach (var key in unusedInAll.Keys.Except(unused.Keys).ToList())
+                            unusedInAll.Remove(key);
                     }
+                }
+
+                foreach (var referencedProject in (unusedInAll ?? new Dictionary<string, Project>()).Values)
+                {
+                    unusedReferences.Add(new UnusedDependency
+                    {
+                        Name = GetProjectDisplayName(referencedProject),
+                        Version = string.Empty,
+                        Type = "ProjectReference",
+                        ProjectName = GetProjectDisplayName(project),
+                        ProjectPath = project.FilePath ?? string.Empty,
+                        Reason = "No types from this project are used",
+                        ExpectedNamespaces = new List<string>()
+                    });
                 }
             }
             catch (Exception ex)
@@ -286,65 +239,61 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Gets all types from a namespace recursively
+        /// Referenced projects (keyed by project file) that no identifier in this compilation binds to.
         /// </summary>
-        private IEnumerable<INamedTypeSymbol> GetAllTypes(INamespaceSymbol ns)
+        private async Task<Dictionary<string, Project>> FindUnusedProjectReferencesAsync(Project project, Solution solution)
         {
-            foreach (var type in ns.GetTypeMembers())
-            {
-                yield return type;
-            }
+            var unused = new Dictionary<string, Project>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var childNs in ns.GetNamespaceMembers())
+            var compilation = await project.GetCompilationAsync();
+            if (compilation == null)
+                return unused;
+
+            // Get all referenced projects
+            var referencedProjects = project.ProjectReferences
+                .Select(pr => solution.GetProject(pr.ProjectId))
+                .Where(p => p != null)
+                .Cast<Project>()
+                .ToList();
+
+            foreach (var referencedProject in referencedProjects)
             {
-                foreach (var type in GetAllTypes(childNs))
+                // Check if any types from the referenced project are used
+                var referencedCompilation = await referencedProject.GetCompilationAsync();
+                if (referencedCompilation == null)
+                    continue;
+
+                // Check if any referenced symbol is used in the project
+                bool isUsed = false;
+                foreach (var syntaxTree in compilation.SyntaxTrees)
                 {
-                    yield return type;
+                    var semanticModel = compilation.GetSemanticModel(syntaxTree);
+                    var root = await syntaxTree.GetRootAsync();
+
+                    var identifiers = root.DescendantNodes()
+                        .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>();
+
+                    foreach (var identifier in identifiers)
+                    {
+                        var symbol = semanticModel.GetSymbolInfo(identifier).Symbol;
+                        var containingAssembly = symbol?.ContainingAssembly;
+                        if (containingAssembly != null &&
+                            containingAssembly.Name == referencedCompilation.AssemblyName)
+                        {
+                            isUsed = true;
+                            break;
+                        }
+                    }
+
+                    if (isUsed)
+                        break;
                 }
-            }
-        }
 
-        /// <summary>
-        /// Maps package names to their expected namespaces
-        /// </summary>
-        private List<string> GetExpectedNamespaces(string packageName)
-        {
-            // Common package name to namespace mappings
-            var mappings = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
-            {
-                { "Newtonsoft.Json", new List<string> { "Newtonsoft.Json" } },
-                { "Microsoft.Extensions.Logging", new List<string> { "Microsoft.Extensions.Logging" } },
-                { "Microsoft.Extensions.DependencyInjection", new List<string> { "Microsoft.Extensions.DependencyInjection" } },
-                { "Microsoft.EntityFrameworkCore", new List<string> { "Microsoft.EntityFrameworkCore" } },
-                { "AutoMapper", new List<string> { "AutoMapper" } },
-                { "Serilog", new List<string> { "Serilog" } },
-                { "FluentValidation", new List<string> { "FluentValidation" } },
-                { "MediatR", new List<string> { "MediatR" } },
-                { "Dapper", new List<string> { "Dapper" } },
-                { "NUnit", new List<string> { "NUnit.Framework" } },
-                { "xUnit", new List<string> { "Xunit" } },
-                { "Moq", new List<string> { "Moq" } },
-                { "System.Text.Json", new List<string> { "System.Text.Json" } }
-            };
-
-            if (mappings.TryGetValue(packageName, out var namespaces))
-            {
-                return namespaces;
+                if (!isUsed)
+                    unused[referencedProject.FilePath ?? referencedProject.Name] = referencedProject;
             }
 
-            // Default: assume package name is the namespace
-            // Split by dots and try various combinations
-            var parts = packageName.Split('.');
-            var expectedNamespaces = new List<string> { packageName };
-
-            // For packages like "Microsoft.Extensions.Logging.Abstractions",
-            // also check "Microsoft.Extensions.Logging"
-            if (parts.Length > 2)
-            {
-                expectedNamespaces.Add(string.Join(".", parts.Take(parts.Length - 1)));
-            }
-
-            return expectedNamespaces;
+            return unused;
         }
 
         /// <summary>

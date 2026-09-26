@@ -256,10 +256,11 @@ public class AdvancedTools
 
     [McpServerTool, Description("""
         Scan every comment in the solution's compiled files, including XML doc comments, for TODO, FIXME, HACK,
-        NOTE, BUG, XXX, OPTIMIZE, and REFACTOR markers. Matching is case-insensitive and ignores word boundaries, so
-        words like 'debug' or 'notes' register as BUG or NOTE, and each comment yields at most one marker. Returns
-        up to 10 entries per marker type with file:line and the first 50 characters of the text. A path that fails
-        to load returns the same text as a clean result.
+        NOTE, BUG, XXX, OPTIMIZE, and REFACTOR markers. Markers must be whole words, so 'debug' or 'notes' do not
+        count; a marker in any case is accepted at the start of a comment line, elsewhere only in upper case. Each
+        comment line yields at most one marker: the first one of a requested type. Returns up to 10 entries per
+        marker type with file:line and the first 50 characters of the text. A path that fails to load returns the
+        same text as a clean result.
         """)]
     public static async Task<string> FindTODOComments(
         [Description("Path to solution file (.sln)")] string solutionPath,
@@ -335,12 +336,14 @@ public class AdvancedTools
     }
 
     [McpServerTool, Description("""
-        Run five name- and syntax-based heuristics over every file in the solution, with frequent false positives:
-        LinqMisuse (every Enumerable.Count() call, nested ToList(), ToList() inside a foreach), StringConcatenation
-        (+= in loops whose target name contains 'string', 'str', or 'text'), SyncOverAsync (any .Result or .Wait
-        inside an async method), DisposableNotDisposed (IDisposable-typed fields; local variables are never
-        reported), and ExceptionHandling (empty catch blocks). Groups issues by type, 5 per type (20 in detailed). A
-        path that fails to load returns the same text as a clean result.
+        Run five heuristics over every file in the solution. LinqMisuse (every Enumerable.Count() call, nested
+        ToList(), ToList() inside a foreach) and SyncOverAsync (any .Result or .Wait inside an async method) are
+        name-based and produce false positives. StringConcatenation reports each string += x or s = s + x inside a
+        loop once, skipping strings declared inside that loop. DisposableNotDisposed reports locals created with new,
+        a static factory, or a Create/Open/Begin call that are never disposed, returned, stored, or passed on, and
+        instance fields a type creates but never disposes. ExceptionHandling reports each empty catch block once.
+        Groups issues by type, 5 per type (20 in detailed). A path that fails to load returns the same text as a
+        clean result.
         """)]
     public static async Task<string> FindPerformanceIssues(
         [Description("Path to solution file (.sln)")] string solutionPath,

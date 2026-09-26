@@ -15,10 +15,20 @@ namespace RoslynMcpServer.Core.Services
     {
         private readonly ILogger<TODOCommentAnalyzer> _logger;
 
-        // Pattern to match TODO/FIXME/HACK/NOTE/BUG comments
+        internal static readonly string[] DefaultCommentTypes = { "TODO", "FIXME", "HACK", "NOTE", "BUG", "XXX", "OPTIMIZE", "REFACTOR" };
+
+        // A marker is a whole word: "debug" is not BUG and "notes" is not NOTE. An XML tag such as
+        // <note> is not a marker either. Group 1 = marker, 2 = author in TODO(name); the message is the
+        // rest of the line. The pattern does not consume the message, so later markers on the same
+        // line are still visited.
         private static readonly Regex CommentPattern = new Regex(
-            @"(TODO|FIXME|HACK|NOTE|BUG|XXX|OPTIMIZE|REFACTOR)\s*(?:\(([^)]+)\))?\s*:?\s*(.+)",
+            @"(?<!\w|</?)(TODO|FIXME|HACK|NOTE|BUG|XXX|OPTIMIZE|REFACTOR)\b(?:\s*\(([^)]*)\))?\s*:?",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Comment delimiters and decoration that may precede a marker at the start of a comment line.
+        private static readonly Regex LineLeadPattern = new Regex(
+            @"^\s*(?:///?|/\*+|\*+)?\s*$",
+            RegexOptions.Compiled);
 
         public TODOCommentAnalyzer(ILogger<TODOCommentAnalyzer> logger)
         {
@@ -47,7 +57,7 @@ namespace RoslynMcpServer.Core.Services
                 }
 
                 // Default comment types if not specified
-                var targetTypes = commentTypes ?? new[] { "TODO", "FIXME", "HACK", "NOTE", "BUG", "XXX", "OPTIMIZE", "REFACTOR" };
+                var targetTypes = commentTypes ?? DefaultCommentTypes;
                 var targetTypesSet = new HashSet<string>(targetTypes, StringComparer.OrdinalIgnoreCase);
 
                 // Load solution
@@ -65,6 +75,8 @@ namespace RoslynMcpServer.Core.Services
 
                 // Collect all TODO comments
                 var allComments = new ConcurrentBag<TODOComment>();
+                var analyzedFiles = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+                int failedProjects = 0;
 
                 var projectTasks = solution.Projects
                     .Where(p => p.SupportsCompilation)
@@ -77,57 +89,45 @@ namespace RoslynMcpServer.Core.Services
 
                             foreach (var syntaxTree in compilation.SyntaxTrees)
                             {
-                                var root = await syntaxTree.GetRootAsync();
                                 var filePath = syntaxTree.FilePath;
-                                var fileName = Path.GetFileName(filePath);
 
-                                results.AnalyzedFiles++;
+                                // A file compiled into several projects (multi-targeting, linked files) is scanned once.
+                                if (!analyzedFiles.TryAdd(filePath, 0))
+                                    continue;
+
+                                var root = await syntaxTree.GetRootAsync();
+                                var fileName = Path.GetFileName(filePath);
 
                                 // Get all trivia (comments, whitespace, etc.)
                                 var allTrivia = root.DescendantTrivia();
 
                                 foreach (var trivia in allTrivia)
                                 {
-                                    if (trivia.IsKind(SyntaxKind.SingleLineCommentTrivia) ||
-                                        trivia.IsKind(SyntaxKind.MultiLineCommentTrivia) ||
-                                        trivia.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) ||
-                                        trivia.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia))
+                                    if (!trivia.IsKind(SyntaxKind.SingleLineCommentTrivia) &&
+                                        !trivia.IsKind(SyntaxKind.MultiLineCommentTrivia) &&
+                                        !trivia.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) &&
+                                        !trivia.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia))
                                     {
-                                        var commentText = trivia.ToString();
-                                        var match = CommentPattern.Match(commentText);
+                                        continue;
+                                    }
 
-                                        if (match.Success)
+                                    var firstLine = trivia.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+
+                                    foreach (var marker in FindMarkers(trivia.ToFullString(), targetTypesSet))
+                                    {
+                                        var lineNumber = firstLine + marker.LineOffset;
+
+                                        allComments.Add(new TODOComment
                                         {
-                                            var commentType = match.Groups[1].Value.ToUpperInvariant();
-
-                                            // Filter by target types
-                                            if (!targetTypesSet.Contains(commentType))
-                                                continue;
-
-                                            var author = match.Groups[2].Success ? match.Groups[2].Value.Trim() : string.Empty;
-                                            var message = match.Groups[3].Value.Trim();
-
-                                            // Get line number
-                                            var lineSpan = trivia.GetLocation().GetLineSpan();
-                                            var lineNumber = lineSpan.StartLinePosition.Line + 1;
-
-                                            // Get code context (3 lines before and after)
-                                            var codeContext = GetCodeContext(syntaxTree, lineNumber, 3);
-
-                                            var todoComment = new TODOComment
-                                            {
-                                                Type = commentType,
-                                                Message = message,
-                                                FileName = fileName,
-                                                FilePath = filePath,
-                                                LineNumber = lineNumber,
-                                                ProjectName = project.Name,
-                                                Author = author,
-                                                CodeContext = codeContext
-                                            };
-
-                                            allComments.Add(todoComment);
-                                        }
+                                            Type = marker.Type,
+                                            Message = marker.Message,
+                                            FileName = fileName,
+                                            FilePath = filePath,
+                                            LineNumber = lineNumber,
+                                            ProjectName = project.Name,
+                                            Author = marker.Author,
+                                            CodeContext = GetCodeContext(syntaxTree, lineNumber, 3)
+                                        });
                                     }
                                 }
                             }
@@ -135,11 +135,14 @@ namespace RoslynMcpServer.Core.Services
                         catch (Exception ex)
                         {
                             _logger.LogWarning(ex, "Failed to analyze project: {ProjectName}", project.Name);
-                            results.FailedProjects++;
+                            Interlocked.Increment(ref failedProjects);
                         }
                     });
 
                 await Task.WhenAll(projectTasks);
+
+                results.AnalyzedFiles = analyzedFiles.Count;
+                results.FailedProjects = failedProjects;
 
                 results.Comments = allComments
                     .OrderBy(c => c.Type)
@@ -166,6 +169,46 @@ namespace RoslynMcpServer.Core.Services
             }
 
             return results;
+        }
+
+        internal readonly record struct CommentMarker(string Type, string Author, string Message, int LineOffset);
+
+        /// <summary>
+        /// Finds the markers in one comment, at most one per line: the first whole-word marker on the
+        /// line whose type is in targetTypes. A marker is recognized in any case when it is the first
+        /// word of the comment line ("// todo: ..."), and elsewhere on the line only in upper case,
+        /// so prose such as "works around a bug" is not a BUG marker.
+        /// </summary>
+        internal static IEnumerable<CommentMarker> FindMarkers(string commentText, ISet<string> targetTypes)
+        {
+            var lines = commentText.Split('\n');
+            for (int lineOffset = 0; lineOffset < lines.Length; lineOffset++)
+            {
+                var line = lines[lineOffset].TrimEnd('\r');
+
+                foreach (Match match in CommentPattern.Matches(line))
+                {
+                    var marker = match.Groups[1];
+                    var type = marker.Value.ToUpperInvariant();
+
+                    // Filter by type before choosing the line's marker.
+                    if (!targetTypes.Contains(type))
+                        continue;
+
+                    var isUpperCase = marker.Value == type;
+                    var startsLine = LineLeadPattern.IsMatch(line.Substring(0, marker.Index));
+                    if (!isUpperCase && !startsLine)
+                        continue;
+
+                    var author = match.Groups[2].Success ? match.Groups[2].Value.Trim() : string.Empty;
+                    var message = line.Substring(match.Index + match.Length).Trim();
+                    if (message.EndsWith("*/", StringComparison.Ordinal))
+                        message = message.Substring(0, message.Length - 2).TrimEnd();
+
+                    yield return new CommentMarker(type, author, message, lineOffset);
+                    break;
+                }
+            }
         }
 
         /// <summary>

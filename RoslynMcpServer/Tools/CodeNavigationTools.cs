@@ -613,12 +613,14 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            Flag package and project references that look unused, per project, using heuristics. A PackageReference
-            counts as used when a using directive starts with the package ID (or, for IDs with three or more segments,
-            the ID minus its last segment); a project reference counts as used when any identifier binds to a symbol
-            from that project. Analyzers, build-time packages, test SDKs, packages whose namespaces differ from their
-            IDs, and packages imported only through csproj <Using> items are reported as unused. Summary shows counts
-            and the first 5; normal groups by kind and project, up to 10 each.
+            Flag package and project references that look unused, per project file, using heuristics. A PackageReference
+            counts as used when a using directive, global usings included (such as those the SDK generates from csproj
+            <Using> items), imports the package ID, the ID minus its last segment for IDs with three or more segments, or
+            a sub-namespace of either; packages without compile assets and known build, test, and analyzer packages are
+            never flagged. AnalyzePackages applies the same rule. A project reference counts as used when any
+            identifier binds to a symbol from that project in any target framework. Packages whose namespaces differ
+            from their IDs are still reported as unused. Summary shows counts and the first 5; normal groups by kind
+            and project, up to 10 each.
             """)]
         public static async Task<string> FindUnusedDependencies(
             [Description("Path to solution file (.sln)")] string solutionPath,
@@ -726,18 +728,21 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            Find whole methods whose entire declaration (signature and body, including comments) is textually identical
-            after whitespace normalization. Copies with a different name or signature, near-duplicates, and duplicated
-            fragments inside methods are not detected, and a multi-targeted project reports each method as a duplicate
-            of itself. Returns up to 15 groups, largest first, each with a code preview and file, line range, method,
-            and project per instance; detailed lists all groups.
+            Find methods whose bodies are copies or near-copies. Bodies are compared as token sequences with comments,
+            whitespace, literal values, and names declared inside the method (parameters, locals, loop, catch, and
+            lambda variables) normalized away, so a copy with a different method name, signature, or local names still
+            matches; called methods, members, and types must agree. Similarity is 2 x LCS / (tokens of both bodies),
+            and each group collects the methods at or above the threshold around its largest member. Duplicated
+            fragments inside otherwise different methods are not detected. Returns up to 15 groups, largest first,
+            each with its similarity, a code preview, and file, line range, method, and project per instance;
+            detailed lists all groups.
             """)]
         public static async Task<string> FindDuplicateCode(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
             string format = "normal",
             [Description("Minimum line span of a method's whole declaration for it to be compared; values below 3 are replaced with 5 (default: 5)")] int minLines = 5,
-            [Description("Currently has no effect: only exact matches are found (default: 90)")] int similarity = 90,
+            [Description("Minimum body similarity in percent, 70-100; 100 finds only exact copies after normalization, and values outside the range are replaced with 90 (default: 90)")] int similarity = 90,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -832,10 +837,11 @@ namespace RoslynMcpServer.Tools
 
         [McpServerTool, Description("""
             Scan every comment in the solution's compiled files, including XML doc comments, for TODO, FIXME, HACK,
-            NOTE, BUG, XXX, OPTIMIZE, and REFACTOR markers, capturing an author from the TODO(name): form. Matching is
-            case-insensitive and ignores word boundaries, so words like 'debug' or 'notes' register as BUG or NOTE, and
-            each comment yields at most one marker. Normal groups results by marker type and then project, 10 per
-            project; detailed lists every match with surrounding code.
+            NOTE, BUG, XXX, OPTIMIZE, and REFACTOR markers, capturing an author from the TODO(name): form. Markers
+            must be whole words, so 'debug' or 'notes' do not count; a marker in any case is accepted at the start of
+            a comment line, elsewhere only in upper case. Each comment line yields at most one marker: the first one
+            of a requested type. Normal groups results by marker type and then project, 10 per project; detailed lists
+            every match with surrounding code.
             """)]
         public static async Task<string> FindTODOComments(
             [Description("Path to solution file (.sln)")] string solutionPath,
@@ -1036,17 +1042,20 @@ namespace RoslynMcpServer.Tools
         [McpServerTool, Description("""
             Read the PackageReference items written in each .csproj (versions from Directory.Packages.props or imported
             props are not resolved) and report newer stable versions on nuget.org, packages referenced at different
-            versions across projects, and packages that look unused because no using directive equals the package ID.
-            The update check needs network access and silently returns nothing on failure. Vulnerability checking is not
-            implemented. Normal lists up to 10 updates, 5 conflicts, and 10 unused packages.
+            versions across projects, known vulnerabilities, and packages that look unused. The update check needs
+            network access and silently returns nothing on failure. The vulnerability check runs 'dotnet list package
+            --vulnerable --include-transitive' against the solution, which needs network access and a restored
+            solution; its problems appear as warnings. The unused check is the FindUnusedDependencies heuristic: no
+            using directive, global usings included, imports the package's namespace. Normal lists up to 5
+            vulnerabilities, 10 updates, 5 conflicts, and 10 unused packages.
             """)]
         public static async Task<string> AnalyzePackages(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
             [Description("Query nuget.org for the latest stable version of each package (network access; other feeds are ignored). Default: true")] bool checkUpdates = true,
-            [Description("Not implemented; when true the output only includes a warning saying so. Default: true")] bool checkVulnerabilities = true,
-            [Description("Flag packages whose ID never appears exactly as a using directive in the project; heuristic, with false positives for analyzers, tooling, and multi-namespace packages. Default: true")] bool analyzeUsage = true,
+            [Description("Report packages with known advisories, direct and transitive, using 'dotnet list package --vulnerable' (network access; the solution must already be restored, no restore is run; takes up to a few minutes). Default: true")] bool checkVulnerabilities = true,
+            [Description("Flag packages that no using directive (global usings included) imports; packages without compile assets and known build, test, and analyzer packages are exempt. Heuristic: packages whose namespaces differ from their IDs are false positives. Default: true")] bool analyzeUsage = true,
             IServiceProvider? serviceProvider = null)
         {
             var logger = serviceProvider?.GetService<ILogger<PackageAnalysisService>>();
@@ -1070,7 +1079,11 @@ namespace RoslynMcpServer.Tools
                 // Perform analysis
                 var diagnosticLogger = serviceProvider?.GetService<DiagnosticLogger>();
                 Func<Task<PackageAnalysisResults>> operation = async () =>
-                    await analyzer.AnalyzePackagesAsync(solutionPath, checkUpdates, checkVulnerabilities, analyzeUsage);
+                    await analyzer.AnalyzePackagesAsync(
+                        solutionPath,
+                        checkUpdates: checkUpdates,
+                        checkVulnerabilities: checkVulnerabilities,
+                        analyzeUsage: analyzeUsage);
 
                 var results = diagnosticLogger != null
                     ? await diagnosticLogger.LoggedExecutionAsync(
@@ -1549,13 +1562,14 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            Run five name- and syntax-based heuristics over every file in the solution, with frequent false positives:
-            LinqMisuse (every Enumerable.Count() call, nested ToList(), ToList() inside a foreach), StringConcatenation
-            (+= in loops whose target name contains 'string', 'str', or 'text'), SyncOverAsync (any .Result or .Wait
-            inside an async method), DisposableNotDisposed (IDisposable-typed fields; local variables are never
-            reported), and ExceptionHandling (empty catch blocks). Does not detect boxing or general allocations;
-            AnalyzeMemoryAllocation covers those and has a type-checked string-concatenation check. Normal lists up to
-            10 Critical and 10 High issues; Medium issues appear only in detailed.
+            Run five heuristics over every file in the solution. LinqMisuse (every Enumerable.Count() call, nested
+            ToList(), ToList() inside a foreach) and SyncOverAsync (any .Result or .Wait inside an async method) are
+            name-based and produce false positives. StringConcatenation reports each string += x or s = s + x inside a
+            loop once, skipping strings declared inside that loop. DisposableNotDisposed reports locals created with
+            new, a static factory, or a Create/Open/Begin call that are never disposed, returned, stored, or passed
+            on, and instance fields a type creates but never disposes. ExceptionHandling reports each empty catch
+            block once. Does not detect boxing or general allocations; AnalyzeMemoryAllocation covers those. Normal
+            lists up to 10 Critical and 10 High issues; Medium issues appear only in detailed.
             """)]
         public static async Task<string> FindPerformanceIssues(
             [Description("Path to solution file (.sln)")] string solutionPath,
@@ -6348,12 +6362,13 @@ namespace RoslynMcpServer.Tools
             // Security vulnerabilities
             if (results.Vulnerabilities.Any())
             {
-                output.AppendLine($"🔴 Security Vulnerabilities ({results.VulnerablePackages}):");
-                foreach (var vuln in results.Vulnerabilities.OrderByDescending(v => v.Severity).Take(5))
+                output.AppendLine($"🔴 Security Vulnerabilities (showing top 5 of {results.VulnerablePackages}):");
+                foreach (var vuln in results.Vulnerabilities.Take(5))
                 {
-                    output.AppendLine($"  {GetSeverityIcon(vuln.Severity)} {vuln.PackageName} {vuln.AffectedVersion}");
-                    output.AppendLine($"     → {vuln.VulnerabilityId}: {vuln.Description}");
-                    output.AppendLine($"     → Fix: Upgrade to {vuln.RecommendedVersion}+");
+                    output.AppendLine($"  {GetSeverityIcon(vuln.Severity)} {vuln.PackageName} {vuln.AffectedVersion} ({vuln.Severity}{(vuln.IsTransitive ? ", transitive" : "")})");
+                    output.AppendLine($"     → {vuln.VulnerabilityId}: {vuln.AdvisoryUrl}");
+                    if (!string.IsNullOrEmpty(vuln.RecommendedVersion))
+                        output.AppendLine($"     → Fix: Upgrade to {vuln.RecommendedVersion}+");
                     output.AppendLine($"     → Affected projects: {string.Join(", ", vuln.AffectedProjects)}");
                     output.AppendLine();
                 }
@@ -6447,12 +6462,14 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine($"  Critical: {results.CriticalVulnerabilities}, High: {results.HighVulnerabilities}, " +
                                   $"Medium: {results.MediumVulnerabilities}, Low: {results.LowVulnerabilities}");
                 output.AppendLine();
-                foreach (var vuln in results.Vulnerabilities.OrderByDescending(v => v.Severity))
+                foreach (var vuln in results.Vulnerabilities)
                 {
                     output.AppendLine($"  {GetSeverityIcon(vuln.Severity)} {vuln.Severity} - {vuln.PackageName} {vuln.AffectedVersion}");
                     output.AppendLine($"     ID: {vuln.VulnerabilityId}");
-                    output.AppendLine($"     Description: {vuln.Description}");
-                    output.AppendLine($"     Recommended Version: {vuln.RecommendedVersion}+");
+                    output.AppendLine($"     Advisory: {vuln.AdvisoryUrl}");
+                    output.AppendLine($"     Dependency: {(vuln.IsTransitive ? "transitive" : "direct")}");
+                    if (!string.IsNullOrEmpty(vuln.RecommendedVersion))
+                        output.AppendLine($"     Recommended Version: {vuln.RecommendedVersion}+");
                     output.AppendLine($"     Affected Projects: {string.Join(", ", vuln.AffectedProjects)}");
                     output.AppendLine();
                 }
@@ -8816,17 +8833,19 @@ namespace RoslynMcpServer.Tools
 
         [McpServerTool, Description("""
             Check every catch clause in the solution: EmptyCatch (no statements, High), SwallowedException (no throw and
-            no logging-like call, Medium), and GenericException for catching exactly System.Exception (Low, no parameter
-            disables it). MissingUsing (Medium) flags every local of an IDisposable type, including using var
-            declarations and returned objects, so it is noisy. Line numbers point to the enclosing try statement.
-            Returns counts, then findings grouped by type, up to 10 per type, with file, line, recommendation, and a
-            short code snippet.
+            no logging-like call, Medium), and GenericException (catch (System.Exception) or a bare catch, without an
+            exception filter, Low). MissingUsing (Medium) flags IDisposable locals the method creates (new, a static
+            factory, or a Create/Open/Begin call) and never disposes, returns, stores, or passes on; using
+            declarations are not flagged. Each file is analyzed once, and line numbers point to the catch clause or
+            declaration. Returns counts, then findings grouped by type, up to 10 per type, with file, line,
+            recommendation, and a short code snippet.
             """)]
         public static async Task<string> AnalyzeExceptionHandling(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Check empty catch blocks (default: true)")] bool checkEmptyCatch = true,
             [Description("Check swallowed exceptions (default: true)")] bool checkSwallowedExceptions = true,
-            [Description("Flag locals of IDisposable type that are not in a using statement; using var declarations are flagged too (default: true)")] bool checkMissingUsing = true,
+            [Description("Flag IDisposable locals created in a method and never disposed, returned, stored, or passed on; using declarations are not flagged (default: true)")] bool checkMissingUsing = true,
+            [Description("Flag catch (System.Exception) and bare catch clauses that have no exception filter (default: true)")] bool checkGenericCatch = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -8841,7 +8860,8 @@ namespace RoslynMcpServer.Tools
                     solutionPath,
                     checkEmptyCatch,
                     checkSwallowedExceptions,
-                    checkMissingUsing);
+                    checkMissingUsing,
+                    checkGenericCatch);
 
                 return FormatExceptionHandlingResults(results);
             }
@@ -8860,15 +8880,15 @@ namespace RoslynMcpServer.Tools
             generic AddSingleton, AddScoped, AddTransient, and TryAdd* calls count as registrations; non-generic, keyed,
             AddHostedService, AddDbContext, and similar forms are ignored. Reports unregistered constructor-parameter
             types for every class (ILogger, IOptions, IConfiguration, and System.* excepted), duplicate registrations,
-            and captive-lifetime and circular dependencies, the last two only for classes registered under their own
-            concrete type. Issues are grouped by type, up to 10 each, with locations; expect false positives for classes
-            the container does not create.
+            lifetime mismatches, and captive-lifetime and circular dependencies; the last two follow each service to
+            the implementation it is registered with (AddScoped<IService, Impl>). Issues are grouped by type, up to 10
+            each, with locations; expect false positives for classes the container does not create.
             """)]
         public static async Task<string> AnalyzeDIContainer(
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Currently has no effect; lifetime problems are reported as captive dependencies (see checkCaptive).")] bool checkLifetimes = true,
+            [Description("Report a service registered again with a different lifetime, and an implementation registered under several services with different lifetimes (default: true)")] bool checkLifetimes = true,
             [Description("Check circular dependencies (default: true)")] bool checkCircular = true,
-            [Description("Report a Singleton depending on a Scoped or Transient service, or a Scoped service depending on a Transient one; checked only for classes registered under their own concrete type. Default: true")] bool checkCaptive = true,
+            [Description("Report a Singleton depending on a Scoped or Transient service, or a Scoped service depending on a Transient one, following interface registrations to their implementations. Default: true")] bool checkCaptive = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -9117,7 +9137,8 @@ namespace RoslynMcpServer.Tools
                             _ => "⚪"
                         };
 
-                        output.AppendLine($"{severityEmoji} **{issue.Severity}** - {issue.FilePath}:{issue.LineNumber}");
+                        var member = string.IsNullOrEmpty(issue.MethodName) ? string.Empty : $" (in `{issue.MethodName}`)";
+                        output.AppendLine($"{severityEmoji} **{issue.Severity}** - {issue.FilePath}:{issue.LineNumber}{member}");
                         output.AppendLine($"   - **Issue:** {issue.Description}");
                         output.AppendLine($"   - **Recommendation:** {issue.Recommendation}");
 

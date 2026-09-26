@@ -44,6 +44,8 @@ namespace RoslynMcpServer.Core.Services
 
                 results.AnalyzedProjects = projects.Count;
 
+                int failedProjects = 0;
+
                 // Analyze each project
                 var projectTasks = projects.Select(async project =>
                 {
@@ -59,11 +61,13 @@ namespace RoslynMcpServer.Core.Services
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "Failed to analyze project: {ProjectName}", project.Name);
-                        results.FailedProjects++;
+                        Interlocked.Increment(ref failedProjects);
                     }
                 });
 
                 await Task.WhenAll(projectTasks);
+
+                results.FailedProjects = failedProjects;
 
                 results.Violations = allViolations.ToList();
                 results.AnalyzedSymbols = totalSymbols;
