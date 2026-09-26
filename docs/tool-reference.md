@@ -461,11 +461,11 @@ Use GetChangeImpact tool with:
 ---
 
 ### 31. BatchQuery
-**Description**: Execute multiple queries in a single batch request
+**Description**: Execute multiple read-only queries in a single batch request. Supports only `SearchSymbols` (`solutionPath`, `searchPattern`, `symbolKind`, `ignoreCase`), `FindReferences` (`solutionPath`, `symbolName`, `includeDefinition`), `GetSymbolInfo` (`solutionPath`, `symbolName`), `GetCodeMetrics` (`solutionPath`, `groupBy`), `GetDependencyGraph` (`solutionPath`, `format`, `includePackages`), `GetCallHierarchy` (`solutionPath`, `methodName`, `direction`, `maxDepth`), and `AnalyzeDependencies` (`solutionPath`, `maxDepth`). Other tool names fail for that query only.
 
 **Parameters**:
-- `queriesJson` (string): JSON array of query specifications. Each query should have 'tool' (tool name) and 'parameters' (dict of parameters)
-- `parallel` (bool, optional): Execute queries in parallel (default: true)
+- `queriesJson` (string): JSON array of objects, each with a `"tool"` name and a `"parameters"` object. Tool names are matched case-insensitively against the PascalCase names above; snake_case names are not recognized.
+- `parallel` (bool, optional): Execute queries in parallel (default: true; full version only)
 
 **Example queriesJson**:
 ```json
@@ -474,7 +474,7 @@ Use GetChangeImpact tool with:
     "tool": "SearchSymbols",
     "parameters": {
       "solutionPath": "D:\\MyProject\\MyProject.sln",
-      "pattern": "User*"
+      "searchPattern": "User*"
     }
   },
   {

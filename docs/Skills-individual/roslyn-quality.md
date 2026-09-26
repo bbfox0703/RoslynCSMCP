@@ -1,14 +1,15 @@
-# Skill: Code Quality Analysis
-Perform a comprehensive quality check, including complexity analysis, code smells, and naming conventions.
+---
+name: roslyn-quality
+description: Review the code quality of a C# solution (complexity, code smells, dead code, naming, duplication, magic numbers, concurrency patterns) with the RoslynMcpServer Quality tools. Use when the user asks for a quality review or refactoring candidates.
+---
+
+# Code Quality Analysis
 
 **Required Module**: `RoslynMcpServer.Quality`
 **Usage**: `/roslyn-quality <solution-path>`
 
-**Steps**:
-1. Call `AnalyzeCodeComplexity` with `threshold: 10`.
-2. Call `FindCodeSmells` to detect anti-patterns.
-3. Call `FindUnusedCode` with `format: "summary"`.
-4. Call `AnalyzeNamingConventions` with `scope: "public"`.
-5. Call `FindDuplicateCode` to detect copy-paste logic.
-6. Call `FindMagicNumbers` to find hardcoded values.
-7. Present quality report with recommendations.
+Produce a quality review that tells the user which problems most deserve their attention, ranked, with locations and concrete fixes.
+
+The Quality module covers complexity (`AnalyzeCodeComplexity`), code smells (`FindCodeSmells`), dead code (`FindUnusedCode`), naming (`AnalyzeNamingConventions`), copy-paste (`FindDuplicateCode`), hardcoded literals (`FindMagicNumbers`, `AnalyzeMagicNumbers`), and async/concurrency patterns (`AnalyzeConcurrencyPatterns`). Use the ones that fit the user's request.
+
+The findings come from heuristic analyzers, so check the code behind anything you recommend changing.

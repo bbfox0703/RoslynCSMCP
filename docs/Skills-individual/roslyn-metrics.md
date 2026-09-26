@@ -1,11 +1,13 @@
-# Skill: Code Metrics
-Generate a report on code statistics, complexity, and documentation coverage.
+---
+name: roslyn-metrics
+description: Report size, complexity, and documentation-coverage metrics for a C# solution with the RoslynMcpServer Metrics tools. Use when the user asks for code metrics, statistics, or documentation coverage.
+---
+
+# Code Metrics
 
 **Required Module**: `RoslynMcpServer.Metrics`
 **Usage**: `/roslyn-metrics <solution-path>`
 
-**Steps**:
-1. Call `GetCodeMetrics` for overall solution statistics.
-2. Call `GetFileStatistics` for file-level details.
-3. Call `AnalyzeDocumentationCoverage` to check XML comments.
-4. Present metrics including LOC, cyclomatic complexity, and documentation percentage.
+Report the solution's lines of code, cyclomatic complexity, and documentation coverage, and call out the outliers.
+
+`GetCodeMetrics` gives solution-wide statistics. `GetFileStatistics` takes a single `.cs` file path and gives that file's details. `AnalyzeDocumentationCoverage` measures XML documentation coverage. `AnalyzeMemoryAllocation` finds allocation hotspots when the user also cares about performance.

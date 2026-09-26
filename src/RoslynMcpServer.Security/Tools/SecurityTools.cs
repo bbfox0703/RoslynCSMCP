@@ -49,7 +49,7 @@ public class SecurityTools
         }
     }
 
-    [McpServerTool, Description("Detect common thread safety issues and potential race conditions (mutable static fields, unsynchronized access)")]
+    [McpServerTool, Description("Detect shared-state thread-safety risks and potential race conditions: mutable static fields, shared state accessed without synchronization, and non-thread-safe collections. Does not check async/await usage, await inside lock, or CancellationToken propagation.")]
     public static async Task<string> FindThreadSafetyIssues(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]

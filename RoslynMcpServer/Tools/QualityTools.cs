@@ -22,6 +22,7 @@ namespace RoslynMcpServer.Tools
             static List<T>/Dictionary<K,V> used without thread-safe alternatives,
             mutable static primitive fields without volatile/Interlocked/ThreadStatic,
             and await expressions inside lock() blocks (use SemaphoreSlim instead).
+            Does not analyze general shared-state data races beyond static collections and fields.
             """)]
         public static async Task<string> AnalyzeConcurrencyPatterns(
             [Description("Path to solution file (.sln)")] string solutionPath,
@@ -234,6 +235,7 @@ namespace RoslynMcpServer.Tools
             comparison operators with literal threshold > 10 (ComparisonLiteral, e.g. count > 42),
             and return statements that return a literal integer > 1 as an exit/error code (ReturnLiteral).
             Complements PInvoke's MagicOffset (unsafe pointer arithmetic) with general non-unsafe coverage.
+            Numeric literals only; for a broad inventory that also covers string literals, use FindMagicNumbers.
             """)]
         public static async Task<string> AnalyzeMagicNumbers(
             [Description("Path to solution file (.sln)")] string solutionPath,

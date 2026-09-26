@@ -49,8 +49,9 @@ namespace RoslynMcpServer.Core.Services
         {
             try
             {
-                // Parse the queries
-                var queries = JsonSerializer.Deserialize<List<QuerySpec>>(queriesJson);
+                // Parse the queries (case-insensitive so the documented "tool"/"parameters" keys bind)
+                var queries = JsonSerializer.Deserialize<List<QuerySpec>>(queriesJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 if (queries == null || !queries.Any())
                 {
                     return "Error: No queries provided or invalid JSON format.";
@@ -363,7 +364,9 @@ namespace RoslynMcpServer.Core.Services
                 }
                 else
                 {
-                    builder.AppendLine($"❌ Error: {result.Error ?? "Unknown error"}");
+                    builder.AppendLine(result.Error is null
+                        ? $"❌ {result.Result}"
+                        : $"❌ Error: {result.Error}");
                 }
 
                 builder.AppendLine();

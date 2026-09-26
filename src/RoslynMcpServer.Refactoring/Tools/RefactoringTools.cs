@@ -13,7 +13,7 @@ namespace RoslynMcpServer.Refactoring.Tools;
 [McpServerToolType]
 public class RefactoringTools
 {
-    [McpServerTool, Description("Safely rename a symbol with preview and conflict detection")]
+    [McpServerTool, Description("Rename a symbol and all of its references across the solution, with conflict detection. With previewOnly=true (the default) it only reports the affected files, locations, conflicts, and a risk level. With previewOnly=false it applies the rename and writes the changed files to disk; it does not apply when conflicts are detected. The target is the first declaration found whose simple name exactly equals symbolName (types, methods, properties, and fields are searched), so when the name is ambiguous, confirm from the preview that it picked the intended symbol before applying.")]
     public static async Task<string> RenameSymbolSafely(
         [Description("Current symbol name to rename")] string symbolName,
         [Description("New name for the symbol")] string newName,
@@ -33,7 +33,7 @@ public class RefactoringTools
         }
     }
 
-    [McpServerTool, Description("Extract interface from a class for better testability and SOLID principles")]
+    [McpServerTool, Description("Generate the source code of an interface from a class's public methods and properties, for testability or dependency inversion. Returns the generated interface code as text; it does not create files or modify the class, so applying it is up to you. Fails if the class is not found or is already an interface, and warns if a type with the interface name already exists.")]
     public static async Task<string> ExtractInterface(
         [Description("Class name to extract interface from")] string className,
         [Description("Path to solution file (.sln)")] string solutionPath,
@@ -84,10 +84,10 @@ public class RefactoringTools
         }
     }
 
-    [McpServerTool, Description("Analyze architecture layer violations based on defined rules (Clean Architecture, DDD, etc.)")]
+    [McpServerTool, Description("Check project-to-project references against a layered architecture you define (Clean Architecture, DDD, etc.). Projects are assigned to layers by name pattern; projects matching no layer are ignored, and a project matching several layers is assigned to the last one listed. Reports references a rule forbids (High), references between layers with no rule (Medium), and circular dependencies (Critical). Works on project references only, not type-level usage.")]
     public static async Task<string> AnalyzeLayerViolations(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("JSON string defining layers and rules")] string layerDefinitionsJson,
+        [Description("JSON object: {\"layers\": [{\"name\": string, \"projectPatterns\": [project-name globs using * and ?]}], \"rules\": [{\"fromLayer\": layer name, \"toLayer\": layer name, \"allowed\": bool}]}. Property names are case-insensitive; layer names in rules must match the layer names exactly.")] string layerDefinitionsJson,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (with recommendations). Default: normal")]
         string format = "normal",
         Phase1AnalysisService phase1Service = null!,
