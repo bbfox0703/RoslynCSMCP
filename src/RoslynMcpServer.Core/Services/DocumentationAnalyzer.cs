@@ -60,6 +60,9 @@ namespace RoslynMcpServer.Core.Services
                 int totalSymbols = 0;
                 int documentedSymbols = 0;
 
+                int analyzedFiles = 0;
+                int failedProjects = 0;
+
                 var projectTasks = solution.Projects
                     .Where(p => p.SupportsCompilation)
                     .Select(async project =>
@@ -76,7 +79,7 @@ namespace RoslynMcpServer.Core.Services
                                 var filePath = syntaxTree.FilePath;
                                 var fileName = Path.GetFileName(filePath);
 
-                                results.AnalyzedFiles++;
+                                Interlocked.Increment(ref analyzedFiles);
 
                                 // Get all type declarations
                                 var types = root.DescendantNodes()
@@ -92,13 +95,13 @@ namespace RoslynMcpServer.Core.Services
                                     if (!MatchesScope(symbol, scopeFilter))
                                         continue;
 
-                                    totalSymbols++;
+                                    Interlocked.Increment(ref totalSymbols);
 
                                     // Check if type has documentation
                                     var hasDoc = HasDocumentation(symbol);
                                     if (hasDoc)
                                     {
-                                        documentedSymbols++;
+                                        Interlocked.Increment(ref documentedSymbols);
                                     }
                                     else
                                     {
@@ -116,12 +119,12 @@ namespace RoslynMcpServer.Core.Services
                                         if (!MatchesScope(member, scopeFilter))
                                             continue;
 
-                                        totalSymbols++;
+                                        Interlocked.Increment(ref totalSymbols);
 
                                         var memberHasDoc = HasDocumentation(member);
                                         if (memberHasDoc)
                                         {
-                                            documentedSymbols++;
+                                            Interlocked.Increment(ref documentedSymbols);
                                         }
                                         else
                                         {
@@ -140,11 +143,14 @@ namespace RoslynMcpServer.Core.Services
                         catch (Exception ex)
                         {
                             _logger.LogWarning(ex, "Failed to analyze project: {ProjectName}", project.Name);
-                            results.FailedProjects++;
+                            Interlocked.Increment(ref failedProjects);
                         }
                     });
 
                 await Task.WhenAll(projectTasks);
+
+                results.AnalyzedFiles = analyzedFiles;
+                results.FailedProjects = failedProjects;
 
                 results.TotalSymbols = totalSymbols;
                 results.DocumentedSymbols = documentedSymbols;

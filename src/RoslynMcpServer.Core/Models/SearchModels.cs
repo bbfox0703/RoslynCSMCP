@@ -31,12 +31,21 @@ namespace RoslynMcpServer.Core.Models
         public string SymbolName { get; set; } = string.Empty;
         public string DocumentPath { get; set; } = string.Empty;
         public string ProjectName { get; set; } = string.Empty;
+        /// <summary>Solution the reference was found in (the first listed one for cross-solution searches).</summary>
+        public string SolutionPath { get; set; } = string.Empty;
         public int LineNumber { get; set; }
         public int ColumnNumber { get; set; }
         public string LineText { get; set; } = string.Empty;
         public List<string> Context { get; set; } = new();
         public bool IsDefinition { get; set; }
         public string ReferenceKind { get; set; } = string.Empty;
+    }
+
+    public class ReferenceSearchResult
+    {
+        /// <summary>Number of declared symbols that matched the requested name; 0 means no such symbol.</summary>
+        public int MatchedSymbolCount { get; set; }
+        public List<ReferenceResult> References { get; set; } = new();
     }
 
     public class SymbolInfo
@@ -704,9 +713,11 @@ namespace RoslynMcpServer.Core.Models
         public string PackageName { get; set; } = string.Empty;
         public string AffectedVersion { get; set; } = string.Empty;
         public string Severity { get; set; } = string.Empty;  // Critical, High, Medium, Low
-        public string VulnerabilityId { get; set; } = string.Empty;  // CVE ID or similar
+        public string VulnerabilityId { get; set; } = string.Empty;  // Advisory ID (e.g. GHSA-xxxx-xxxx-xxxx)
+        public string AdvisoryUrl { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
-        public string RecommendedVersion { get; set; } = string.Empty;  // Minimum safe version
+        public string RecommendedVersion { get; set; } = string.Empty;  // Minimum safe version, when known
+        public bool IsTransitive { get; set; }  // Only reached through other packages, in every affected project
         public List<string> AffectedProjects { get; set; } = new();  // Projects using this vulnerable version
     }
 
@@ -891,6 +902,7 @@ namespace RoslynMcpServer.Core.Models
         public string ProjectName { get; set; } = string.Empty;
         public int LineNumber { get; set; }
         public string ReferenceKind { get; set; } = string.Empty; // Direct, Indirect
+        public string ReferencedSymbol { get; set; } = string.Empty; // Symbol used at this location: the changed symbol, or an intermediate member for indirect references
         public int Distance { get; set; } // Distance from changed symbol (0 = direct reference)
         public string ImpactType { get; set; } = string.Empty; // Usage, Inheritance, Implementation
         public string CodeContext { get; set; } = string.Empty; // Code snippet showing usage
@@ -1412,6 +1424,7 @@ namespace RoslynMcpServer.Core.Models
         public string FilePath { get; set; } = string.Empty;
         public int LineNumber { get; set; }
         public List<string> DependencyChain { get; set; } = new();  // For circular dependencies
+        public List<string> Applications { get; set; } = new();  // Applications (DI containers) the issue occurs in
     }
 
     /// <summary>
@@ -1420,6 +1433,7 @@ namespace RoslynMcpServer.Core.Models
     public class DIContainerResults
     {
         public List<DIContainerIssue> Issues { get; set; } = new();
+        public List<string> Applications { get; set; } = new();  // Applications analyzed, each with its own DI container
         public int AnalyzedServices { get; set; }
         public int AnalyzedConstructors { get; set; }
         public List<OperationWarning> Warnings { get; set; } = new();

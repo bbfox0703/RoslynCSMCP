@@ -13,9 +13,15 @@ namespace RoslynMcpServer.Testing.Tools;
 [McpServerToolType]
 public class TestingTools
 {
-    [McpServerTool, Description("Find test classes and methods for a given type")]
+    [McpServerTool, Description("""
+        Find test classes for a type by naming convention, searching only projects whose names contain Test or Spec.
+        A class matches when its name is <Type>Test or <Type>Tests, starts with Test<Type> or <Type>_, or contains
+        <Type> followed later by Test (case-insensitive), and it needs a method marked [Fact], [Theory], [Test],
+        [TestCase], [TestMethod], or [DataTestMethod]. Matching does not check that the tests reference the type, so
+        short names can match unrelated classes. Normal lists up to 10 methods per class; detailed lists all.
+        """)]
     public static async Task<string> FindTestsForType(
-        [Description("Type name to find tests for")] string typeName,
+        [Description("Simple type name without namespace or generic arguments, e.g. OrderService")] string typeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
@@ -28,7 +34,7 @@ public class TestingTools
             var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
             if (pathError != null) return pathError;
 
-            var results = await discoveryService.FindTestsForTypeAsync(solutionPath, typeName);
+            var results = await discoveryService.FindTestsForTypeAsync(typeName: typeName, solutionPath: solutionPath);
 
             return format.ToLowerInvariant() switch
             {
@@ -43,13 +49,19 @@ public class TestingTools
         }
     }
 
-    [McpServerTool, Description("Analyze test coverage for all types in solution - identify untested code, coverage percentages, and high-risk areas")]
+    [McpServerTool, Description("""
+        Estimate test coverage statically: no tests are run and no line or branch coverage is measured. A class or
+        interface counts as tested when a test class matches its name by convention (as in FindTestsForType), and a
+        public method, property, or event counts as tested when any code in a test project references it. Analyzes
+        top-level types in projects whose names do not contain Test or Spec and ranks untested types by
+        complexity-based risk. It reloads the solution for each type, so it is slow on large solutions.
+        """)]
     public static async Task<string> GetTestCoverage(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+        [Description("Output format: summary (coverage percentages and risk counts), normal (up to 20 Critical/High-risk types and per-project statistics), detailed (up to 50 types with no matching test class, with file, complexity, and risk). Default: normal")]
         string format = "normal",
-        [Description("Scope filter: public (public only), all (all types). Default: public")] string scope = "public",
-        [Description("Group by: project, namespace. Default: project")] string groupBy = "project",
+        [Description("Which top-level classes and interfaces to include: public, or all (any accessibility). Only public members are counted either way. Default: public")] string scope = "public",
+        [Description("Statistics section grouping in normal and detailed output: project or namespace. Default: project")] string groupBy = "project",
         TestCoverageAnalyzer coverageAnalyzer = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
@@ -59,13 +71,19 @@ public class TestingTools
             var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
             if (pathError != null) return pathError;
 
+            if (!groupBy.Equals("project", StringComparison.OrdinalIgnoreCase) &&
+                !groupBy.Equals("namespace", StringComparison.OrdinalIgnoreCase))
+            {
+                return errorHandler.ValidationError("groupBy", "groupBy must be project or namespace");
+            }
+
             var results = await coverageAnalyzer.AnalyzeTestCoverageAsync(solutionPath, scope, groupBy);
 
             return format.ToLowerInvariant() switch
             {
                 "summary" => FormatTestCoverageSummary(results),
-                "detailed" => FormatTestCoverageDetailed(results),
-                _ => FormatTestCoverageNormal(results)
+                "detailed" => FormatTestCoverageDetailed(results, groupBy),
+                _ => FormatTestCoverageNormal(results, groupBy)
             };
         }
         catch (Exception ex)
@@ -150,10 +168,10 @@ public class TestingTools
         output.AppendLine($"  Member coverage: {results.OverallMemberCoverage:F1}% ({results.TestedPublicMembers}/{results.TotalPublicMembers})");
         output.AppendLine($"  Critical risk: {results.CriticalRiskTypes}");
         output.AppendLine($"  High risk: {results.HighRiskTypes}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
-    private static string FormatTestCoverageNormal(TestCoverageResults results)
+    private static string FormatTestCoverageNormal(TestCoverageResults results, string groupBy)
     {
         var output = new StringBuilder();
         output.AppendLine($"# Test Coverage Analysis");
@@ -172,16 +190,12 @@ public class TestingTools
             output.AppendLine();
         }
 
-        output.AppendLine("## Project Statistics:");
-        foreach (var (project, stats) in results.ProjectStatistics)
-        {
-            output.AppendLine($"  {project}: {stats.TypeCoveragePercentage:F1}% types, {stats.MemberCoveragePercentage:F1}% members");
-        }
+        AppendCoverageStatistics(output, results, groupBy);
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
-    private static string FormatTestCoverageDetailed(TestCoverageResults results)
+    private static string FormatTestCoverageDetailed(TestCoverageResults results, string groupBy)
     {
         var output = new StringBuilder();
         output.AppendLine($"# Test Coverage Analysis");
@@ -207,7 +221,21 @@ public class TestingTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        AppendCoverageStatistics(output, results, groupBy);
+
+        return output.AppendWarnings(results.Warnings).ToString();
+    }
+
+    private static void AppendCoverageStatistics(StringBuilder output, TestCoverageResults results, string groupBy)
+    {
+        var byNamespace = groupBy.Equals("namespace", StringComparison.OrdinalIgnoreCase);
+        var statistics = byNamespace ? results.NamespaceStatistics : results.ProjectStatistics;
+
+        output.AppendLine(byNamespace ? "## Namespace Statistics:" : "## Project Statistics:");
+        foreach (var (name, stats) in statistics)
+        {
+            output.AppendLine($"  {name}: {stats.TypeCoveragePercentage:F1}% types, {stats.MemberCoveragePercentage:F1}% members");
+        }
     }
 
     #endregion

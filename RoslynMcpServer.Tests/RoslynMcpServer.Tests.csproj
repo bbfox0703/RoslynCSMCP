@@ -69,6 +69,7 @@
     <ProjectReference Include="..\src\RoslynMcpServer.Testing\RoslynMcpServer.Testing.csproj" />
     <ProjectReference Include="..\src\RoslynMcpServer.Metrics\RoslynMcpServer.Metrics.csproj" />
     <ProjectReference Include="..\src\RoslynMcpServer.Advanced\RoslynMcpServer.Advanced.csproj" />
+    <ProjectReference Include="..\src\RoslynMcpServer.Interop\RoslynMcpServer.Interop.csproj" />
   </ItemGroup>
 
 </Project>

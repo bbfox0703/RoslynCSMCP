@@ -32,6 +32,7 @@ namespace RoslynMcpServer.Core.Services
         {
             var results = new PerformanceIssueResults();
             var allIssues = new ConcurrentBag<PerformanceIssue>();
+            int failedProjects = 0;
 
             try
             {
@@ -57,13 +58,19 @@ namespace RoslynMcpServer.Core.Services
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "Failed to analyze project: {ProjectName}", project.Name);
-                        results.FailedProjects++;
+                        Interlocked.Increment(ref failedProjects);
                     }
                 });
 
                 await Task.WhenAll(projectTasks);
 
-                results.Issues = allIssues.ToList();
+                results.FailedProjects = failedProjects;
+
+                // A file compiled into several projects (multi-targeting, linked files) is reported once.
+                results.Issues = allIssues
+                    .GroupBy(i => (i.FilePath, i.LineNumber, i.IssueType, i.Title))
+                    .Select(g => g.OrderBy(i => i.ProjectName, StringComparer.Ordinal).First())
+                    .ToList();
                 results.AnalyzedFiles = results.Issues.Select(i => i.FilePath).Distinct().Count();
 
                 // Calculate statistics
@@ -108,12 +115,12 @@ namespace RoslynMcpServer.Core.Services
                     // Analyze different types of issues
                     if (issueTypes == null || issueTypes.Contains("LinqMisuse"))
                     {
-                        issues.AddRange(await AnalyzeLinqMisuseAsync(root, semanticModel, syntaxTree, project.Name));
+                        issues.AddRange(AnalyzeLinqMisuse(root, semanticModel, syntaxTree, project.Name));
                     }
 
                     if (issueTypes == null || issueTypes.Contains("StringConcatenation"))
                     {
-                        issues.AddRange(AnalyzeStringConcatenation(root, syntaxTree, project.Name));
+                        issues.AddRange(AnalyzeStringConcatenation(root, semanticModel, syntaxTree, project.Name));
                     }
 
                     if (issueTypes == null || issueTypes.Contains("SyncOverAsync"))
@@ -123,12 +130,12 @@ namespace RoslynMcpServer.Core.Services
 
                     if (issueTypes == null || issueTypes.Contains("DisposableNotDisposed"))
                     {
-                        issues.AddRange(await AnalyzeDisposableNotDisposedAsync(root, semanticModel, syntaxTree, project.Name));
+                        issues.AddRange(AnalyzeDisposableNotDisposed(root, semanticModel, syntaxTree, project.Name));
                     }
 
                     if (issueTypes == null || issueTypes.Contains("ExceptionHandling"))
                     {
-                        issues.AddRange(AnalyzeExceptionHandling(root, syntaxTree, project.Name));
+                        issues.AddRange(AnalyzeExceptionHandling(root, semanticModel, syntaxTree, project.Name));
                     }
                 }
                 catch (Exception ex)
@@ -143,7 +150,7 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Analyzes LINQ misuse patterns
         /// </summary>
-        private async Task<List<PerformanceIssue>> AnalyzeLinqMisuseAsync(
+        internal static List<PerformanceIssue> AnalyzeLinqMisuse(
             SyntaxNode root,
             SemanticModel semanticModel,
             SyntaxTree syntaxTree,
@@ -237,58 +244,114 @@ namespace RoslynMcpServer.Core.Services
                 }
             }
 
-            return await Task.FromResult(issues);
+            return issues;
         }
 
         /// <summary>
-        /// Analyzes string concatenation in loops
+        /// Reports string accumulation inside loops: `s += x` or `s = s + x` where s is a string
+        /// that outlives the innermost enclosing loop. Each assignment is reported once, however
+        /// deeply the loops nest; strings declared inside the loop body start fresh on every
+        /// iteration and are not reported.
         /// </summary>
-        private List<PerformanceIssue> AnalyzeStringConcatenation(
+        internal static List<PerformanceIssue> AnalyzeStringConcatenation(
             SyntaxNode root,
+            SemanticModel semanticModel,
             SyntaxTree syntaxTree,
             string projectName)
         {
             var issues = new List<PerformanceIssue>();
 
-            // Find all loops
-            var loops = root.DescendantNodes()
-                .Where(n => n is ForStatementSyntax || n is ForEachStatementSyntax || n is WhileStatementSyntax);
-
-            foreach (var loop in loops)
+            foreach (var assignment in root.DescendantNodes().OfType<AssignmentExpressionSyntax>())
             {
-                // Look for string concatenation assignments (+=)
-                var assignments = loop.DescendantNodes()
-                    .OfType<AssignmentExpressionSyntax>()
-                    .Where(a => a.IsKind(SyntaxKind.AddAssignmentExpression));
+                if (!IsStringAccumulation(assignment, semanticModel))
+                    continue;
 
-                foreach (var assignment in assignments)
+                var loop = GetInnermostLoop(assignment);
+                if (loop == null)
+                    continue;
+
+                // A string declared inside the loop does not accumulate across iterations.
+                var target = semanticModel.GetSymbolInfo(assignment.Left).Symbol;
+                if (target is ILocalSymbol local &&
+                    local.DeclaringSyntaxReferences.FirstOrDefault() is { } declaration &&
+                    declaration.SyntaxTree == loop.SyntaxTree &&
+                    loop.Span.Contains(declaration.Span))
                 {
-                    // Check if left side is potentially a string
-                    var leftType = assignment.Left.ToString();
-                    if (leftType.Contains("string") || leftType.Contains("str") || leftType.Contains("text"))
-                    {
-                        issues.Add(CreateIssue(
-                            "StringConcatenation",
-                            "High",
-                            "String concatenation in loop",
-                            "String concatenation in loops creates many intermediate string objects, causing poor performance.",
-                            syntaxTree,
-                            assignment,
-                            projectName,
-                            "Use StringBuilder for string concatenation in loops",
-                            "var sb = new StringBuilder(); sb.Append(value);",
-                            8.0));
-                    }
+                    continue;
                 }
+
+                issues.Add(CreateIssue(
+                    "StringConcatenation",
+                    "High",
+                    "String concatenation in loop",
+                    $"'{assignment.Left}' is a string rebuilt on every iteration, creating a new string object each time.",
+                    syntaxTree,
+                    assignment,
+                    projectName,
+                    "Use StringBuilder for string concatenation in loops",
+                    "var sb = new StringBuilder(); sb.Append(value);",
+                    8.0));
             }
 
             return issues;
         }
 
+        private static bool IsStringAccumulation(AssignmentExpressionSyntax assignment, SemanticModel semanticModel)
+        {
+            if (assignment.IsKind(SyntaxKind.AddAssignmentExpression))
+            {
+                return semanticModel.GetTypeInfo(assignment.Left).Type?.SpecialType == SpecialType.System_String;
+            }
+
+            // s = s + x (the target must be the leftmost operand of the + chain)
+            if (assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) &&
+                assignment.Right is BinaryExpressionSyntax binary &&
+                binary.IsKind(SyntaxKind.AddExpression))
+            {
+                if (semanticModel.GetTypeInfo(assignment.Left).Type?.SpecialType != SpecialType.System_String)
+                    return false;
+
+                ExpressionSyntax leftmost = binary;
+                while (leftmost is BinaryExpressionSyntax b && b.IsKind(SyntaxKind.AddExpression))
+                    leftmost = b.Left;
+
+                var target = semanticModel.GetSymbolInfo(assignment.Left).Symbol;
+                var operand = semanticModel.GetSymbolInfo(leftmost).Symbol;
+                return target != null && SymbolEqualityComparer.Default.Equals(target, operand);
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Innermost loop statement around the node within the same function body.
+        /// </summary>
+        private static StatementSyntax? GetInnermostLoop(SyntaxNode node)
+        {
+            foreach (var ancestor in node.Ancestors())
+            {
+                switch (ancestor)
+                {
+                    case ForStatementSyntax:
+                    case CommonForEachStatementSyntax:
+                    case WhileStatementSyntax:
+                    case DoStatementSyntax:
+                        return (StatementSyntax)ancestor;
+
+                    case AnonymousFunctionExpressionSyntax:
+                    case LocalFunctionStatementSyntax:
+                    case MemberDeclarationSyntax:
+                        return null;
+                }
+            }
+
+            return null;
+        }
+
         /// <summary>
         /// Analyzes sync over async patterns
         /// </summary>
-        private List<PerformanceIssue> AnalyzeSyncOverAsync(
+        internal static List<PerformanceIssue> AnalyzeSyncOverAsync(
             SyntaxNode root,
             SyntaxTree syntaxTree,
             string projectName)
@@ -329,9 +392,12 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Analyzes IDisposable not disposed
+        /// Reports disposable objects the code creates and then loses:
+        /// locals created in a method (new, a static factory, or a Create*/Open*/Begin* call) that are
+        /// never disposed, returned, stored, or passed on, and instance fields the type creates itself
+        /// but never disposes (or cannot dispose because the type is not IDisposable).
         /// </summary>
-        private async Task<List<PerformanceIssue>> AnalyzeDisposableNotDisposedAsync(
+        internal static List<PerformanceIssue> AnalyzeDisposableNotDisposed(
             SyntaxNode root,
             SemanticModel semanticModel,
             SyntaxTree syntaxTree,
@@ -339,115 +405,160 @@ namespace RoslynMcpServer.Core.Services
         {
             var issues = new List<PerformanceIssue>();
 
-            // Find variable declarations
-            var variableDeclarations = root.DescendantNodes().OfType<VariableDeclarationSyntax>();
-
-            foreach (var declaration in variableDeclarations)
+            foreach (var declaration in root.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
             {
-                try
+                foreach (var (variable, local) in DisposableUsageAnalysis.FindUndisposedLocals(declaration, semanticModel))
                 {
-                    var typeInfo = semanticModel.GetTypeInfo(declaration.Type);
-                    var type = typeInfo.Type;
-
-                    if (type != null && ImplementsIDisposable(type))
-                    {
-                        // Check if it's in a using statement
-                        var usingStatement = declaration.Ancestors().OfType<UsingStatementSyntax>().FirstOrDefault();
-                        var usingDeclaration = declaration.Parent as LocalDeclarationStatementSyntax;
-                        var hasUsingModifier = usingDeclaration?.UsingKeyword != null;
-
-                        if (usingStatement == null && !hasUsingModifier)
-                        {
-                            issues.Add(CreateIssue(
-                                "DisposableNotDisposed",
-                                "High",
-                                "IDisposable not properly disposed",
-                                $"Variable '{declaration.Variables.First().Identifier}' implements IDisposable but is not wrapped in using statement.",
-                                syntaxTree,
-                                declaration,
-                                projectName,
-                                "Wrap IDisposable objects in using statements or declare with using keyword",
-                                "using var resource = new DisposableResource(); or using (var resource = new DisposableResource()) { }",
-                                7.0));
-                        }
-                    }
-                }
-                catch
-                {
-                    // Skip if type info not available
+                    issues.Add(CreateIssue(
+                        "DisposableNotDisposed",
+                        "High",
+                        "IDisposable not properly disposed",
+                        $"Local '{variable.Identifier.Text}' ({local.Type.ToDisplayString()}) is created here but never disposed, returned, stored, or passed on.",
+                        syntaxTree,
+                        declaration,
+                        projectName,
+                        "Declare it with the using keyword or dispose it in a finally block",
+                        "using var resource = new DisposableResource(); or using (var resource = new DisposableResource()) { }",
+                        7.0));
                 }
             }
 
-            return await Task.FromResult(issues);
-        }
-
-        /// <summary>
-        /// Analyzes exception handling anti-patterns
-        /// </summary>
-        private List<PerformanceIssue> AnalyzeExceptionHandling(
-            SyntaxNode root,
-            SyntaxTree syntaxTree,
-            string projectName)
-        {
-            var issues = new List<PerformanceIssue>();
-
-            // Find catch blocks that catch Exception without using it
-            var catchClauses = root.DescendantNodes().OfType<CatchClauseSyntax>();
-
-            foreach (var catchClause in catchClauses)
+            foreach (var field in root.DescendantNodes().OfType<FieldDeclarationSyntax>())
             {
-                // Check for empty catch blocks
-                if (catchClause.Block.Statements.Count == 0)
+                foreach (var variable in field.Declaration.Variables)
                 {
-                    issues.Add(CreateIssue(
-                        "ExceptionHandling",
-                        "High",
-                        "Empty catch block",
-                        "Empty catch blocks silently swallow exceptions, making debugging difficult.",
-                        syntaxTree,
-                        catchClause,
-                        projectName,
-                        "Log exceptions or remove catch block if not needed",
-                        "catch (Exception ex) { _logger.LogError(ex, \"Error occurred\"); }",
-                        4.0));
-                }
+                    if (semanticModel.GetDeclaredSymbol(variable) is not IFieldSymbol fieldSymbol)
+                        continue;
 
-                // Check for catch(Exception) without rethrow
-                if (catchClause.Declaration?.Type.ToString() == "Exception")
-                {
-                    var hasThrow = catchClause.Block.DescendantNodes().OfType<ThrowStatementSyntax>().Any();
-                    if (!hasThrow && catchClause.Block.Statements.Count == 0)
-                    {
-                        issues.Add(CreateIssue(
-                            "ExceptionHandling",
-                            "Medium",
-                            "Catching Exception without handling",
-                            "Catching base Exception type without proper handling can hide bugs.",
-                            syntaxTree,
-                            catchClause,
-                            projectName,
-                            "Catch specific exception types or add proper logging",
-                            "catch (SpecificException ex) { ... }",
-                            3.0));
-                    }
+                    var issue = AnalyzeOwnedField(fieldSymbol, variable, semanticModel, syntaxTree, projectName);
+                    if (issue != null)
+                        issues.Add(issue);
                 }
             }
 
             return issues;
         }
 
-        /// <summary>
-        /// Checks if a type implements IDisposable
-        /// </summary>
-        private bool ImplementsIDisposable(ITypeSymbol type)
+        private static PerformanceIssue? AnalyzeOwnedField(
+            IFieldSymbol field,
+            VariableDeclaratorSyntax variable,
+            SemanticModel semanticModel,
+            SyntaxTree syntaxTree,
+            string projectName)
         {
-            return type.AllInterfaces.Any(i => i.Name == "IDisposable");
+            // Static fields usually live for the whole process; const fields are never disposable.
+            if (field.IsStatic || field.IsConst || !DisposableUsageAnalysis.IsDisposableType(field.Type))
+                return null;
+
+            var containingType = field.ContainingType;
+            var typeParts = containingType.DeclaringSyntaxReferences.Select(r => r.GetSyntax()).ToList();
+            var compilation = semanticModel.Compilation;
+
+            // Only fields the type creates itself are its responsibility (injected ones are not).
+            var owned = DisposableUsageAnalysis.IsOwnedCreation(variable.Initializer?.Value, semanticModel) ||
+                        IsAssignedOwnedValue(field, typeParts, compilation);
+            if (!owned)
+                return null;
+
+            var typeIsDisposable = DisposableUsageAnalysis.IsDisposableType(containingType);
+            if (typeIsDisposable && DisposableUsageAnalysis.IsDisposedOrHandedOff(field, typeParts, compilation))
+                return null;
+
+            var description = typeIsDisposable
+                ? $"Field '{field.Name}' ({field.Type.ToDisplayString()}) is created by '{containingType.Name}' but never disposed, for example in its Dispose method."
+                : $"Field '{field.Name}' ({field.Type.ToDisplayString()}) is created by '{containingType.Name}', which does not implement IDisposable, so it is never disposed.";
+            var recommendation = typeIsDisposable
+                ? $"Dispose '{field.Name}' in {containingType.Name}.Dispose()"
+                : $"Implement IDisposable on '{containingType.Name}' and dispose '{field.Name}' there";
+
+            return CreateIssue(
+                "DisposableNotDisposed",
+                "High",
+                "IDisposable field not disposed",
+                description,
+                syntaxTree,
+                variable,
+                projectName,
+                recommendation,
+                "public void Dispose() { _resource.Dispose(); }",
+                6.0);
+        }
+
+        private static bool IsAssignedOwnedValue(IFieldSymbol field, List<SyntaxNode> typeParts, Compilation compilation)
+        {
+            foreach (var part in typeParts)
+            {
+                SemanticModel? model = null;
+                foreach (var assignment in part.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+                {
+                    if (!assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) &&
+                        !assignment.IsKind(SyntaxKind.CoalesceAssignmentExpression))
+                        continue;
+
+                    var leftName = assignment.Left switch
+                    {
+                        IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+                        MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax } access => access.Name.Identifier.ValueText,
+                        _ => null
+                    };
+                    if (leftName != field.Name)
+                        continue;
+
+                    model ??= compilation.GetSemanticModel(part.SyntaxTree);
+                    if (!SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(assignment.Left).Symbol, field))
+                        continue;
+
+                    if (DisposableUsageAnalysis.IsOwnedCreation(assignment.Right, model))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Reports empty catch blocks, once per catch clause.
+        /// </summary>
+        internal static List<PerformanceIssue> AnalyzeExceptionHandling(
+            SyntaxNode root,
+            SemanticModel semanticModel,
+            SyntaxTree syntaxTree,
+            string projectName)
+        {
+            var issues = new List<PerformanceIssue>();
+
+            foreach (var catchClause in root.DescendantNodes().OfType<CatchClauseSyntax>())
+            {
+                if (catchClause.Block.Statements.Count != 0)
+                    continue;
+
+                var catchesEverything = catchClause.Declaration == null ||
+                    semanticModel.GetTypeInfo(catchClause.Declaration.Type).Type?.ToDisplayString() == "System.Exception";
+
+                issues.Add(CreateIssue(
+                    "ExceptionHandling",
+                    "High",
+                    "Empty catch block",
+                    catchesEverything
+                        ? "Empty catch block silently swallows every exception, making debugging difficult."
+                        : "Empty catch block silently swallows exceptions, making debugging difficult.",
+                    syntaxTree,
+                    catchClause,
+                    projectName,
+                    catchesEverything
+                        ? "Catch a specific exception type, and log or rethrow what you catch"
+                        : "Log exceptions or remove catch block if not needed",
+                    "catch (IOException ex) { _logger.LogError(ex, \"Error occurred\"); }",
+                    4.0));
+            }
+
+            return issues;
         }
 
         /// <summary>
         /// Checks if a method is a LINQ method
         /// </summary>
-        private bool IsLinqMethod(IMethodSymbol method)
+        private static bool IsLinqMethod(IMethodSymbol method)
         {
             var containingType = method.ContainingType;
             return containingType?.Name == "Enumerable" &&
@@ -457,7 +568,7 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Creates a performance issue
         /// </summary>
-        private PerformanceIssue CreateIssue(
+        private static PerformanceIssue CreateIssue(
             string issueType,
             string severity,
             string title,
@@ -471,10 +582,6 @@ namespace RoslynMcpServer.Core.Services
         {
             var lineSpan = node.GetLocation().GetLineSpan();
             var line = lineSpan.StartLinePosition.Line + 1;
-
-            // Get method name
-            var methodNode = node.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
-            var methodName = methodNode?.Identifier.ToString() ?? "Unknown";
 
             // Get code snippet
             var codeSnippet = node.ToString();
@@ -493,7 +600,7 @@ namespace RoslynMcpServer.Core.Services
                 FileName = Path.GetFileName(syntaxTree.FilePath),
                 ProjectName = projectName,
                 LineNumber = line,
-                MethodName = methodName,
+                MethodName = DisposableUsageAnalysis.GetEnclosingMemberName(node),
                 CodeSnippet = codeSnippet.Trim(),
                 Recommendation = recommendation,
                 FixExample = fixExample,

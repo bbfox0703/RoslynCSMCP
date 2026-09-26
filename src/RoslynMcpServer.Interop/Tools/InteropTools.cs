@@ -211,12 +211,7 @@ public class InteropTools
         else if (score >= 50) output.AppendLine("  Fair — significant work needed before AOT publish.");
         else output.AppendLine("  Poor — many AOT-incompatible patterns detected.");
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine();
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -228,7 +223,7 @@ public class InteropTools
             var ok = new StringBuilder();
             ok.AppendLine("No AOT compatibility issues found.");
             ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-            return ok.ToString();
+            return ok.AppendWarnings(results.Warnings).ToString();
         }
 
         var output = new StringBuilder();
@@ -253,9 +248,7 @@ public class InteropTools
             output.AppendLine();
         }
 
-        if (results.Warnings.Count > 0)
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -263,7 +256,7 @@ public class InteropTools
     private static string FormatDetailed(AotCompatibilityResults results)
     {
         if (results.TotalIssues == 0)
-            return $"No AOT compatibility issues found. Analyzed {results.AnalyzedProjects} project(s).";
+            return $"No AOT compatibility issues found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine("# Native AOT Compatibility Analysis — Detailed Report");
@@ -312,12 +305,7 @@ public class InteropTools
             }
         }
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine("## Warnings");
-            foreach (var w in results.Warnings)
-                output.AppendLine($"- {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -364,12 +352,7 @@ public class InteropTools
         else if (score >= 50) output.AppendLine("  Fair — several interop issues to address.");
         else output.AppendLine("  Poor — significant P/Invoke safety or migration work needed.");
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine();
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -381,7 +364,7 @@ public class InteropTools
             var ok = new StringBuilder();
             ok.AppendLine("No P/Invoke issues found.");
             ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-            return ok.ToString();
+            return ok.AppendWarnings(results.Warnings).ToString();
         }
 
         var output = new StringBuilder();
@@ -406,9 +389,7 @@ public class InteropTools
             output.AppendLine();
         }
 
-        if (results.Warnings.Count > 0)
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -416,7 +397,7 @@ public class InteropTools
     private static string FormatPInvokeDetailed(PInvokeAnalysisResults results)
     {
         if (results.TotalIssues == 0)
-            return $"No P/Invoke issues found. Analyzed {results.AnalyzedProjects} project(s).";
+            return $"No P/Invoke issues found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine("# P/Invoke Compatibility Analysis — Detailed Report");
@@ -463,12 +444,7 @@ public class InteropTools
             }
         }
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine("## Warnings");
-            foreach (var w in results.Warnings)
-                output.AppendLine($"- {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -507,12 +483,7 @@ public class InteropTools
         else if (score >= 50) output.AppendLine("  Fair — several unsafe code risks to address.");
         else output.AppendLine("  Poor — significant unsafe code risks requiring attention.");
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine();
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -524,7 +495,7 @@ public class InteropTools
             var ok = new StringBuilder();
             ok.AppendLine("No unsafe code issues found.");
             ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-            return ok.ToString();
+            return ok.AppendWarnings(results.Warnings).ToString();
         }
 
         var output = new StringBuilder();
@@ -549,9 +520,7 @@ public class InteropTools
             output.AppendLine();
         }
 
-        if (results.Warnings.Count > 0)
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -559,7 +528,7 @@ public class InteropTools
     private static string FormatUnsafeDetailed(UnsafeCodeAnalysisResults results)
     {
         if (results.TotalIssues == 0)
-            return $"No unsafe code issues found. Analyzed {results.AnalyzedProjects} project(s).";
+            return $"No unsafe code issues found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine("# Unsafe Code Analysis — Detailed Report");
@@ -606,12 +575,7 @@ public class InteropTools
             }
         }
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine("## Warnings");
-            foreach (var w in results.Warnings)
-                output.AppendLine($"- {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }

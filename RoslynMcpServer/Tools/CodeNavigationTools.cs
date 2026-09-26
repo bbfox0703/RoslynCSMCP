@@ -14,11 +14,17 @@ namespace RoslynMcpServer.Tools
     [McpServerToolType]
     public class CodeNavigationTools
     {
-        [McpServerTool, Description("Search for symbols in C# code using wildcard patterns (* and ?)")]
+        [McpServerTool, Description("""
+            Search every project in a solution for types and members whose simple or fully qualified name matches a
+            wildcard pattern (* and ?, matched against the whole name). Symbols from referenced assemblies such as the
+            .NET framework are included, and a symbol visible to several projects is listed once per project. Results
+            are ranked with exact and prefix matches first, grouped by kind, and capped at 20 per kind. Nested types
+            and their members are searched at any depth.
+            """)]
         public static async Task<string> SearchSymbols(
-            [Description("Wildcard pattern to search for (e.g., 'User*', '*Service', 'Get*User')")] string pattern,
+            [Description("Wildcard pattern (* and ?) matched against the whole simple name or fully qualified name, e.g. 'User*', '*Service', 'MyApp.Services.*'.")] string pattern,
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Symbol types to include: class,interface,method,property,field (comma-separated)")] string symbolTypes = "class,interface,method,property",
+            [Description("Comma-separated kinds: class, interface, struct, enum, method, property, field, event, namespace. class, interface, struct, and enum all select every type declaration, so they cannot be told apart.")] string symbolTypes = "class,interface,method,property",
             [Description("Whether to ignore case in search")] bool ignoreCase = true,
             IServiceProvider? serviceProvider = null)
         {
@@ -69,13 +75,20 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find all references to a specific symbol with configurable detail level")]
+        [McpServerTool, Description("""
+            Find source references to the symbols declared in the solution that match symbolName, plus their
+            declaration sites when includeDefinition is true. A simple name combines every match (overloads and
+            same-named members of different types); qualify it with the containing type or namespace to narrow it.
+            Members of referenced assemblies such as the .NET framework are never matched. References are grouped by
+            file, one entry per line, with declarations marked; a name that matches no declared symbol returns a
+            'not found' message.
+            """)]
         public static async Task<string> FindReferences(
-            [Description("Exact symbol name to find references for")] string symbolName,
+            [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
+            [Description("Detail level: summary (reference count and up to 10 line numbers per file), locations (code line per reference; files with more than 5 references list line numbers only), full (every reference with 5-line context). Default: locations")]
             string detailLevel = "locations",
-            [Description("Include symbol definition in results")] bool includeDefinition = true,
+            [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -92,7 +105,13 @@ namespace RoslynMcpServer.Tools
                     return "Error: Symbol search service not available.";
                 }
 
-                var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
+                var search = await searchService.SearchReferencesAsync(symbolName, solutionPath, includeDefinition);
+                if (search.MatchedSymbolCount == 0)
+                {
+                    return $"Symbol '{symbolName}' not found: no symbol with that name is declared in the solution.";
+                }
+
+                var results = search.References;
 
                 // Format based on detail level
                 return detailLevel.ToLower() switch
@@ -111,13 +130,19 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find all references to a symbol across multiple solutions")]
+        [McpServerTool, Description("""
+            Run the FindReferences search in each listed solution and merge the results into one entry per file line,
+            so a line in a file shared by several solutions appears once. symbolName is resolved in each solution the
+            same way as in FindReferences. Output lists the solutions searched, then references grouped by file
+            without saying which solution each came from, with declarations marked. A solution that fails to load
+            contributes nothing, without an error.
+            """)]
         public static async Task<string> FindReferencesAcrossSolutions(
-            [Description("Exact symbol name to find references for")] string symbolName,
+            [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
             [Description("Comma-separated list of solution file paths (.sln)")] string solutionPaths,
-            [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
+            [Description("Detail level: summary (reference count and up to 10 line numbers per file), locations (code line per reference; files with more than 5 references list line numbers only), full (every reference with 5-line context). Default: locations")]
             string detailLevel = "locations",
-            [Description("Include symbol definition in results")] bool includeDefinition = true,
+            [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -183,12 +208,18 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get hierarchical structure of projects, namespaces, and types")]
+        [McpServerTool, Description("""
+            List the source-declared types of every project in a solution, grouped by project and namespace, with each
+            type's kind and accessibility and optionally its member signatures. Nested types appear under their
+            namespace without their containing type, and projects with no matching types are omitted. Output is not
+            truncated, so large solutions produce long output unless filtered by namespace. Does not show project
+            references, file paths, or line numbers.
+            """)]
         public static async Task<string> GetProjectStructure(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Include member signatures (default: false)")] bool includeMembers = false,
-            [Description("Filter by namespace pattern (optional, e.g., 'MyProject.Services')")] string? namespaceFilter = null,
-            [Description("Include only public types (default: true)")] bool publicOnly = true,
+            [Description("Keep only types whose namespace contains this text (case-insensitive substring, no wildcards). Optional.")] string? namespaceFilter = null,
+            [Description("Include only public types, and only public members when includeMembers is true (default: true).")] bool publicOnly = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -219,13 +250,20 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get type signature with members but without implementation")]
+        [McpServerTool, Description("""
+            Return a C#-style outline of one type: its declaration (modifiers, type parameters, base class, interfaces)
+            and member signatures without bodies, grouped as fields, constructors, properties, events, and methods, with
+            <summary> doc text. Nested types, operators, attributes, generic constraints, parameter modifiers, and
+            default values are omitted. The name is matched case-sensitively and the first match in project order wins;
+            a namespace-qualified name can also resolve a framework type. For every type in one file, use
+            GetFileOutline.
+            """)]
         public static async Task<string> GetTypeSignature(
-            [Description("Fully qualified or simple type name (e.g., 'UserService' or 'MyProject.Services.UserService')")]
+            [Description("Type name, case-sensitive: simple ('UserService'), namespace-qualified ('MyProject.Services.UserService'), generic ('MyProject.Repo<T>'), or nested metadata form ('MyProject.Outer+Inner').")]
             string typeName,
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Include private members (default: false)")] bool includePrivate = false,
-            [Description("Include XML documentation comments (default: true)")] bool includeDocumentation = true,
+            [Description("Include non-public members (private, internal, private protected). When false, only public, protected, and protected internal members are listed (default: false).")] bool includePrivate = false,
+            [Description("Include the <summary> text of XML doc comments on the type and its members (default: true).")] bool includeDocumentation = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -256,9 +294,17 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get detailed information about a specific symbol")]
+        [McpServerTool, Description("""
+            Describe one type or member declared in the solution's source: kind, accessibility, namespace or
+            declaring type, source file and line, attributes, and for methods the return type and parameters or for
+            properties the type. Only source declarations are matched (never framework or package members); nested
+            types and their members are included. Exact-case matches win over case-insensitive ones, and without type
+            arguments a non-generic type wins over generic ones. If several declarations still match (for example
+            overloads, or the same name in different types), nothing is described and the candidates are listed with
+            names to call again with. An unknown name returns 'Symbol not found.'
+            """)]
         public static async Task<string> GetSymbolInfo(
-            [Description("Exact symbol name or full qualified name")] string symbolName,
+            [Description("Simple ('Save'), qualified ('UserService.Save', 'App.Services.UserService.Save'), or nested-type ('Outer.Inner') name, matched case-insensitively. Add type arguments ('Result<T>') to select a generic type and a parameter list ('Save(User, bool)', 'Save()') to select an overload.")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Detail level: summary (minimal), basic (balanced), full (comprehensive). Default: basic")]
             string detailLevel = "basic",
@@ -291,6 +337,10 @@ namespace RoslynMcpServer.Tools
                     _ => FormatSymbolInfoBasic(info)
                 };
             }
+            catch (SymbolResolutionException ex)
+            {
+                return ex.Message;
+            }
             catch (Exception ex)
             {
                 var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
@@ -299,10 +349,17 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get code metrics and statistics for entire solution")]
+        [McpServerTool, Description("""
+            Compute solution-wide totals: projects, .cs files, total, code, comment, and blank lines, and counts of
+            classes, interfaces, structs, enums, methods, and properties. Reports cyclomatic complexity of method
+            declarations (average, maximum, count above 10), lists the 5 largest types and the 5 most complex methods,
+            then appends the breakdowns selected by groupBy. Lines are classified by text prefix, and generated files
+            under obj are included. For one file use GetFileStatistics; to list methods above a complexity threshold
+            use AnalyzeCodeComplexity.
+            """)]
         public static async Task<string> GetCodeMetrics(
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Group by: project | namespace | type (default: project)")] string groupBy = "project",
+            [Description("Breakdowns to append, comma-separated: project (files, lines, classes, methods per project), namespace (files, types, lines inside types, methods per namespace; up to 30, largest first), type (lines, methods, properties, and maximum method complexity per type declaration, partial parts listed separately; up to 20, largest first), or none. Other values return an error. Default: project")] string groupBy = "project",
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -311,6 +368,11 @@ namespace RoslynMcpServer.Tools
                 if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
                 {
                     return "Error: Invalid solution path provided.";
+                }
+
+                if (!CodeMetricsService.TryParseGroupBy(groupBy, out _))
+                {
+                    return $"Error: {CodeMetricsService.GroupByErrorMessage}.";
                 }
 
                 var metricsService = serviceProvider?.GetService<CodeMetricsService>();
@@ -329,11 +391,17 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get project dependency graph in various formats")]
+        [McpServerTool, Description("""
+            Return the project-reference graph of the solution: text lists each project with the projects it references,
+            then summary counts; mermaid and dot return diagram source with project-to-project edges only. With
+            includePackages, text output also lists each project's referenced non-framework assemblies, including
+            transitive ones, which requires compiling every project. Does not show type-level dependencies or detect
+            circular references.
+            """)]
         public static async Task<string> GetDependencyGraph(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: text | dot | mermaid (default: text)")] string format = "text",
-            [Description("Include package dependencies (default: false)")] bool includePackages = false,
+            [Description("Also list each project's referenced assemblies (NuGet and other, including transitive; framework assemblies excluded). Affects text format only. Default: false")] bool includePackages = false,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -360,12 +428,20 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get call hierarchy showing callers and callees for a method")]
+        [McpServerTool, Description("""
+            List the callers and callees of one method as trees up to maxDepth levels deep (callers of callers, callees
+            of callees). The method is found by exact, case-sensitive simple name among method declarations in source,
+            and the first declaration found is used, so other overloads and same-named methods in other types are
+            ignored. Callers show one entry per calling member with a call count. Callees include only calls to methods
+            declared in source, one entry per overload; framework calls, constructors, and property accesses are
+            omitted. Each method is expanded once (later repeats and recursive calls are marked, not expanded), and
+            each direction stops after 200 entries, listing shallower levels first.
+            """)]
         public static async Task<string> GetCallHierarchy(
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Method name to analyze")] string methodName,
-            [Description("Direction: both | callers | callees (default: both)")] string direction = "both",
-            [Description("Maximum depth for hierarchy traversal (default: 3)")] int maxDepth = 3,
+            [Description("Simple method name, case-sensitive, without type or parameters (e.g., 'SaveAsync'); the first matching declaration in the solution is used.")] string methodName,
+            [Description("Direction: both, callers, or callees, case-insensitive; other values return an error (default: both).")] string direction = "both",
+            [Description("Number of levels to follow: 1 lists only direct callers and callees; values below 1 count as 1 and above 10 as 10 (default: 3).")] int maxDepth = 3,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -401,10 +477,16 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Analyze project dependencies and symbol usage patterns")]
+        [McpServerTool, Description("""
+            Summarize the solution's dependencies: project references and referenced assemblies (excluding System*,
+            Microsoft*, mscorlib, and netstandard) grouped by kind, up to 10 each, the 10 most-referenced namespaces,
+            and symbol counts that include referenced-assembly symbols. Assembly names are listed, not NuGet package
+            IDs. Circular references are not reported. For per-project edges use GetDependencyGraph; for unused
+            references use FindUnusedDependencies.
+            """)]
         public static async Task<string> AnalyzeDependencies(
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Maximum depth for dependency analysis")] int maxDepth = 3,
+            [Description("Currently has no effect.")] int maxDepth = 3,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -432,10 +514,16 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Analyze code complexity and identify high-complexity methods")]
+        [McpServerTool, Description("""
+            Report ordinary methods (not constructors, accessors, or operators) whose cyclomatic complexity is at or
+            above threshold: 1 plus one per branch, loop, catch, case label, switch-expression arm, when guard, ?:, ??,
+            ?., &&, ||, and pattern and/or, with lambdas and local functions counted toward their enclosing method.
+            Returns the match count and the 20 most complex methods with class, namespace, file, and line. For method
+            length use FindCodeSmells; for solution-wide averages use GetCodeMetrics.
+            """)]
         public static async Task<string> AnalyzeCodeComplexity(
             [Description("Path to solution file")] string solutionPath,
-            [Description("Complexity threshold (1-10)")] int threshold = 5,
+            [Description("Minimum cyclomatic complexity for a method to be reported, inclusive; any positive integer (default: 5)")] int threshold = 5,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -495,14 +583,22 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find unused code (dead code) in the solution - types, methods, properties, and fields with no references")]
+        [McpServerTool, Description("""
+            Find types, methods, properties, fields, and events with no reference in the solution other than their own
+            declaration; references from test projects count as usage. Skips static Main, test methods, overrides,
+            explicit interface implementations, instance constructors, Program and Startup types, and
+            serialization-attributed symbols. Code used only through reflection, framework conventions (controller
+            actions, deserialized properties), implicit calls (foreach GetEnumerator, Deconstruct), or callers outside
+            the solution is still reported. Returns items grouped by accessibility and then kind, up to 10 per kind,
+            with declaring type and project; for unused packages and project references, use FindUnusedDependencies.
+            """)]
         public static async Task<string> FindUnusedCode(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
             string format = "normal",
-            [Description("Scope: private (private members only), internal (internal members only), public (public members only), all (all members). Default: all")]
+            [Description("Declared accessibility to analyze: private, internal, public, or all (those three together); protected members are never analyzed. Default: all")]
             string scope = "all",
-            [Description("Include test projects in analysis (default: false)")] bool includeTests = false,
+            [Description("Also report unused symbols declared in test projects (name contains Test or Spec); references from test projects count as usage either way (default: false)")] bool includeTests = false,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -540,7 +636,16 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find unused dependencies (NuGet packages and project references) in the solution")]
+        [McpServerTool, Description("""
+            Flag package and project references that look unused, per project file, using heuristics. A PackageReference
+            counts as used when a using directive, global usings included (such as those the SDK generates from csproj
+            <Using> items), imports the package ID, the ID minus its last segment for IDs with three or more segments, or
+            a sub-namespace of either; packages without compile assets and known build, test, and analyzer packages are
+            never flagged. AnalyzePackages applies the same rule. A project reference counts as used when any
+            identifier binds to a symbol from that project in any target framework. Packages whose namespaces differ
+            from their IDs are still reported as unused. Summary shows counts and the first 5; normal groups by kind
+            and project, up to 10 each.
+            """)]
         public static async Task<string> FindUnusedDependencies(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
@@ -587,14 +692,21 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find security issues and anti-patterns in the solution (SQL injection, hardcoded secrets, weak crypto, etc.)")]
+        [McpServerTool, Description("""
+            Scan C# source in every project for five categories with pattern checks, not data-flow analysis, so any
+            non-literal argument to Path.Combine or File.Read*/Write* and any runtime value in a SQL-looking string is
+            flagged regardless of origin. Findings are only ever Critical or High. Returns counts by severity and
+            category, then findings grouped by severity and category, up to 10 per category, with description and
+            recommendation; detailed adds a code snippet with secret values masked. Does not scan configuration files or
+            detect command injection, XSS, or insecure randomness.
+            """)]
         public static async Task<string> FindSecurityIssues(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
             string format = "normal",
-            [Description("Categories to check (comma-separated): sql-injection, secrets, crypto, path-traversal, deserialization, all. Default: all")]
+            [Description("Comma-separated, lowercase: sql-injection (runtime values in SQL-looking strings), secrets (literals assigned to password, secret, apikey, token, or connectionstring names, and connection-string literals), crypto (MD5, SHA1, DES, TripleDES, RC2), path-traversal (non-literal arguments to Path, File, and Directory APIs), deserialization (BinaryFormatter, JavaScriptSerializer, NetDataContractSerializer), or all. Default: all")]
             string categories = "all",
-            [Description("Severity filter: critical, high, medium, low, all. Default: all")]
+            [Description("Exact severity to return (case-insensitive): critical, high, or all. No check emits medium or low. Default: all")]
             string severity = "all",
             IServiceProvider? serviceProvider = null)
         {
@@ -639,13 +751,22 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find duplicate code blocks across the solution")]
+        [McpServerTool, Description("""
+            Find methods whose bodies are copies or near-copies. Bodies are compared as token sequences with comments,
+            whitespace, literal values, and names declared inside the method (parameters, locals, loop, catch, and
+            lambda variables) normalized away, so a copy with a different method name, signature, or local names still
+            matches; called methods, members, and types must agree. Similarity is 2 x LCS / (tokens of both bodies),
+            and each group collects the methods at or above the threshold around its largest member. Duplicated
+            fragments inside otherwise different methods are not detected. Returns up to 15 groups, largest first,
+            each with its similarity, a code preview, and file, line range, method, and project per instance;
+            detailed lists all groups.
+            """)]
         public static async Task<string> FindDuplicateCode(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
             string format = "normal",
-            [Description("Minimum lines to consider duplicate (default: 5)")] int minLines = 5,
-            [Description("Similarity threshold percentage 70-100 (default: 90)")] int similarity = 90,
+            [Description("Minimum line span of a method's whole declaration for it to be compared; values below 3 are replaced with 5 (default: 5)")] int minLines = 5,
+            [Description("Minimum body similarity in percent, 70-100; 100 finds only exact copies after normalization, and values outside the range are replaced with 90 (default: 90)")] int similarity = 90,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -686,12 +807,18 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Analyze XML documentation coverage for types and members")]
+        [McpServerTool, Description("""
+            Measure XML documentation coverage across the solution for each class, struct, interface, or record in scope
+            and its declared members, counting constructors and property accessors as separate methods. Top-level enums
+            and delegates are skipped, and partial and nested types are counted more than once, which skews totals.
+            Normal shows the 10 namespaces with the most undocumented symbols and 3 examples per kind; detailed lists
+            every undocumented symbol with a generated XML-doc stub and can be very long.
+            """)]
         public static async Task<string> AnalyzeDocumentationCoverage(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (counts only), normal (grouped list), detailed (with suggestions). Default: normal")]
             string format = "normal",
-            [Description("Scope filter: public (public only), all (all symbols). Default: public")]
+            [Description("public: only public symbols, skipping all members of non-public types; all: every accessibility, including private. Default: public")]
             string scope = "public",
             IServiceProvider? serviceProvider = null)
         {
@@ -732,7 +859,14 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find TODO, FIXME, HACK, and other special comments in code")]
+        [McpServerTool, Description("""
+            Scan every comment in the solution's compiled files, including XML doc comments, for TODO, FIXME, HACK,
+            NOTE, BUG, XXX, OPTIMIZE, and REFACTOR markers, capturing an author from the TODO(name): form. Markers
+            must be whole words, so 'debug' or 'notes' do not count; a marker in any case is accepted at the start of
+            a comment line, elsewhere only in upper case. Each comment line yields at most one marker: the first one
+            of a requested type. Normal groups results by marker type and then project, 10 per project; detailed lists
+            every match with surrounding code.
+            """)]
         public static async Task<string> FindTODOComments(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (counts only), normal (grouped list), detailed (with code context). Default: normal")]
@@ -785,12 +919,17 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find large source files that may need refactoring")]
+        [McpServerTool, Description("""
+            List source files whose physical line count (blank and comment lines included) is at least threshold,
+            largest first, with type and method counts, skipping generated files (.g.cs, .designer.cs, .Generated.cs)
+            and obj/bin output. Summary shows the top 10; normal groups by project, 15 per project; detailed buckets
+            files at 1,000 and 2,000 lines with full paths and splitting suggestions.
+            """)]
         public static async Task<string> FindLargeFiles(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (top files only), normal (balanced), detailed (with metrics). Default: normal")]
             string format = "normal",
-            [Description("Minimum line count threshold (default: 500)")] int threshold = 500,
+            [Description("Minimum physical line count, inclusive; values below 100 are replaced with 500 (default: 500)")] int threshold = 500,
             IServiceProvider? serviceProvider = null)
         {
             var logger = serviceProvider?.GetService<ILogger<LargeFileAnalyzer>>();
@@ -830,12 +969,19 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find usages of deprecated/obsolete APIs in the solution")]
+        [McpServerTool, Description("""
+            Find references to symbols marked [Obsolete], declared in the solution or in referenced assemblies, plus
+            optionally a hardcoded list of legacy types (see includeFrameworkAPIs). Only simple identifiers are checked,
+            so obsolete constructors and explicitly generic calls such as M<int>() are missed. Results are grouped per
+            API, error-level ([Obsolete] with error=true) first, each with its message and a migration hint; normal
+            shows every error-level API and the 10 most-used warning-level APIs, and detailed lists every usage with
+            surrounding code.
+            """)]
         public static async Task<string> FindDeprecatedAPIs(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (counts and top APIs), normal (grouped by API), detailed (with code context). Default: normal")]
             string format = "normal",
-            [Description("Include .NET Framework obsolete APIs (default: true)")] bool includeFrameworkAPIs = true,
+            [Description("Also flag uses of legacy types that may lack [Obsolete]: BinaryFormatter, WebRequest, HttpWebRequest, ServicePointManager, MD5, SHA1. [Obsolete]-marked framework APIs are reported either way (default: true)")] bool includeFrameworkAPIs = true,
             IServiceProvider? serviceProvider = null)
         {
             var logger = serviceProvider?.GetService<ILogger<DeprecatedAPIAnalyzer>>();
@@ -875,7 +1021,13 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get comprehensive statistics for a C# file (LOC, complexity, dependencies, documentation coverage)")]
+        [McpServerTool, Description("""
+            Parse a single .cs file on its own, without its project, and report line counts, counts of types, methods,
+            properties, and fields, cyclomatic complexity summed over method declarations with average and most complex
+            method, using-directive namespaces, and XML documentation coverage of explicitly public types, methods, and
+            properties. Detailed adds a heuristic quality score and recommendations. For solution-wide totals use
+            GetCodeMetrics; for a member outline use GetFileOutline.
+            """)]
         public static async Task<string> GetFileStatistics(
             [Description("Path to C# source file (.cs)")] string filePath,
             [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
@@ -911,14 +1063,23 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Analyze NuGet packages in solution: check for updates, version conflicts, unused packages, and security vulnerabilities")]
+        [McpServerTool, Description("""
+            Read the PackageReference items written in each .csproj (versions from Directory.Packages.props or imported
+            props are not resolved) and report newer stable versions on nuget.org, packages referenced at different
+            versions across projects, known vulnerabilities, and packages that look unused. The update check needs
+            network access and silently returns nothing on failure. The vulnerability check runs 'dotnet list package
+            --vulnerable --include-transitive' against the solution, which needs network access and a restored
+            solution; its problems appear as warnings. The unused check is the FindUnusedDependencies heuristic: no
+            using directive, global usings included, imports the package's namespace. Normal lists up to 5
+            vulnerabilities, 10 updates, 5 conflicts, and 10 unused packages.
+            """)]
         public static async Task<string> AnalyzePackages(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
-            [Description("Check for available package updates (default: true)")] bool checkUpdates = true,
-            [Description("Check for security vulnerabilities (default: true)")] bool checkVulnerabilities = true,
-            [Description("Analyze package usage to detect unused packages (default: true)")] bool analyzeUsage = true,
+            [Description("Query nuget.org for the latest stable version of each package (network access; other feeds are ignored). Default: true")] bool checkUpdates = true,
+            [Description("Report packages with known advisories, direct and transitive, using 'dotnet list package --vulnerable' (network access; the solution must already be restored, no restore is run; takes up to a few minutes). Default: true")] bool checkVulnerabilities = true,
+            [Description("Flag packages that no using directive (global usings included) imports; packages without compile assets and known build, test, and analyzer packages are exempt. Heuristic: packages whose namespaces differ from their IDs are false positives. Default: true")] bool analyzeUsage = true,
             IServiceProvider? serviceProvider = null)
         {
             var logger = serviceProvider?.GetService<ILogger<PackageAnalysisService>>();
@@ -942,7 +1103,11 @@ namespace RoslynMcpServer.Tools
                 // Perform analysis
                 var diagnosticLogger = serviceProvider?.GetService<DiagnosticLogger>();
                 Func<Task<PackageAnalysisResults>> operation = async () =>
-                    await analyzer.AnalyzePackagesAsync(solutionPath, checkUpdates, checkVulnerabilities, analyzeUsage);
+                    await analyzer.AnalyzePackagesAsync(
+                        solutionPath,
+                        checkUpdates: checkUpdates,
+                        checkVulnerabilities: checkVulnerabilities,
+                        analyzeUsage: analyzeUsage);
 
                 var results = diagnosticLogger != null
                     ? await diagnosticLogger.LoggedExecutionAsync(
@@ -1004,18 +1169,24 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find references with advanced filtering options to reduce noise and focus on specific usage patterns")]
+        [McpServerTool, Description("""
+            Find references the way FindReferences does, then narrow them by project name pattern, test-project
+            exclusion, cross-project usage, write access, or public API context. Filters are applied to each reference
+            before lines are merged, so a line that both reads and writes the symbol counts as a write. Declaration
+            sites (includeDefinition) are subject to projectFilter, excludeTests, and publicOnly, and are dropped by
+            crossProjectOnly and writesOnly. Output lists the active filters, then references grouped by file.
+            """)]
         public static async Task<string> FindReferencesFiltered(
-            [Description("Exact symbol name to find references for")] string symbolName,
+            [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
+            [Description("Detail level: summary (reference count and up to 10 line numbers per file), locations (code line per reference; files with more than 5 references list line numbers only), full (every reference with 5-line context). Default: locations")]
             string detailLevel = "locations",
-            [Description("Include symbol definition in results")] bool includeDefinition = true,
-            [Description("Only show references in public API contexts (excludes private/internal usage)")] bool publicOnly = false,
-            [Description("Exclude test projects (projects with 'Test', 'Tests', 'Testing', 'Spec' in name)")] bool excludeTests = false,
-            [Description("Only show cross-project references (exclude same-project usage)")] bool crossProjectOnly = false,
-            [Description("Only show write operations (assignments, increments, etc.)")] bool writesOnly = false,
-            [Description("Filter by project name pattern (supports wildcards: * and ?)")] string? projectFilter = null,
+            [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
+            [Description("Keep only locations inside a type or member visible outside its assembly: it and every containing type are public, protected, or protected internal, and an accessor's own modifier counts (e.g. a private setter). Code in private or internal members, top-level statements, and using directives is dropped.")] bool publicOnly = false,
+            [Description("Drop references in projects whose name contains 'test' or 'spec' (case-insensitive substring).")] bool excludeTests = false,
+            [Description("Keep only references located in a project other than the one declaring the referenced symbol (checked per symbol when several match); declaration sites are dropped.")] bool crossProjectOnly = false,
+            [Description("Keep only references that write the symbol: assignment or compound-assignment target (including object initializers and deconstruction), ++/-- operand, or out/ref argument. Reads, including right-hand-side reads inside an assignment, and declaration sites are dropped.")] bool writesOnly = false,
+            [Description("Project name wildcard pattern (* and ?), matched case-insensitively against the whole name.")] string? projectFilter = null,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -1084,13 +1255,19 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get compilation errors and warnings from solution to quickly identify build issues without running full build")]
+        [McpServerTool, Description("""
+            Report compiler diagnostics (CS codes) for every project by compiling the solution in memory, without
+            running a build. Analyzer rules (CA, IDE, StyleCop), NuGet and MSBuild errors, and diagnostics without a
+            source location are not included. Projects that fail to load or compile are reported as warnings, so an
+            empty result is not proof that the solution builds. Results are grouped by severity and then project;
+            normal mode shows up to 10 per project per severity with the source line.
+            """)]
         public static async Task<string> GetCompilationErrors(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output mode: compact (error counts and key issues), normal (balanced), detailed (comprehensive). Default: normal")]
             string mode = "normal",
-            [Description("Severity filter: Error, Warning, Info, or All (default: All)")] string severity = "All",
-            [Description("Filter by project name pattern (supports wildcards: * and ?)")] string? projectFilter = null,
+            [Description("Severity to return, case-insensitive: Error, Warning, or Info returns only that severity (not that level and above); All returns every severity, including hidden ones (default: All).")] string severity = "All",
+            [Description("Project name wildcard pattern (* and ?), matched case-insensitively against the whole name.")] string? projectFilter = null,
             [Description("Filter by specific error codes (e.g., CS0103, CS0246)")] string[]? errorCodes = null,
             IServiceProvider? serviceProvider = null)
         {
@@ -1133,14 +1310,20 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get structural outline of a C# file showing types and members without full implementation details")]
+        [McpServerTool, Description("""
+            Parse a single .cs file on its own, without loading a solution, and outline its classes, interfaces,
+            structs, enums, and records with their constructors, fields, properties, methods, and events, plus line
+            counts and using directives. Only syntax is read, so accessibility comes from written modifiers (none is
+            reported as Private). Nested types are listed separately; enum members, indexers, operators, delegates, and
+            field-like events are omitted.
+            """)]
         public static async Task<string> GetFileOutline(
             [Description("Path to C# source file (.cs)")] string filePath,
             [Description("Output mode: compact (minimal info), normal (balanced), detailed (comprehensive). Default: normal")]
             string mode = "normal",
-            [Description("Maximum members to show per type (default: 10, 0=show all)")] int maxMembers = 10,
-            [Description("Include member details (default: true)")] bool includeMembers = true,
-            [Description("Include documentation comments (default: true)")] bool includeDocumentation = true,
+            [Description("Maximum members listed per member kind (constructors, fields, properties, methods, events) within each type; in compact mode it limits only the method list. 0 shows all (default: 10).")] int maxMembers = 10,
+            [Description("List members in normal mode; compact and detailed modes ignore it (default: true).")] bool includeMembers = true,
+            [Description("Include the <summary> text of XML doc comments in normal and detailed modes (default: true).")] bool includeDocumentation = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -1182,13 +1365,23 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find all implementations of an interface or abstract class")]
+        [McpServerTool, Description("""
+            Find the source types that implement an interface (directly, through a base class, or through an inherited
+            interface) or derive from an abstract class at any depth, including through constructed generics (IRepo<int>
+            counts for IRepo<T>), grouped by the declaring project with file, line, namespace, base class, and other
+            interfaces; each type is listed once. The target must be an interface or abstract class declared in the
+            solution's source, so framework types such as IDisposable cannot be the target. Exact-case matches win over
+            case-insensitive ones; if several interfaces or abstract classes still match, the candidates are listed
+            instead. An unknown name, and a name that only matches other kinds of declaration (such as a concrete
+            class), are reported as such rather than as 'no implementations'. For subclasses of a concrete class, use
+            GetClassHierarchy.
+            """)]
         public static async Task<string> FindImplementations(
-            [Description("Interface or abstract class name to find implementations for")] string typeName,
+            [Description("Simple ('IRepository'), qualified ('App.Data.IRepository'), or nested-type ('Outer.IInner') name of an interface or abstract class, matched case-insensitively. Add type arguments ('IRepository<T>') to select a generic type.")] string typeName,
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Output format: summary (names only), normal (balanced), detailed (comprehensive). Default: normal")]
+            [Description("Output format: summary (names with file:line, grouped by project), normal (adds accessibility, namespace, doc summary, base class, other interfaces), detailed (adds all interfaces and counts by accessibility). Default: normal")]
             string format = "normal",
-            [Description("Include abstract implementations (default: false)")] bool includeAbstractImplementations = false,
+            [Description("Also list abstract classes and, for an interface target, derived interfaces (default: false).")] bool includeAbstractImplementations = false,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -1221,6 +1414,10 @@ namespace RoslynMcpServer.Tools
                     _ => FormatImplementationResults(results, typeName)
                 };
             }
+            catch (SymbolResolutionException ex)
+            {
+                return ex.Message;
+            }
             catch (Exception ex)
             {
                 var logger = serviceProvider?.GetService<ILogger<CodeNavigationTools>>();
@@ -1229,11 +1426,18 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find test classes and methods for a given type")]
+        [McpServerTool, Description("""
+            Find test classes for a type by naming convention, searching only projects whose names contain Test or Spec.
+            A class matches when its name is <Type>Test or <Type>Tests (case-insensitive) or, with partial matching,
+            starts with Test<Type> or <Type>_ or contains <Type> followed later by Test, and it needs a method marked
+            [Fact], [Theory], [Test], [TestCase], [TestMethod], or [DataTestMethod]. Matching does not check that the
+            tests reference the type, so short names can match unrelated classes. Results are grouped by project with up
+            to 10 methods per class.
+            """)]
         public static async Task<string> FindTestsForType(
-            [Description("Type name to find tests for")] string typeName,
+            [Description("Simple type name without namespace or generic arguments, e.g. OrderService")] string typeName,
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Include partial name matches (default: true)")] bool includePartialMatches = true,
+            [Description("Also match class names starting with Test<Type> or <Type>_, or containing <Type> anywhere before Test, which can match unrelated classes such as <Type>FactoryTests. Default: true")] bool includePartialMatches = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -1265,12 +1469,18 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Analyze test coverage for all types in solution - identify untested code, coverage percentages, and high-risk areas")]
+        [McpServerTool, Description("""
+            Estimate test coverage statically: no tests are run and no line or branch coverage is measured. A class or
+            interface counts as tested when a test class matches its name by convention (as in FindTestsForType), and a
+            public method, property, or event counts as tested when any code in a test project references it. Analyzes
+            top-level types in projects whose names do not contain Test or Spec and ranks untested types by
+            complexity-based risk. It reloads the solution for each type, so it is slow on large solutions.
+            """)]
         public static async Task<string> GetTestCoverage(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
-            [Description("Scope: public (only public types), all (all types). Default: public")]
+            [Description("Which top-level classes and interfaces to include: public, or all (any accessibility). Only public members are counted either way. Default: public")]
             string scope = "public",
             [Description("Group by: project, namespace. Default: project")]
             string groupBy = "project",
@@ -1321,14 +1531,24 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Analyze impact of changing a symbol - identify all dependent code, assess risk, and get recommendations before refactoring")]
+        [McpServerTool, Description("""
+            Estimate the impact of changing one symbol. Direct references are every reference to it across the
+            solution; indirect references follow the members that contain them, level by level (references to the
+            callers, then to their callers), up to maxDepth. Each location is listed with its enclosing member, file,
+            and project, along with dependency chains, and a heuristic risk level comes from reference count, project
+            count, and public accessibility; any public symbol or interface is labeled a breaking change. The name
+            matches a type (nested types included) or member declared in the solution's source by exact, case-sensitive
+            simple name or full display name such as Ns.Type.Method(int); the first match wins, so prefer the full name.
+            Framework symbols are not matched, and an unknown name returns a not-found warning. Indirect analysis stops
+            with a warning after following 200 members.
+            """)]
         public static async Task<string> GetChangeImpact(
-            [Description("Symbol name to analyze (class, method, property, etc.)")] string symbolName,
+            [Description("Type or member declared in the solution: exact, case-sensitive simple name, or full display name (Ns.Type, Ns.Type.Member, Ns.Type.Method(int, string)). The first match wins.")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
-            [Description("Maximum depth for indirect dependency analysis (default: 3)")] int maxDepth = 3,
-            [Description("Include indirect references (default: true)")] bool includeIndirectReferences = true,
+            [Description("Number of reference levels to follow, counting direct references as level 1 (1 = direct references only). Default: 3")] int maxDepth = 3,
+            [Description("Follow references to the members that contain each reference, up to maxDepth levels; false reports direct references only. Default: true")] bool includeIndirectReferences = true,
             IServiceProvider? serviceProvider = null)
         {
             var logger = serviceProvider?.GetService<ILogger<ChangeImpactAnalyzer>>();
@@ -1376,12 +1596,21 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find common performance anti-patterns and issues in C# code")]
+        [McpServerTool, Description("""
+            Run five heuristics over every file in the solution. LinqMisuse (every Enumerable.Count() call, nested
+            ToList(), ToList() inside a foreach) and SyncOverAsync (any .Result or .Wait inside an async method) are
+            name-based and produce false positives. StringConcatenation reports each string += x or s = s + x inside a
+            loop once, skipping strings declared inside that loop. DisposableNotDisposed reports locals created with
+            new, a static factory, or a Create/Open/Begin call that are never disposed, returned, stored, or passed
+            on, and instance fields a type creates but never disposes. ExceptionHandling reports each empty catch
+            block once. Does not detect boxing or general allocations; AnalyzeMemoryAllocation covers those. Normal
+            lists up to 10 Critical and 10 High issues; Medium issues appear only in detailed.
+            """)]
         public static async Task<string> FindPerformanceIssues(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
-            [Description("Comma-separated issue types to check: LinqMisuse, StringConcatenation, SyncOverAsync, DisposableNotDisposed, ExceptionHandling. Default: all")]
+            [Description("Comma-separated, case-sensitive: LinqMisuse, StringConcatenation, SyncOverAsync, DisposableNotDisposed, ExceptionHandling, or all. Default: all")]
             string? issueTypes = null,
             IServiceProvider? serviceProvider = null)
         {
@@ -1403,9 +1632,9 @@ namespace RoslynMcpServer.Tools
                     return "Error: Performance issue analyzer service not available.";
                 }
 
-                // Parse issue types filter
+                // Parse issue types filter ("all" or empty = every check)
                 string[]? issueTypesArray = null;
-                if (!string.IsNullOrWhiteSpace(issueTypes))
+                if (!string.IsNullOrWhiteSpace(issueTypes) && !issueTypes.Equals("all", StringComparison.OrdinalIgnoreCase))
                 {
                     issueTypesArray = issueTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 }
@@ -1437,14 +1666,21 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Analyze C# naming convention compliance and detect violations")]
+        [McpServerTool, Description("""
+            Check declared names against fixed rules (.editorconfig is ignored): PascalCase without underscores for
+            types, methods, properties, and public or internal fields; an I or T prefix for interfaces and type
+            parameters (a bare T is flagged); _camelCase for private and protected fields; camelCase for parameters.
+            Test and generated code are included, so underscore-style test names are reported. Returns a compliance
+            score, counts by type, and up to 10 High and 10 Medium violations; Low-severity findings are listed only in
+            detailed format.
+            """)]
         public static async Task<string> AnalyzeNamingConventions(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
-            [Description("Comma-separated violation types to check: InterfaceNaming, TypeNaming, MethodNaming, PropertyNaming, FieldNaming, ParameterNaming, TypeParameterNaming. Default: all")]
+            [Description("Comma-separated, case-sensitive: InterfaceNaming, TypeNaming, MethodNaming, PropertyNaming, FieldNaming, ParameterNaming, TypeParameterNaming, or all. FieldNaming results are reported as ConstantNaming, PrivateFieldNaming, or PublicFieldNaming. Default: all")]
             string? violationTypes = null,
-            [Description("Analysis scope: all, public, internal. Default: all")]
+            [Description("Declared accessibility to check: all; public (public only); internal (internal and public). public and internal skip parameters, type parameters, and private or protected members. Default: all")]
             string scope = "all",
             IServiceProvider? serviceProvider = null)
         {
@@ -1466,9 +1702,9 @@ namespace RoslynMcpServer.Tools
                     return "Error: Naming convention analyzer service not available.";
                 }
 
-                // Parse violation types filter
+                // Parse violation types filter ("all" or empty = every check)
                 string[]? violationTypesArray = null;
-                if (!string.IsNullOrWhiteSpace(violationTypes))
+                if (!string.IsNullOrWhiteSpace(violationTypes) && !violationTypes.Equals("all", StringComparison.OrdinalIgnoreCase))
                 {
                     violationTypesArray = violationTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 }
@@ -1500,7 +1736,16 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Analyze API changes between two versions of a solution - detect breaking changes, additions, removals, and get semantic versioning recommendations")]
+        [McpServerTool, Description("""
+            Compare the public API (public and protected types, methods, properties, fields, and events) of two
+            solutions, optionally including internal ones, and recommend a Major, Minor, or Patch version bump. Symbols
+            are matched by documentation comment ID, so each overload and each same-named member of another type is
+            compared separately; a changed parameter list shows as a removal plus an addition, and a changed return
+            type as a signature change. Removals, return-type and property-type changes, base-type changes,
+            abstract/sealed changes, and reduced visibility outside the assembly count as breaking; changes that code
+            outside the assembly cannot see are Internal. Normal lists 10 breaking changes and 10 additions; detailed
+            lists every change.
+            """)]
         public static async Task<string> AnalyzeAPIChanges(
             [Description("Path to old version solution file (.sln)")] string oldSolutionPath,
             [Description("Path to new version solution file (.sln)")] string newSolutionPath,
@@ -1508,7 +1753,7 @@ namespace RoslynMcpServer.Tools
             string format = "normal",
             [Description("Label for old version (e.g., 'v1.0.0', 'main'). Default: 'Old'")] string oldVersionLabel = "Old",
             [Description("Label for new version (e.g., 'v2.0.0', 'develop'). Default: 'New'")] string newVersionLabel = "New",
-            [Description("Include internal API changes (default: false)")] bool includeInternal = false,
+            [Description("Also compare internal and private protected symbols; changes that code outside the assembly cannot see are classified as Internal and call for at most a Patch bump (default: false)")] bool includeInternal = false,
             IServiceProvider? serviceProvider = null)
         {
             var logger = serviceProvider?.GetService<ILogger<APIChangeAnalyzer>>();
@@ -1565,13 +1810,22 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get complete class hierarchy showing ancestors (base classes/interfaces) and descendants (derived classes)")]
+        [McpServerTool, Description("""
+            Show the inheritance tree of one type declared in the solution's source, up to 10 levels each way: ancestors
+            (base-class chain excluding System.Object, plus declared interfaces, recursively, including framework types)
+            and descendants (source types that derive from or directly implement it, recursively, including through
+            constructed generic bases such as Base<int>). A descendant appears once under each type it directly derives
+            from or implements. The starting type must be declared in the solution's source, so a framework type such as
+            Exception cannot be the starting point. Exact-case matches win over case-insensitive ones, and without type
+            arguments a non-generic type wins over generic ones; if several types still match, the candidates are listed
+            instead. For a flat list of an interface's implementers, use FindImplementations.
+            """)]
         public static async Task<string> GetClassHierarchy(
-            [Description("Type name to analyze hierarchy for")] string typeName,
+            [Description("Simple ('Shape'), qualified ('App.Geometry.Shape'), or nested-type ('Outer.Inner') type name, matched case-insensitively. Add type arguments ('Repository<T>') to select a generic type.")] string typeName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: compact (tree structure only), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
-            [Description("Direction: ancestors, descendants, or both (default: both)")] string direction = "both",
+            [Description("Direction: ancestors, descendants, or both, case-insensitive; other values return an error (default: both).")] string direction = "both",
             [Description("Maximum depth to traverse (default: 10)")] int maxDepth = 10,
             IServiceProvider? serviceProvider = null)
         {
@@ -1583,6 +1837,12 @@ namespace RoslynMcpServer.Tools
                     return "Error: Invalid solution path provided.";
                 }
 
+                var normalizedDirection = SymbolSearchService.NormalizeHierarchyDirection(direction);
+                if (normalizedDirection == null)
+                {
+                    return $"Error: Invalid direction '{direction}'. Use both, ancestors, or descendants.";
+                }
+
                 var searchService = serviceProvider?.GetService<SymbolSearchService>();
                 if (searchService == null)
                 {
@@ -1592,7 +1852,7 @@ namespace RoslynMcpServer.Tools
                 var result = await searchService.GetClassHierarchyAsync(
                     typeName,
                     solutionPath,
-                    direction,
+                    normalizedDirection,
                     maxDepth);
 
                 if (result == null)
@@ -1605,11 +1865,15 @@ namespace RoslynMcpServer.Tools
 
                 return normalizedFormat switch
                 {
-                    "compact" => FormatClassHierarchyCompact(result, direction),
-                    "detailed" => FormatClassHierarchyDetailed(result, direction),
-                    "normal" => FormatClassHierarchy(result, direction),
-                    _ => FormatClassHierarchy(result, direction)
+                    "compact" => FormatClassHierarchyCompact(result, normalizedDirection),
+                    "detailed" => FormatClassHierarchyDetailed(result, normalizedDirection),
+                    "normal" => FormatClassHierarchy(result, normalizedDirection),
+                    _ => FormatClassHierarchy(result, normalizedDirection)
                 };
+            }
+            catch (SymbolResolutionException ex)
+            {
+                return ex.Message;
             }
             catch (Exception ex)
             {
@@ -1619,13 +1883,20 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find all usages of a specific attribute across the solution")]
+        [McpServerTool, Description("""
+            Find where an attribute is applied in source across all projects, grouped by target kind (class, method,
+            property, parameter, and so on) and then project, with file:line, declaring type, signature, and attribute
+            arguments. The attribute is matched by simple class name, case-insensitively, with or without the Attribute
+            suffix; qualified names do not match, and same-named attributes from different namespaces are combined.
+            Attributes on regular fields, field-like events, and the assembly are not found. For call sites of
+            [Obsolete] members, use FindDeprecatedAPIs.
+            """)]
         public static async Task<string> FindAttributeUsages(
-            [Description("Attribute name to search for (with or without 'Attribute' suffix)")] string attributeName,
+            [Description("Attribute class simple name, with or without the 'Attribute' suffix (e.g., 'Obsolete'), matched case-insensitively; namespace-qualified names do not match.")] string attributeName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: inline (compact single-line), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
-            [Description("Target type filter: class, interface, method, property, field, parameter, or all (default: all)")] string targetType = "all",
+            [Description("Target kind filter, case-insensitive: class, interface, struct, enum, method, property, field, parameter, event, or all (default: all). Constructors and accessors count as method; field matches only enum members.")] string targetType = "all",
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -2052,7 +2323,11 @@ namespace RoslynMcpServer.Tools
             var errors = errorResults.Errors;
 
             if (!errors.Any())
-                return $"No compilation {severityFilter.ToLower()} issues found. Solution builds successfully!";
+            {
+                return errorResults.Warnings.Any()
+                    ? $"No compilation {severityFilter.ToLower()} issues found in the {errorResults.AnalyzedProjects} projects analyzed, but some projects could not be loaded or analyzed, so this does not mean the solution builds.".WithWarnings(errorResults.Warnings)
+                    : $"No compilation {severityFilter.ToLower()} issues found. Solution builds successfully!";
+            }
 
             var output = new StringBuilder();
             output.AppendLine($"**Compilation Diagnostics** (Severity: {severityFilter})\n");
@@ -2127,7 +2402,11 @@ namespace RoslynMcpServer.Tools
             var errors = errorResults.Errors;
 
             if (!errors.Any())
-                return $"✅ No {severityFilter.ToLower()} issues ({errorResults.AnalyzedProjects} projects OK)";
+            {
+                return errorResults.Warnings.Any()
+                    ? $"No {severityFilter.ToLower()} issues in {errorResults.AnalyzedProjects} projects analyzed; some projects could not be loaded or analyzed.".WithWarnings(errorResults.Warnings)
+                    : $"✅ No {severityFilter.ToLower()} issues ({errorResults.AnalyzedProjects} projects OK)";
+            }
 
             var output = new StringBuilder();
             output.AppendLine($"Issues: {errors.Count} ({errorResults.AnalyzedProjects} projects, {errorResults.FailedProjects} failed)\n");
@@ -2164,7 +2443,7 @@ namespace RoslynMcpServer.Tools
             var warningCount = errors.Count(e => e.Severity == "Warning");
             output.AppendLine($"\nTotal: {errorCount} errors, {warningCount} warnings");
 
-            return output.ToString();
+            return output.AppendWarnings(errorResults.Warnings).ToString();
         }
 
         // Detailed mode: Comprehensive information with code snippets
@@ -2173,7 +2452,12 @@ namespace RoslynMcpServer.Tools
             var errors = errorResults.Errors;
 
             if (!errors.Any())
-                return $"✅ No compilation {severityFilter.ToLower()} issues found. Solution builds successfully!\n\n**Analysis Summary:**\n  • Projects analyzed: {errorResults.AnalyzedProjects}\n  • Projects failed: {errorResults.FailedProjects}\n  • Diagnostics failed: {errorResults.FailedDiagnostics}";
+            {
+                var headline = errorResults.Warnings.Any()
+                    ? $"No compilation {severityFilter.ToLower()} issues found in the projects analyzed, but some projects could not be loaded or analyzed, so this does not mean the solution builds."
+                    : $"✅ No compilation {severityFilter.ToLower()} issues found. Solution builds successfully!";
+                return $"{headline}\n\n**Analysis Summary:**\n  • Projects analyzed: {errorResults.AnalyzedProjects}\n  • Projects failed: {errorResults.FailedProjects}\n  • Diagnostics failed: {errorResults.FailedDiagnostics}".WithWarnings(errorResults.Warnings);
+            }
 
             var output = new StringBuilder();
             output.AppendLine($"**Compilation Diagnostics** (Severity: {severityFilter})\n");
@@ -2265,7 +2549,7 @@ namespace RoslynMcpServer.Tools
             if (!outline.Types.Any())
             {
                 output.AppendLine("No types found.");
-                return output.ToString();
+                return output.AppendWarnings(outline.Warnings).ToString();
             }
 
             foreach (var type in outline.Types)
@@ -2314,7 +2598,7 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine();
             }
 
-            return output.ToString();
+            return output.AppendWarnings(outline.Warnings).ToString();
         }
 
         // Normal mode: Balanced information
@@ -2402,7 +2686,7 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine("No types found in this file.");
             }
 
-            return output.ToString();
+            return output.AppendWarnings(outline.Warnings).ToString();
         }
 
         // Detailed mode: Comprehensive information (original behavior)
@@ -3135,7 +3419,7 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine();
             }
 
-            return output.ToString();
+            return output.AppendWarnings(searchResults.Warnings).ToString();
         }
 
         // Detailed mode: Comprehensive information with all details
@@ -3379,7 +3663,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatUnusedCodeSummary(UnusedCodeResults results)
         {
             if (!results.UnusedItems.Any())
-                return $"✅ No unused code found ({results.AnalyzedProjects} projects analyzed)";
+                return $"✅ No unused code found ({results.AnalyzedProjects} projects analyzed)".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"Unused code: {results.UnusedItems.Count} items ({results.AnalyzedProjects} projects, {results.FailedProjects} failed)\n");
@@ -3432,14 +3716,14 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         // Normal mode: Balanced format with grouped listings
         private static string FormatUnusedCodeNormal(UnusedCodeResults results)
         {
             if (!results.UnusedItems.Any())
-                return $"✅ No unused code found. All symbols have references!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}";
+                return $"✅ No unused code found. All symbols have references!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Unused Code Analysis**\n");
@@ -3539,7 +3823,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatUnusedCodeDetailed(UnusedCodeResults results)
         {
             if (!results.UnusedItems.Any())
-                return $"✅ No unused code found. All symbols have references!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Symbols analyzed: {results.AnalyzedSymbols}\n  • Projects failed: {results.FailedProjects}";
+                return $"✅ No unused code found. All symbols have references!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Symbols analyzed: {results.AnalyzedSymbols}\n  • Projects failed: {results.FailedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Unused Code Analysis (Detailed)**\n");
@@ -3687,7 +3971,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatUnusedDependenciesSummary(UnusedDependencyResults results)
         {
             if (!results.UnusedDependencies.Any())
-                return $"✅ No unused dependencies found ({results.AnalyzedProjects} projects analyzed)";
+                return $"✅ No unused dependencies found ({results.AnalyzedProjects} projects analyzed)".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"Unused dependencies: {results.TotalUnusedDependencies} items ({results.AnalyzedProjects} projects, {results.FailedProjects} failed)\n");
@@ -3718,14 +4002,14 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         // Normal mode: Balanced format with grouped listings
         private static string FormatUnusedDependenciesNormal(UnusedDependencyResults results)
         {
             if (!results.UnusedDependencies.Any())
-                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}";
+                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Unused Dependencies Analysis**\n");
@@ -3800,7 +4084,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatUnusedDependenciesDetailed(UnusedDependencyResults results)
         {
             if (!results.UnusedDependencies.Any())
-                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}";
+                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Unused Dependencies Analysis (Detailed)**\n");
@@ -3895,7 +4179,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatSecurityIssuesSummary(SecurityIssueResults results)
         {
             if (!results.Issues.Any())
-                return $"✅ No security issues found ({results.AnalyzedFiles} files analyzed)";
+                return $"✅ No security issues found ({results.AnalyzedFiles} files analyzed)".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"Security issues: {results.TotalIssues} found ({results.AnalyzedFiles} files, {results.AnalyzedProjects} projects)\n");
@@ -3946,14 +4230,14 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         // Normal mode: Balanced format with grouped listings
         private static string FormatSecurityIssuesNormal(SecurityIssueResults results)
         {
             if (!results.Issues.Any())
-                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Security Issues Analysis**\n");
@@ -4060,7 +4344,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatSecurityIssuesDetailed(SecurityIssueResults results)
         {
             if (!results.Issues.Any())
-                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Security Issues Analysis (Detailed)**\n");
@@ -4215,7 +4499,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDuplicateCodeSummary(DuplicateCodeResults results)
         {
             if (!results.DuplicateBlocks.Any())
-                return $"✅ No duplicate code found ({results.AnalyzedMethods} methods analyzed)";
+                return $"✅ No duplicate code found ({results.AnalyzedMethods} methods analyzed)".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"Duplicate code: {results.TotalDuplicateBlocks} blocks, {results.TotalDuplicateInstances} instances ({results.AnalyzedMethods} methods analyzed)\n");
@@ -4254,14 +4538,14 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         // Normal mode: Balanced format with grouped listings
         private static string FormatDuplicateCodeNormal(DuplicateCodeResults results)
         {
             if (!results.DuplicateBlocks.Any())
-                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Duplicate Code Analysis**\n");
@@ -4331,7 +4615,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDuplicateCodeDetailed(DuplicateCodeResults results)
         {
             if (!results.DuplicateBlocks.Any())
-                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Duplicate Code Analysis (Detailed)**\n");
@@ -4422,7 +4706,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDocumentationCoverageSummary(DocumentationCoverageResults results)
         {
             if (results.TotalSymbols == 0)
-                return "✅ No symbols found to analyze.";
+                return "✅ No symbols found to analyze.".WithWarnings(results.Warnings);
 
             var coverageIcon = results.CoveragePercentage >= 80 ? "✅" : results.CoveragePercentage >= 50 ? "⚠️" : "❌";
 
@@ -4476,7 +4760,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDocumentationCoverageNormal(DocumentationCoverageResults results)
         {
             if (results.TotalSymbols == 0)
-                return "✅ No symbols found to analyze.";
+                return "✅ No symbols found to analyze.".WithWarnings(results.Warnings);
 
             var coverageIcon = results.CoveragePercentage >= 80 ? "✅" : results.CoveragePercentage >= 50 ? "⚠️" : "❌";
 
@@ -4555,7 +4839,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDocumentationCoverageDetailed(DocumentationCoverageResults results)
         {
             if (results.TotalSymbols == 0)
-                return "✅ No symbols found to analyze.";
+                return "✅ No symbols found to analyze.".WithWarnings(results.Warnings);
 
             var coverageIcon = results.CoveragePercentage >= 80 ? "✅" : results.CoveragePercentage >= 50 ? "⚠️" : "❌";
 
@@ -4701,7 +4985,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatTODOCommentsSummary(TODOCommentResults results)
         {
             if (results.TotalComments == 0)
-                return "✅ No TODO/FIXME/HACK comments found.";
+                return "✅ No TODO/FIXME/HACK comments found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"📝 **TODO Comments Found: {results.TotalComments}**\n");
@@ -4762,7 +5046,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatTODOCommentsNormal(TODOCommentResults results)
         {
             if (results.TotalComments == 0)
-                return "✅ No TODO/FIXME/HACK comments found.";
+                return "✅ No TODO/FIXME/HACK comments found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**TODO Comments Analysis**\n");
@@ -4846,7 +5130,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatTODOCommentsDetailed(TODOCommentResults results)
         {
             if (results.TotalComments == 0)
-                return "✅ No TODO/FIXME/HACK comments found.";
+                return "✅ No TODO/FIXME/HACK comments found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**TODO Comments Analysis (Detailed)**\n");
@@ -4980,7 +5264,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatLargeFilesSummary(LargeFileResults results, int threshold)
         {
             if (results.TotalLargeFiles == 0)
-                return $"✅ No files found above {threshold} lines.";
+                return $"✅ No files found above {threshold} lines.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"📄 **Large Files Found: {results.TotalLargeFiles}** (> {threshold} lines)\n");
@@ -5018,7 +5302,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatLargeFilesNormal(LargeFileResults results, int threshold)
         {
             if (results.TotalLargeFiles == 0)
-                return $"✅ No files found above {threshold} lines.";
+                return $"✅ No files found above {threshold} lines.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Large Files Analysis**\n");
@@ -5074,7 +5358,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatLargeFilesDetailed(LargeFileResults results, int threshold)
         {
             if (results.TotalLargeFiles == 0)
-                return $"✅ No files found above {threshold} lines.";
+                return $"✅ No files found above {threshold} lines.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Large Files Analysis (Detailed)**\n");
@@ -5223,7 +5507,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDeprecatedAPIsSummary(DeprecatedAPIResults results)
         {
             if (results.TotalDeprecatedAPIs == 0)
-                return "✅ No deprecated APIs found.";
+                return "✅ No deprecated APIs found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"⚠️ **Deprecated APIs Found: {results.TotalDeprecatedAPIs}** ({results.TotalUsages} usages)\n");
@@ -5264,7 +5548,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDeprecatedAPIsNormal(DeprecatedAPIResults results)
         {
             if (results.TotalDeprecatedAPIs == 0)
-                return "✅ No deprecated APIs found.";
+                return "✅ No deprecated APIs found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Deprecated API Analysis**\n");
@@ -5331,7 +5615,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDeprecatedAPIsDetailed(DeprecatedAPIResults results)
         {
             if (results.TotalDeprecatedAPIs == 0)
-                return "✅ No deprecated APIs found.";
+                return "✅ No deprecated APIs found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Deprecated API Analysis (Detailed)**\n");
@@ -6140,12 +6424,13 @@ namespace RoslynMcpServer.Tools
             // Security vulnerabilities
             if (results.Vulnerabilities.Any())
             {
-                output.AppendLine($"🔴 Security Vulnerabilities ({results.VulnerablePackages}):");
-                foreach (var vuln in results.Vulnerabilities.OrderByDescending(v => v.Severity).Take(5))
+                output.AppendLine($"🔴 Security Vulnerabilities (showing top 5 of {results.VulnerablePackages}):");
+                foreach (var vuln in results.Vulnerabilities.Take(5))
                 {
-                    output.AppendLine($"  {GetSeverityIcon(vuln.Severity)} {vuln.PackageName} {vuln.AffectedVersion}");
-                    output.AppendLine($"     → {vuln.VulnerabilityId}: {vuln.Description}");
-                    output.AppendLine($"     → Fix: Upgrade to {vuln.RecommendedVersion}+");
+                    output.AppendLine($"  {GetSeverityIcon(vuln.Severity)} {vuln.PackageName} {vuln.AffectedVersion} ({vuln.Severity}{(vuln.IsTransitive ? ", transitive" : "")})");
+                    output.AppendLine($"     → {vuln.VulnerabilityId}: {vuln.AdvisoryUrl}");
+                    if (!string.IsNullOrEmpty(vuln.RecommendedVersion))
+                        output.AppendLine($"     → Fix: Upgrade to {vuln.RecommendedVersion}+");
                     output.AppendLine($"     → Affected projects: {string.Join(", ", vuln.AffectedProjects)}");
                     output.AppendLine();
                 }
@@ -6239,12 +6524,14 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine($"  Critical: {results.CriticalVulnerabilities}, High: {results.HighVulnerabilities}, " +
                                   $"Medium: {results.MediumVulnerabilities}, Low: {results.LowVulnerabilities}");
                 output.AppendLine();
-                foreach (var vuln in results.Vulnerabilities.OrderByDescending(v => v.Severity))
+                foreach (var vuln in results.Vulnerabilities)
                 {
                     output.AppendLine($"  {GetSeverityIcon(vuln.Severity)} {vuln.Severity} - {vuln.PackageName} {vuln.AffectedVersion}");
                     output.AppendLine($"     ID: {vuln.VulnerabilityId}");
-                    output.AppendLine($"     Description: {vuln.Description}");
-                    output.AppendLine($"     Recommended Version: {vuln.RecommendedVersion}+");
+                    output.AppendLine($"     Advisory: {vuln.AdvisoryUrl}");
+                    output.AppendLine($"     Dependency: {(vuln.IsTransitive ? "transitive" : "direct")}");
+                    if (!string.IsNullOrEmpty(vuln.RecommendedVersion))
+                        output.AppendLine($"     Recommended Version: {vuln.RecommendedVersion}+");
                     output.AppendLine($"     Affected Projects: {string.Join(", ", vuln.AffectedProjects)}");
                     output.AppendLine();
                 }
@@ -6607,7 +6894,7 @@ namespace RoslynMcpServer.Tools
             output.AppendLine($"🔄 Change Impact Summary: {results.TargetSymbol}");
             output.AppendLine();
 
-            // Show warnings if any
+            // Show warnings if any; stop only when the symbol could not be analyzed
             if (results.Warnings.Any())
             {
                 output.AppendLine("⚠️ Warnings:");
@@ -6616,7 +6903,8 @@ namespace RoslynMcpServer.Tools
                     output.AppendLine($"  - {warning.Message}");
                 }
                 output.AppendLine();
-                return output.ToString();
+                if (string.IsNullOrEmpty(results.TargetSymbolFullName))
+                    return output.ToString();
             }
 
             // Symbol info
@@ -6672,7 +6960,7 @@ namespace RoslynMcpServer.Tools
             output.AppendLine($"🔄 Change Impact Analysis: {results.TargetSymbol}");
             output.AppendLine();
 
-            // Show warnings if any
+            // Show warnings if any; stop only when the symbol could not be analyzed
             if (results.Warnings.Any())
             {
                 output.AppendLine("⚠️ Warnings:");
@@ -6681,7 +6969,8 @@ namespace RoslynMcpServer.Tools
                     output.AppendLine($"  [{warning.Context}] {warning.Message}");
                 }
                 output.AppendLine();
-                return output.ToString();
+                if (string.IsNullOrEmpty(results.TargetSymbolFullName))
+                    return output.ToString();
             }
 
             // Symbol information
@@ -6805,7 +7094,8 @@ namespace RoslynMcpServer.Tools
                     }
                 }
                 output.AppendLine();
-                return output.ToString();
+                if (string.IsNullOrEmpty(results.TargetSymbolFullName))
+                    return output.ToString();
             }
 
             // Complete symbol information
@@ -7821,14 +8111,21 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find code smells and anti-patterns in the solution")]
+        [McpServerTool, Description("""
+            Run syntactic heuristics for ten code smells across all projects, including tests and generated code.
+            Method-level smells examine ordinary methods only; DataClumps compares methods within one file, and
+            SpeculativeGenerality flags every abstract class with abstract methods and every single-member interface
+            without counting implementations. FeatureEnvy and MiddleMan are noisy. Returns severity and per-type counts,
+            then findings grouped by smell type and severity with symbol, file, line, and project, up to 10 per group;
+            detailed lists every finding with metrics and recommendations.
+            """)]
         public static async Task<string> FindCodeSmells(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (counts only), normal (grouped list), detailed (with metrics). Default: normal")]
             string format = "normal",
-            [Description("Comma-separated smell types: LongMethod, LargeClass, LongParameterList, FeatureEnvy, DataClumps, PrimitiveObsession, SwitchStatements, SpeculativeGenerality, MessageChains, MiddleMan. Default: all")]
+            [Description("Comma-separated, case-insensitive: LongMethod (20+ lines), LargeClass (300+ lines or 20+ members), LongParameterList (4+ parameters), FeatureEnvy, DataClumps (same 3+ parameter types on 2+ methods in a file), PrimitiveObsession (3+ parameters of one primitive type), SwitchStatements (5+ sections), SpeculativeGenerality, MessageChains (3+ dots), MiddleMan. Default: all")]
             string smellTypes = "all",
-            [Description("Severity filter: High, Medium, Low, All (default: All)")] string severity = "All",
+            [Description("Return only findings of exactly this severity (case-insensitive): High, Medium, Low, or All (default: All)")] string severity = "All",
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -8599,12 +8896,21 @@ namespace RoslynMcpServer.Tools
         // AnalyzeExceptionHandling - Detect exception handling anti-patterns
         // ============================================================================
 
-        [McpServerTool, Description("Analyze exception handling patterns and detect anti-patterns (empty catch, swallowed exceptions)")]
+        [McpServerTool, Description("""
+            Check every catch clause in the solution: EmptyCatch (no statements, High), SwallowedException (no throw and
+            no logging-like call, Medium), and GenericException (catch (System.Exception) or a bare catch, without an
+            exception filter, Low). MissingUsing (Medium) flags IDisposable locals the method creates (new, a static
+            factory, or a Create/Open/Begin call) and never disposes, returns, stores, or passes on; using
+            declarations are not flagged. Each file is analyzed once, and line numbers point to the catch clause or
+            declaration. Returns counts, then findings grouped by type, up to 10 per type, with file, line,
+            recommendation, and a short code snippet.
+            """)]
         public static async Task<string> AnalyzeExceptionHandling(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Check empty catch blocks (default: true)")] bool checkEmptyCatch = true,
             [Description("Check swallowed exceptions (default: true)")] bool checkSwallowedExceptions = true,
-            [Description("Check missing using statements (default: true)")] bool checkMissingUsing = true,
+            [Description("Flag IDisposable locals created in a method and never disposed, returned, stored, or passed on; using declarations are not flagged (default: true)")] bool checkMissingUsing = true,
+            [Description("Flag catch (System.Exception) and bare catch clauses that have no exception filter (default: true)")] bool checkGenericCatch = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -8619,7 +8925,8 @@ namespace RoslynMcpServer.Tools
                     solutionPath,
                     checkEmptyCatch,
                     checkSwallowedExceptions,
-                    checkMissingUsing);
+                    checkMissingUsing,
+                    checkGenericCatch);
 
                 return FormatExceptionHandlingResults(results);
             }
@@ -8633,12 +8940,25 @@ namespace RoslynMcpServer.Tools
         // AnalyzeDIContainer - Analyze dependency injection configuration
         // ============================================================================
 
-        [McpServerTool, Description("Analyze dependency injection container configuration for common issues (unregistered dependencies, lifetime mismatches)")]
+        [McpServerTool, Description("""
+            Statically compare dependency-injection registrations with constructor parameters, one container per
+            application: each executable project, and each library that registers services but is not part of an
+            application, together with the libraries it references transitively (a referenced executable, e.g. from a
+            test project, keeps its own container). Only generic AddSingleton, AddScoped, AddTransient, and TryAdd*
+            calls count as registrations; non-generic, keyed, AddHostedService, AddDbContext, and similar forms are
+            ignored. Reports duplicate registrations, lifetime mismatches, and captive-lifetime and circular
+            dependencies within each application (the last two follow each service to its registered implementation,
+            AddScoped<IService, Impl>), plus unregistered constructor-parameter types (ILogger, IOptions,
+            IConfiguration, and System.* excepted): a registered class is checked against each application that
+            registers it, any other class only fails when no application containing it registers the type. An issue
+            found in several applications is listed once, naming them. Issues are grouped by type, up to 10 each, with
+            locations; expect false positives for classes the container does not create.
+            """)]
         public static async Task<string> AnalyzeDIContainer(
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("Check service lifetime issues (default: true)")] bool checkLifetimes = true,
+            [Description("Report a service registered again with a different lifetime in the same application, and an implementation registered under several services with different lifetimes (default: true)")] bool checkLifetimes = true,
             [Description("Check circular dependencies (default: true)")] bool checkCircular = true,
-            [Description("Check captive dependencies (default: true)")] bool checkCaptive = true,
+            [Description("Report a Singleton depending on a Scoped or Transient service, or a Scoped service depending on a Transient one, following interface registrations to their implementations. Default: true")] bool checkCaptive = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -8887,7 +9207,8 @@ namespace RoslynMcpServer.Tools
                             _ => "⚪"
                         };
 
-                        output.AppendLine($"{severityEmoji} **{issue.Severity}** - {issue.FilePath}:{issue.LineNumber}");
+                        var member = string.IsNullOrEmpty(issue.MethodName) ? string.Empty : $" (in `{issue.MethodName}`)";
+                        output.AppendLine($"{severityEmoji} **{issue.Severity}** - {issue.FilePath}:{issue.LineNumber}{member}");
                         output.AppendLine($"   - **Issue:** {issue.Description}");
                         output.AppendLine($"   - **Recommendation:** {issue.Recommendation}");
 
@@ -8994,6 +9315,7 @@ namespace RoslynMcpServer.Tools
 
             // Summary
             output.AppendLine($"## 📊 Summary\n");
+            output.AppendLine($"- **Applications analyzed:** {results.Applications.Count}{(results.Applications.Any() ? $" ({string.Join(", ", results.Applications)})" : string.Empty)}");
             output.AppendLine($"- **Services analyzed:** {results.AnalyzedServices}");
             output.AppendLine($"- **Constructors analyzed:** {results.AnalyzedConstructors}");
             output.AppendLine($"- **Total issues found:** {results.TotalIssues}");
@@ -9084,6 +9406,11 @@ namespace RoslynMcpServer.Tools
                         if (issue.DependencyChain != null && issue.DependencyChain.Any())
                         {
                             output.AppendLine($"   - **Dependency Chain:** {string.Join(" → ", issue.DependencyChain)}");
+                        }
+
+                        if (results.Applications.Count > 1 && issue.Applications.Any())
+                        {
+                            output.AppendLine($"   - **Applications:** {string.Join(", ", issue.Applications)}");
                         }
 
                         if (!string.IsNullOrEmpty(issue.FilePath) && issue.FilePath != "Multiple Files")

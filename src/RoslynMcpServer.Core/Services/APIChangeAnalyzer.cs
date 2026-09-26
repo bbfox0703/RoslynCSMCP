@@ -139,7 +139,8 @@ namespace RoslynMcpServer.Core.Services
             {
                 if (!newSymbols.ContainsKey(kvp.Key))
                 {
-                    changes.Add(CreateRemovedChange(kvp.Value, oldVersion, newVersion));
+                    var change = CreateRemovedChange(kvp.Value, oldVersion, newVersion);
+                    changes.Add(MarkInternalIfNotVisible(change, kvp.Value, null));
                 }
             }
 
@@ -148,7 +149,8 @@ namespace RoslynMcpServer.Core.Services
             {
                 if (!oldSymbols.ContainsKey(kvp.Key))
                 {
-                    changes.Add(CreateAddedChange(kvp.Value, oldVersion, newVersion));
+                    var change = CreateAddedChange(kvp.Value, oldVersion, newVersion);
+                    changes.Add(MarkInternalIfNotVisible(change, null, kvp.Value));
                 }
             }
 
@@ -158,7 +160,7 @@ namespace RoslynMcpServer.Core.Services
                 if (oldSymbols.TryGetValue(kvp.Key, out var oldSymbol))
                 {
                     var modificationChanges = DetectModifications(oldSymbol, kvp.Value, oldVersion, newVersion);
-                    changes.AddRange(modificationChanges);
+                    changes.AddRange(modificationChanges.Select(c => MarkInternalIfNotVisible(c, oldSymbol, kvp.Value)));
                 }
             }
 
@@ -328,7 +330,11 @@ namespace RoslynMcpServer.Core.Services
             var oldAccess = oldSymbol.DeclaredAccessibility;
             var newAccess = newSymbol.DeclaredAccessibility;
 
-            bool isBreaking = IsAccessibilityChangeBreaking(oldAccess, newAccess);
+            // Compare what code outside the assembly can see, so e.g. protected -> protected internal is internal-only
+            var oldVisibility = GetExternalVisibility(oldSymbol);
+            var newVisibility = GetExternalVisibility(newSymbol);
+            bool isBreaking = newVisibility < oldVisibility;
+            bool isWidened = newVisibility > oldVisibility;
 
             return new APIChange
             {
@@ -336,8 +342,8 @@ namespace RoslynMcpServer.Core.Services
                 FullSymbolName = newSymbol.ToDisplayString(),
                 SymbolKind = newSymbol.Kind.ToString(),
                 ChangeType = "AccessibilityChanged",
-                ImpactLevel = isBreaking ? "Breaking" : "NonBreaking",
-                Severity = isBreaking ? "High" : "Medium",
+                ImpactLevel = isBreaking ? "Breaking" : isWidened ? "NonBreaking" : "Internal",
+                Severity = isBreaking ? "High" : isWidened ? "Medium" : "Low",
                 Description = $"Accessibility changed from {oldAccess} to {newAccess}",
                 OldVersion = oldVersion,
                 NewVersion = newVersion,
@@ -349,10 +355,14 @@ namespace RoslynMcpServer.Core.Services
                 DeclaringType = newSymbol.ContainingType?.Name ?? "",
                 MigrationGuidance = isBreaking
                     ? $"The {newSymbol.Kind.ToString().ToLower()} '{newSymbol.Name}' is now less accessible. Update consuming code or use reflection."
-                    : $"The {newSymbol.Kind.ToString().ToLower()} '{newSymbol.Name}' is now more accessible.",
+                    : isWidened
+                        ? $"The {newSymbol.Kind.ToString().ToLower()} '{newSymbol.Name}' is now more accessible."
+                        : $"The accessibility of {newSymbol.Kind.ToString().ToLower()} '{newSymbol.Name}' changed only for code inside its assembly.",
                 AffectedAreas = isBreaking
                     ? new List<string> { "Code accessing this symbol from restricted contexts" }
-                    : new List<string> { "No breaking impact" }
+                    : isWidened
+                        ? new List<string> { "No breaking impact" }
+                        : new List<string> { "Code inside the declaring assembly (and friend assemblies)" }
             };
         }
 
@@ -492,32 +502,56 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Checks if an accessibility change is breaking
+        /// How visible a symbol is to code outside its assembly, taking containing types into account:
+        /// 2 = public, 1 = protected only (protected, protected internal), 0 = not visible (internal,
+        /// private protected, private, or nested in such a type)
         /// </summary>
-        private bool IsAccessibilityChangeBreaking(Accessibility oldAccess, Accessibility newAccess)
+        private static int GetExternalVisibility(ISymbol symbol)
         {
-            // Accessibility levels (most to least permissive): Public > Protected > Internal > Private
-            var accessLevels = new Dictionary<Accessibility, int>
+            var visibility = 2;
+
+            for (var current = symbol; current != null && current is not INamespaceSymbol; current = current.ContainingSymbol)
             {
-                { Accessibility.Public, 4 },
-                { Accessibility.Protected, 3 },
-                { Accessibility.Internal, 2 },
-                { Accessibility.Private, 1 }
-            };
+                var level = current.DeclaredAccessibility switch
+                {
+                    Accessibility.Public => 2,
+                    Accessibility.Protected or Accessibility.ProtectedOrInternal => 1,
+                    _ => 0
+                };
+                visibility = Math.Min(visibility, level);
+            }
 
-            var oldLevel = accessLevels.GetValueOrDefault(oldAccess, 0);
-            var newLevel = accessLevels.GetValueOrDefault(newAccess, 0);
-
-            // Breaking if accessibility decreased
-            return newLevel < oldLevel;
+            return visibility;
         }
 
         /// <summary>
-        /// Generates a unique key for a symbol
+        /// Reclassifies a change as Internal (no effect on external consumers) when the symbol is not
+        /// visible outside its assembly in either version. Only possible when internal symbols are included.
+        /// </summary>
+        private static APIChange MarkInternalIfNotVisible(APIChange change, ISymbol? oldSymbol, ISymbol? newSymbol)
+        {
+            var visibleBefore = oldSymbol != null && GetExternalVisibility(oldSymbol) > 0;
+            var visibleAfter = newSymbol != null && GetExternalVisibility(newSymbol) > 0;
+
+            if (!visibleBefore && !visibleAfter)
+            {
+                change.ImpactLevel = "Internal";
+                change.Severity = "Low";
+                change.AffectedAreas = new List<string> { "Code inside the declaring assembly (and friend assemblies)" };
+            }
+
+            return change;
+        }
+
+        /// <summary>
+        /// Generates a unique key for a symbol. The documentation comment ID includes the containing type and,
+        /// for methods, the parameter types, so each overload and each same-named member of another type
+        /// gets its own key (e.g. "M:Ns.Type.Save(System.Int32)").
         /// </summary>
         private string GetSymbolKey(ISymbol symbol)
         {
-            return symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            return symbol.GetDocumentationCommentId()
+                ?? $"{symbol.Kind}:{symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)}";
         }
 
         /// <summary>
@@ -552,10 +586,13 @@ namespace RoslynMcpServer.Core.Services
                 results.RecommendedVersionBump = "Major";
                 results.VersioningReason = $"Found {results.BreakingChanges} breaking change(s). Requires major version bump (e.g., 1.0.0 → 2.0.0).";
             }
-            else if (results.AddedSymbols > 0)
+            else if (results.NonBreakingChanges > 0)
             {
+                var addedPublic = results.Changes.Count(c => c.ChangeType == "Added" && c.ImpactLevel == "NonBreaking");
                 results.RecommendedVersionBump = "Minor";
-                results.VersioningReason = $"Added {results.AddedSymbols} new symbol(s) without breaking changes. Requires minor version bump (e.g., 1.0.0 → 1.1.0).";
+                results.VersioningReason = addedPublic > 0
+                    ? $"Added {addedPublic} new public API symbol(s) without breaking changes. Requires minor version bump (e.g., 1.0.0 → 1.1.0)."
+                    : $"Found {results.NonBreakingChanges} non-breaking public API change(s). Requires minor version bump (e.g., 1.0.0 → 1.1.0).";
             }
             else if (results.TotalChanges > 0)
             {
@@ -638,15 +675,21 @@ namespace RoslynMcpServer.Core.Services
 
             private bool ShouldIncludeSymbol(ISymbol symbol)
             {
-                var accessibility = symbol.DeclaredAccessibility;
+                switch (symbol.DeclaredAccessibility)
+                {
+                    // Protected members are visible to external derived types, so they are public API
+                    case Accessibility.Public:
+                    case Accessibility.Protected:
+                    case Accessibility.ProtectedOrInternal:
+                        return true;
 
-                if (accessibility == Accessibility.Public)
-                    return true;
+                    case Accessibility.Internal:
+                    case Accessibility.ProtectedAndInternal:
+                        return _includeInternal;
 
-                if (_includeInternal && accessibility == Accessibility.Internal)
-                    return true;
-
-                return false;
+                    default:
+                        return false;
+                }
             }
         }
     }

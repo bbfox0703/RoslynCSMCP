@@ -110,12 +110,7 @@ namespace RoslynMcpServer.Tools
             else if (score >= 50) output.AppendLine("  Fair — several allocation hotspots to address.");
             else output.AppendLine("  Poor — significant allocation overhead requiring attention.");
 
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine();
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }
@@ -127,7 +122,7 @@ namespace RoslynMcpServer.Tools
                 var ok = new StringBuilder();
                 ok.AppendLine("No memory allocation issues found.");
                 ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-                return ok.ToString();
+                return ok.AppendWarnings(results.Warnings).ToString();
             }
 
             var output = new StringBuilder();
@@ -152,9 +147,7 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine();
             }
 
-            if (results.Warnings.Count > 0)
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }
@@ -162,7 +155,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatMemoryDetailed(MemoryAllocationResults results)
         {
             if (results.TotalIssues == 0)
-                return $"No memory allocation issues found. Analyzed {results.AnalyzedProjects} project(s).";
+                return $"No memory allocation issues found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine("# Memory Allocation Analysis — Detailed Report");
@@ -209,12 +202,7 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine("## Warnings");
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"- {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }

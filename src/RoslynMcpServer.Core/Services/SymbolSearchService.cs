@@ -1,10 +1,12 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.FindSymbols;
+using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using RoslynMcpServer.Core.Models;
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.RegularExpressions;
 using MsSymbolInfo = Microsoft.CodeAnalysis.SymbolInfo;
 using SymbolInfo = RoslynMcpServer.Core.Models.SymbolInfo;
@@ -146,9 +148,26 @@ namespace RoslynMcpServer.Core.Services
                         break;
                     
                     case INamedTypeSymbol namedType:
-                        foreach (var typeMember in namedType.GetMembers())
+                        foreach (var typeMember in GetTypeMembersRecursive(namedType))
                             yield return typeMember;
                         break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get the members of a type, descending into nested types at any depth
+        /// </summary>
+        private IEnumerable<ISymbol> GetTypeMembersRecursive(INamedTypeSymbol type)
+        {
+            foreach (var member in type.GetMembers())
+            {
+                yield return member;
+
+                if (member is INamedTypeSymbol nestedType)
+                {
+                    foreach (var nestedMember in GetTypeMembersRecursive(nestedType))
+                        yield return nestedMember;
                 }
             }
         }
@@ -224,42 +243,45 @@ namespace RoslynMcpServer.Core.Services
             return score;
         }
 
+        #region Find References
+
+        // Qualified form compared against names such as 'Type.Member' or 'Ns.Type.Member':
+        // namespaces and containing types, without generic arguments or parameter lists.
+        private static readonly SymbolDisplayFormat QualifiedNameFormat = new(
+            globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+            typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+            genericsOptions: SymbolDisplayGenericsOptions.None,
+            memberOptions: SymbolDisplayMemberOptions.IncludeContainingType);
+
+        /// <summary>A symbol resolved from the requested name, with the projects that declare it.</summary>
+        private sealed record ReferenceTarget(ISymbol Symbol, IReadOnlySet<ProjectId> DeclaringProjects);
+
+        /// <summary>One reference or declaration location, kept with what the filters need.</summary>
+        private sealed record ReferenceHit(ReferenceResult Result, Document Document, TextSpan Span, ReferenceTarget Target);
+
         public async Task<IEnumerable<ReferenceResult>> FindReferencesAsync(
             string symbolName, string solutionPath, bool includeDefinition)
         {
+            var search = await SearchReferencesAsync(symbolName, solutionPath, includeDefinition);
+            return search.References;
+        }
+
+        /// <summary>
+        /// Finds references like <see cref="FindReferencesAsync"/> and also reports how many declared
+        /// symbols matched the name, so callers can tell "no such symbol" from "no references".
+        /// </summary>
+        public async Task<ReferenceSearchResult> SearchReferencesAsync(
+            string symbolName, string solutionPath, bool includeDefinition)
+        {
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
-            var targetSymbols = await FindSymbolsByNameAsync(solution, symbolName);
+            var targets = await ResolveReferenceTargetsAsync(solution, symbolName);
+            var hits = await CollectReferenceHitsAsync(solution, solutionPath, targets, includeDefinition);
 
-            var allReferences = new List<ReferenceResult>();
-
-            foreach (var symbol in targetSymbols)
+            return new ReferenceSearchResult
             {
-                var references = await SymbolFinder.FindReferencesAsync(symbol, solution);
-
-                foreach (var referencedSymbol in references)
-                {
-                    foreach (var location in referencedSymbol.Locations)
-                    {
-                        // Check if this location is a definition by comparing with the symbol's definition locations
-                        var isDefinition = referencedSymbol.Definition.Locations.Any(defLoc =>
-                            defLoc.SourceTree == location.Location.SourceTree &&
-                            defLoc.SourceSpan == location.Location.SourceSpan);
-
-                        if (!includeDefinition && isDefinition)
-                            continue;
-
-                        var reference = await CreateReferenceResultAsync(location, symbol, isDefinition);
-                        if (reference != null)
-                            allReferences.Add(reference);
-                    }
-                }
-            }
-
-            return allReferences
-                .GroupBy(r => $"{r.DocumentPath}:{r.LineNumber}")
-                .Select(g => g.First()) // Remove duplicates
-                .OrderBy(r => r.DocumentPath)
-                .ThenBy(r => r.LineNumber);
+                MatchedSymbolCount = targets.Count,
+                References = DeduplicateByLine(hits.Select(h => h.Result)).ToList()
+            };
         }
 
         public async Task<IEnumerable<ReferenceResult>> FindReferencesFilteredAsync(
@@ -272,66 +294,54 @@ namespace RoslynMcpServer.Core.Services
             bool writesOnly = false,
             string? projectFilter = null)
         {
-            // Get all references first
-            var allReferences = await FindReferencesAsync(symbolName, solutionPath, includeDefinition);
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
-            var targetSymbols = await FindSymbolsByNameAsync(solution, symbolName);
-            var targetSymbol = targetSymbols.FirstOrDefault();
+            var targets = await ResolveReferenceTargetsAsync(solution, symbolName);
+            IEnumerable<ReferenceHit> hits = await CollectReferenceHitsAsync(solution, solutionPath, targets, includeDefinition);
 
-            // Apply filters
-            var filteredReferences = allReferences.AsEnumerable();
-
-            // Filter: Exclude test projects
+            // Filters run per location, before lines are deduplicated, so a line that both reads
+            // and writes the symbol still survives writesOnly.
             if (excludeTests)
             {
-                filteredReferences = filteredReferences.Where(r =>
-                    !IsTestProject(r.ProjectName));
+                hits = hits.Where(h => !IsTestProject(h.Result.ProjectName));
             }
 
-            // Filter: Cross-project only
-            if (crossProjectOnly && targetSymbol != null)
-            {
-                var definitionProjectName = targetSymbol.ContainingAssembly?.Name ?? "";
-                filteredReferences = filteredReferences.Where(r =>
-                    !r.ProjectName.Equals(definitionProjectName, StringComparison.OrdinalIgnoreCase) &&
-                    !r.IsDefinition);
-            }
-
-            // Filter: Public API only
-            if (publicOnly && targetSymbol != null)
-            {
-                // Only show references where the symbol being accessed is public
-                var isPublicSymbol = targetSymbol.DeclaredAccessibility == Accessibility.Public;
-                if (!isPublicSymbol)
-                {
-                    // If the symbol itself is not public, return empty
-                    return Enumerable.Empty<ReferenceResult>();
-                }
-            }
-
-            // Filter: Project name pattern
             if (!string.IsNullOrWhiteSpace(projectFilter))
             {
                 var regex = CreateWildcardRegex(projectFilter, ignoreCase: true);
-                filteredReferences = filteredReferences.Where(r =>
-                    regex.IsMatch(r.ProjectName));
+                hits = hits.Where(h => regex.IsMatch(h.Result.ProjectName));
             }
 
-            // Filter: Writes only (requires syntax analysis)
+            // Declaration sites always sit in the declaring project, so they are dropped too.
+            if (crossProjectOnly)
+            {
+                hits = hits.Where(h => !h.Result.IsDefinition &&
+                    !h.Target.DeclaringProjects.Contains(h.Document.Project.Id));
+            }
+
+            // Declarations are not writes; only reference locations are classified.
             if (writesOnly)
             {
-                var writeReferences = new List<ReferenceResult>();
-                foreach (var reference in filteredReferences)
+                var writes = new List<ReferenceHit>();
+                foreach (var hit in hits.Where(h => !h.Result.IsDefinition))
                 {
-                    if (await IsWriteOperationAsync(reference, solution))
-                    {
-                        writeReferences.Add(reference);
-                    }
+                    if (await IsWriteAsync(hit))
+                        writes.Add(hit);
                 }
-                filteredReferences = writeReferences;
+                hits = writes;
             }
 
-            return filteredReferences;
+            if (publicOnly)
+            {
+                var publicHits = new List<ReferenceHit>();
+                foreach (var hit in hits)
+                {
+                    if (await IsInPublicApiContextAsync(hit))
+                        publicHits.Add(hit);
+                }
+                hits = publicHits;
+            }
+
+            return DeduplicateByLine(hits.Select(h => h.Result)).ToList();
         }
 
         /// <summary>
@@ -363,17 +373,10 @@ namespace RoslynMcpServer.Core.Services
                 }
             });
 
+            // Task.WhenAll keeps input order, so a line found in several solutions (shared files)
+            // is attributed to the first listed solution that contains it.
             var solutionResults = await Task.WhenAll(searchTasks);
-
-            // Merge and deduplicate results
-            var allReferences = solutionResults
-                .SelectMany(r => r)
-                .GroupBy(r => $"{r.DocumentPath}:{r.LineNumber}:{r.ColumnNumber}")
-                .Select(g => g.First()) // Deduplicate by location
-                .OrderBy(r => r.DocumentPath)
-                .ThenBy(r => r.LineNumber)
-                .ThenBy(r => r.ColumnNumber)
-                .ToList();
+            var allReferences = DeduplicateByLine(solutionResults.SelectMany(r => r)).ToList();
 
             _logger.LogInformation("Found {TotalCount} unique references across all solutions",
                 allReferences.Count);
@@ -389,53 +392,176 @@ namespace RoslynMcpServer.Core.Services
                 projectName.Contains(pattern, StringComparison.OrdinalIgnoreCase));
         }
 
-        private async Task<bool> IsWriteOperationAsync(ReferenceResult reference, Solution solution)
+        /// <summary>
+        /// Resolves a requested name to the symbols declared in the solution's source. Accepts a simple
+        /// name ('Save') or a name qualified by containing types and/or namespaces ('UserService.Save',
+        /// 'App.Services.UserService.Save'); generic arguments and parameter lists are ignored.
+        /// Symbols from referenced assemblies are never matched. Exact-case matches win; when there
+        /// are none, case is ignored.
+        /// </summary>
+        private async Task<List<ReferenceTarget>> ResolveReferenceTargetsAsync(Solution solution, string symbolName)
+        {
+            var requested = NormalizeRequestedName(symbolName);
+            if (requested.Length == 0)
+                return new List<ReferenceTarget>();
+
+            var lastDot = requested.LastIndexOf('.');
+            var isQualified = lastDot >= 0;
+            var simpleName = isQualified ? requested[(lastDot + 1)..] : requested;
+
+            var candidates = new List<(ISymbol Symbol, Project Project)>();
+            foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
+            {
+                var compilation = await project.GetCompilationAsync();
+                if (compilation == null) continue;
+
+                // compilation.Assembly is this project's own source; referenced assemblies, including
+                // other projects of the solution (searched as their own project), are not walked.
+                candidates.AddRange(GetSourceSymbolsRecursive(compilation.Assembly.GlobalNamespace)
+                    .Where(s => s.Name.Equals(simpleName, StringComparison.OrdinalIgnoreCase) &&
+                                (!isQualified || QualifiedNameMatches(s, requested, StringComparison.OrdinalIgnoreCase)))
+                    .Select(s => (s, project)));
+            }
+
+            var exactCase = candidates
+                .Where(c => isQualified
+                    ? QualifiedNameMatches(c.Symbol, requested, StringComparison.Ordinal)
+                    : c.Symbol.Name.Equals(simpleName, StringComparison.Ordinal))
+                .ToList();
+            var matches = exactCase.Count > 0 ? exactCase : candidates;
+
+            return matches
+                .Select(c => new ReferenceTarget(c.Symbol, GetDeclaringProjects(solution, c.Symbol, c.Project)))
+                .ToList();
+        }
+
+        /// <summary>
+        /// Normalizes a requested symbol name: drops 'global::', a parameter list, generic arguments
+        /// and arity suffixes, and whitespace, and turns nested-type '+' separators into '.'.
+        /// </summary>
+        internal static string NormalizeRequestedName(string symbolName)
+        {
+            var name = symbolName.Trim();
+            if (name.StartsWith("global::", StringComparison.Ordinal))
+                name = name["global::".Length..];
+
+            var parameterListStart = name.IndexOf('(');
+            if (parameterListStart >= 0)
+                name = name[..parameterListStart];
+
+            var builder = new StringBuilder(name.Length);
+            var genericDepth = 0;
+            for (var i = 0; i < name.Length; i++)
+            {
+                var c = name[i];
+                if (c == '<') { genericDepth++; continue; }
+                if (c == '>') { genericDepth = Math.Max(0, genericDepth - 1); continue; }
+                if (genericDepth > 0 || char.IsWhiteSpace(c)) continue;
+                if (c == '`')
+                {
+                    while (i + 1 < name.Length && char.IsDigit(name[i + 1])) i++;
+                    continue;
+                }
+                builder.Append(c == '+' ? '.' : c);
+            }
+
+            return builder.ToString().Trim('.');
+        }
+
+        private static bool QualifiedNameMatches(ISymbol symbol, string requested, StringComparison comparison)
+        {
+            var qualifiedName = symbol.ToDisplayString(QualifiedNameFormat);
+            return qualifiedName.Equals(requested, comparison) ||
+                   qualifiedName.EndsWith("." + requested, comparison);
+        }
+
+        /// <summary>Namespaces, types at any nesting depth, and their members.</summary>
+        private static IEnumerable<ISymbol> GetSourceSymbolsRecursive(INamespaceOrTypeSymbol container)
+        {
+            foreach (var member in container.GetMembers())
+            {
+                yield return member;
+
+                if (member is INamespaceOrTypeSymbol nested)
+                {
+                    foreach (var inner in GetSourceSymbolsRecursive(nested))
+                        yield return inner;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The project the symbol was found in plus every project that compiles one of its declaring
+        /// files (linked files, other target frameworks of a multi-targeted project).
+        /// </summary>
+        private static IReadOnlySet<ProjectId> GetDeclaringProjects(Solution solution, ISymbol symbol, Project foundIn)
+        {
+            var projects = new HashSet<ProjectId> { foundIn.Id };
+            foreach (var location in symbol.Locations.Where(l => l.IsInSource))
+            {
+                var filePath = location.SourceTree?.FilePath;
+                if (string.IsNullOrEmpty(filePath)) continue;
+
+                foreach (var documentId in solution.GetDocumentIdsWithFilePath(filePath))
+                    projects.Add(documentId.ProjectId);
+            }
+            return projects;
+        }
+
+        private static async Task<List<ReferenceHit>> CollectReferenceHitsAsync(
+            Solution solution, string solutionPath, IReadOnlyList<ReferenceTarget> targets, bool includeDefinition)
+        {
+            var hits = new List<ReferenceHit>();
+
+            foreach (var target in targets)
+            {
+                if (includeDefinition)
+                {
+                    foreach (var location in target.Symbol.Locations.Where(l => l.IsInSource))
+                    {
+                        var document = solution.GetDocument(location.SourceTree);
+                        if (document != null)
+                            hits.Add(await CreateReferenceHitAsync(document, location, target, solutionPath, isDefinition: true));
+                    }
+                }
+
+                var referencedSymbols = await SymbolFinder.FindReferencesAsync(target.Symbol, solution);
+                foreach (var referencedSymbol in referencedSymbols)
+                {
+                    foreach (var location in referencedSymbol.Locations)
+                    {
+                        hits.Add(await CreateReferenceHitAsync(
+                            location.Document, location.Location, target, solutionPath, isDefinition: false));
+                    }
+                }
+            }
+
+            return hits;
+        }
+
+        /// <summary>
+        /// One entry per file line, sorted by file and line. A declaration wins over a reference on
+        /// the same line; otherwise the leftmost reference (then the first solution) is kept.
+        /// </summary>
+        private static IEnumerable<ReferenceResult> DeduplicateByLine(IEnumerable<ReferenceResult> references)
+        {
+            return references
+                .GroupBy(r => (r.DocumentPath, r.LineNumber))
+                .Select(g => g.OrderByDescending(r => r.IsDefinition).ThenBy(r => r.ColumnNumber).First())
+                .OrderBy(r => r.DocumentPath)
+                .ThenBy(r => r.LineNumber);
+        }
+
+        private async Task<bool> IsWriteAsync(ReferenceHit hit)
         {
             try
             {
-                // Find the document
-                var document = solution.Projects
-                    .SelectMany(p => p.Documents)
-                    .FirstOrDefault(d => d.FilePath == reference.DocumentPath);
-
-                if (document == null)
+                var root = await hit.Document.GetSyntaxRootAsync();
+                if (root == null)
                     return false;
 
-                var syntaxTree = await document.GetSyntaxTreeAsync();
-                if (syntaxTree == null)
-                    return false;
-
-                var semanticModel = await document.GetSemanticModelAsync();
-                if (semanticModel == null)
-                    return false;
-
-                // Get the syntax node at the reference location
-                var position = syntaxTree.GetText().Lines[reference.LineNumber - 1].Start + reference.ColumnNumber - 1;
-                var node = syntaxTree.GetRoot().FindNode(new Microsoft.CodeAnalysis.Text.TextSpan(position, 1));
-
-                // Check if this is an assignment operation
-                // Simple heuristic: check if the node or its parent is an assignment expression
-                var currentNode = node;
-                while (currentNode != null)
-                {
-                    var kind = currentNode.Kind().ToString();
-                    if (kind.Contains("Assignment") ||
-                        kind.Contains("PostIncrement") ||
-                        kind.Contains("PostDecrement") ||
-                        kind.Contains("PreIncrement") ||
-                        kind.Contains("PreDecrement"))
-                    {
-                        return true;
-                    }
-
-                    currentNode = currentNode.Parent;
-
-                    // Don't traverse too far up
-                    if (currentNode?.Kind().ToString().Contains("Statement") == true)
-                        break;
-                }
-
-                return false;
+                var node = root.FindNode(hit.Span, getInnermostNodeForTie: true);
+                return ReferenceSyntaxClassifier.IsWrittenTo(node);
             }
             catch (Exception ex)
             {
@@ -445,63 +571,63 @@ namespace RoslynMcpServer.Core.Services
             }
         }
 
-        private async Task<IEnumerable<ISymbol>> FindSymbolsByNameAsync(Solution solution, string symbolName)
+        private async Task<bool> IsInPublicApiContextAsync(ReferenceHit hit)
         {
-            var symbols = new List<ISymbol>();
-            
-            foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
+            try
             {
-                var compilation = await project.GetCompilationAsync();
-                if (compilation != null)
-                {
-                    var projectSymbols = GetAllSymbolsRecursive(compilation.GlobalNamespace)
-                        .Where(s => s.Name.Equals(symbolName, StringComparison.OrdinalIgnoreCase));
-                    symbols.AddRange(projectSymbols);
-                }
+                var root = await hit.Document.GetSyntaxRootAsync();
+                var semanticModel = await hit.Document.GetSemanticModelAsync();
+                if (root == null || semanticModel == null)
+                    return false;
+
+                var node = root.FindNode(hit.Span, getInnermostNodeForTie: true);
+                return ReferenceSyntaxClassifier.IsInPublicApiContext(node, semanticModel);
             }
-            
-            return symbols;
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not determine the accessibility context of a reference, excluding it");
+                return false;
+            }
         }
 
-        private async Task<ReferenceResult?> CreateReferenceResultAsync(
-            ReferenceLocation location, ISymbol symbol, bool isDefinition)
+        private static async Task<ReferenceHit> CreateReferenceHitAsync(
+            Document document, Location location, ReferenceTarget target, string solutionPath, bool isDefinition)
         {
-            if (location.Document == null) return null;
-            
-            var document = location.Document;
             var sourceText = await document.GetTextAsync();
-            var lineSpan = location.Location.GetLineSpan();
-            
+            var lineSpan = location.GetLineSpan();
+
             // Get surrounding context
             var lineNumber = lineSpan.StartLinePosition.Line;
             var line = sourceText.Lines[lineNumber];
             var contextStart = Math.Max(0, lineNumber - 2);
             var contextEnd = Math.Min(sourceText.Lines.Count - 1, lineNumber + 2);
-            
+
             var context = sourceText.Lines
                 .Skip(contextStart)
                 .Take(contextEnd - contextStart + 1)
                 .Select((l, i) => $"{contextStart + i + 1,4}: {l}")
                 .ToList();
-            
-            return new ReferenceResult
+
+            var result = new ReferenceResult
             {
-                SymbolName = symbol.Name,
+                SymbolName = target.Symbol.Name,
                 DocumentPath = document.FilePath ?? "",
                 ProjectName = document.Project.Name,
+                SolutionPath = solutionPath,
                 LineNumber = lineNumber + 1,
                 ColumnNumber = lineSpan.StartLinePosition.Character + 1,
                 LineText = line.ToString(),
                 Context = context,
                 IsDefinition = isDefinition,
-                ReferenceKind = DetermineReferenceKind(location.Location, symbol)
+                ReferenceKind = isDefinition ? "Definition" : DetermineReferenceKind(target.Symbol)
             };
+
+            return new ReferenceHit(result, document, location.SourceSpan, target);
         }
 
-        private string DetermineReferenceKind(Location location, ISymbol symbol)
+        private static string DetermineReferenceKind(ISymbol symbol)
         {
-            // This is a simplified implementation
-            // A more sophisticated version would analyze the syntax context
+            // Kind of the referenced symbol, not of the individual usage
             return symbol.Kind switch
             {
                 SymbolKind.Method => "Method Call",
@@ -512,12 +638,19 @@ namespace RoslynMcpServer.Core.Services
             };
         }
 
+        #endregion
+
+        /// <summary>
+        /// Describes the one type or member declared in the solution's source that the name identifies
+        /// (see <see cref="SourceSymbolResolver.ResolveSingleAsync"/> for the accepted name forms).
+        /// </summary>
+        /// <returns>null when no type or member in the source has that name.</returns>
+        /// <exception cref="SymbolResolutionException">The name is ambiguous, or its type arguments or parameter list fit no declaration.</exception>
         public async Task<SymbolInfo?> GetSymbolInfoAsync(string symbolName, string solutionPath)
         {
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
-            var symbols = await FindSymbolsByNameAsync(solution, symbolName);
-            var symbol = symbols.FirstOrDefault();
-            
+            var symbol = await SourceSymbolResolver.ResolveSingleAsync(solution, symbolName, SymbolTarget.TypeOrMember);
+
             if (symbol == null) return null;
             
             var info = new SymbolInfo
@@ -565,6 +698,10 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Find all implementations of an interface or abstract class
         /// </summary>
+        /// <exception cref="SymbolResolutionException">
+        /// No interface or abstract class in the solution's source has that name, or the name is ambiguous
+        /// (an empty list always means the type exists but has no implementations).
+        /// </exception>
         public async Task<List<ImplementationResult>> FindImplementationsAsync(
             string typeName,
             string solutionPath,
@@ -575,14 +712,14 @@ namespace RoslynMcpServer.Core.Services
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
             var results = new List<ImplementationResult>();
 
-            // Find the target interface or abstract class
-            var targetSymbols = await FindSymbolsByNameAsync(solution, typeName);
-            var targetType = targetSymbols.OfType<INamedTypeSymbol>().FirstOrDefault();
+            // Find the target interface or abstract class among the solution's own declarations
+            var targetType = await SourceSymbolResolver.ResolveSingleAsync(
+                solution, typeName, SymbolTarget.InterfaceOrAbstractClass) as INamedTypeSymbol;
 
             if (targetType == null)
             {
                 _logger.LogWarning("Type not found: {TypeName}", typeName);
-                return results;
+                throw SourceSymbolResolver.NotFound(typeName, SymbolTarget.InterfaceOrAbstractClass);
             }
 
             // Check if target is interface or abstract class
@@ -598,59 +735,28 @@ namespace RoslynMcpServer.Core.Services
             _logger.LogInformation("Searching for implementations of {TypeKind}: {TypeName}",
                 targetType.TypeKind, typeName);
 
-            // Search all projects for implementations
-            foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
+            foreach (var (type, project) in await GetSolutionSourceTypesAsync(solution))
             {
-                var compilation = await project.GetCompilationAsync();
-                if (compilation == null) continue;
+                // Skip the target type itself
+                if (IsSameTypeDefinition(type, targetType))
+                    continue;
 
-                // Get all named type symbols in the project
-                var allTypes = compilation.GlobalNamespace.GetNamespaceMembers()
-                    .SelectMany(ns => GetAllTypesInNamespace(ns))
-                    .Concat(GetAllTypesInNamespace(compilation.GlobalNamespace));
+                // Compare definitions so that constructed generics (IRepo<int>, Base<string>) match
+                bool isImplementation = isInterface
+                    ? type.AllInterfaces.Any(i => IsSameTypeDefinition(i, targetType))
+                    : InheritsFrom(type, targetType);
 
-                foreach (var type in allTypes)
+                if (!isImplementation)
+                    continue;
+
+                // Skip abstract implementations if not requested
+                if (type.IsAbstract && !includeAbstractImplementations)
+                    continue;
+
+                var implementation = CreateImplementationResult(type, targetType, project);
+                if (implementation != null)
                 {
-                    // Skip the target type itself
-                    if (SymbolEqualityComparer.Default.Equals(type, targetType))
-                        continue;
-
-                    // Check if type implements the interface or inherits from abstract class
-                    bool isImplementation = false;
-
-                    if (isInterface)
-                    {
-                        // Check if type implements the interface (directly or indirectly)
-                        isImplementation = type.AllInterfaces.Any(i =>
-                            SymbolEqualityComparer.Default.Equals(i, targetType));
-                    }
-                    else if (isAbstractClass)
-                    {
-                        // Check if type inherits from abstract class
-                        var baseType = type.BaseType;
-                        while (baseType != null)
-                        {
-                            if (SymbolEqualityComparer.Default.Equals(baseType, targetType))
-                            {
-                                isImplementation = true;
-                                break;
-                            }
-                            baseType = baseType.BaseType;
-                        }
-                    }
-
-                    if (isImplementation)
-                    {
-                        // Skip abstract implementations if not requested
-                        if (type.IsAbstract && !includeAbstractImplementations)
-                            continue;
-
-                        var implementation = await CreateImplementationResultAsync(type, targetType, project);
-                        if (implementation != null)
-                        {
-                            results.Add(implementation);
-                        }
-                    }
+                    results.Add(implementation);
                 }
             }
 
@@ -659,9 +765,77 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
+        /// Collect every type declared in the solution's source (nested types included), each paired with
+        /// the project that declares it. Only each compilation's own assembly is walked, so referenced
+        /// projects and the framework are not re-scanned, and a type is listed once even when a
+        /// multi-targeted project contributes one compilation per target framework.
+        /// </summary>
+        private static async Task<List<(INamedTypeSymbol Type, Project Project)>> GetSolutionSourceTypesAsync(Solution solution)
+        {
+            var types = new List<(INamedTypeSymbol Type, Project Project)>();
+            var seen = new HashSet<string>();
+
+            foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
+            {
+                var compilation = await project.GetCompilationAsync();
+                if (compilation == null) continue;
+
+                foreach (var type in GetAllTypesInNamespace(compilation.Assembly.GlobalNamespace))
+                {
+                    if (seen.Add(GetTypeDefinitionKey(type)))
+                        types.Add((type, project));
+                }
+            }
+
+            return types;
+        }
+
+        /// <summary>
+        /// Identity of a type definition that is stable across compilations: the declaring assembly plus the
+        /// documentation comment ID of the original (unconstructed) definition.
+        /// </summary>
+        private static string GetTypeDefinitionKey(INamedTypeSymbol type)
+        {
+            var definition = type.OriginalDefinition;
+            return $"{definition.ContainingAssembly?.Name}|{definition.GetDocumentationCommentId() ?? definition.ToDisplayString()}";
+        }
+
+        /// <summary>
+        /// Whether two types share the same definition, so that Repo&lt;int&gt; matches Repo&lt;T&gt;
+        /// </summary>
+        private static bool IsSameTypeDefinition(INamedTypeSymbol candidate, INamedTypeSymbol target)
+        {
+            var candidateDefinition = candidate.OriginalDefinition;
+            var targetDefinition = target.OriginalDefinition;
+
+            if (SymbolEqualityComparer.Default.Equals(candidateDefinition, targetDefinition))
+                return true;
+
+            // The same declaration can surface as distinct symbols in different compilations
+            // (for example a retargeted project reference), so fall back to the definition key
+            return candidateDefinition.Name == targetDefinition.Name
+                && candidateDefinition.Arity == targetDefinition.Arity
+                && GetTypeDefinitionKey(candidateDefinition) == GetTypeDefinitionKey(targetDefinition);
+        }
+
+        /// <summary>
+        /// Whether a type derives from the target class at any depth
+        /// </summary>
+        private static bool InheritsFrom(INamedTypeSymbol type, INamedTypeSymbol targetType)
+        {
+            for (var baseType = type.BaseType; baseType != null; baseType = baseType.BaseType)
+            {
+                if (IsSameTypeDefinition(baseType, targetType))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Get all types in a namespace recursively
         /// </summary>
-        private IEnumerable<INamedTypeSymbol> GetAllTypesInNamespace(INamespaceSymbol namespaceSymbol)
+        private static IEnumerable<INamedTypeSymbol> GetAllTypesInNamespace(INamespaceSymbol namespaceSymbol)
         {
             foreach (var type in namespaceSymbol.GetTypeMembers())
             {
@@ -686,7 +860,7 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Get nested types recursively
         /// </summary>
-        private IEnumerable<INamedTypeSymbol> GetNestedTypes(INamedTypeSymbol type)
+        private static IEnumerable<INamedTypeSymbol> GetNestedTypes(INamedTypeSymbol type)
         {
             foreach (var nestedType in type.GetTypeMembers())
             {
@@ -702,7 +876,7 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Create ImplementationResult from a type symbol
         /// </summary>
-        private async Task<ImplementationResult?> CreateImplementationResultAsync(
+        private static ImplementationResult? CreateImplementationResult(
             INamedTypeSymbol type,
             INamedTypeSymbol targetType,
             Project project)
@@ -712,7 +886,6 @@ namespace RoslynMcpServer.Core.Services
                 return null;
 
             var lineSpan = location.GetLineSpan();
-            var document = project.GetDocument(location.SourceTree);
 
             // Get documentation
             var documentation = type.GetDocumentationCommentXml() ?? "";
@@ -753,19 +926,27 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Get complete class hierarchy (ancestors and descendants) for a type
         /// </summary>
+        /// <param name="direction">both, ancestors, or descendants (case-insensitive)</param>
+        /// <exception cref="ArgumentException">direction is not one of the supported values</exception>
+        /// <returns>null when no type in the solution's source has that name.</returns>
+        /// <exception cref="SymbolResolutionException">The name is ambiguous, or only non-type declarations or other arities have it.</exception>
         public async Task<ClassHierarchyResult?> GetClassHierarchyAsync(
             string typeName,
             string solutionPath,
             string direction = "both",
             int maxDepth = 10)
         {
-            _logger.LogInformation("Getting class hierarchy for: {TypeName}, Direction: {Direction}", typeName, direction);
+            var normalizedDirection = NormalizeHierarchyDirection(direction)
+                ?? throw new ArgumentException(
+                    $"Invalid direction '{direction}'. Use both, ancestors, or descendants.", nameof(direction));
+
+            _logger.LogInformation("Getting class hierarchy for: {TypeName}, Direction: {Direction}", typeName, normalizedDirection);
 
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
 
-            // Find the target type
-            var targetSymbols = await FindSymbolsByNameAsync(solution, typeName);
-            var targetType = targetSymbols.OfType<INamedTypeSymbol>().FirstOrDefault();
+            // Find the target type among the solution's own declarations
+            var targetType = await SourceSymbolResolver.ResolveSingleAsync(
+                solution, typeName, SymbolTarget.Type) as INamedTypeSymbol;
 
             if (targetType == null)
             {
@@ -798,24 +979,35 @@ namespace RoslynMcpServer.Core.Services
             };
 
             // Get ancestors (base classes and interfaces)
-            if (direction == "ancestors" || direction == "both")
+            if (normalizedDirection == "ancestors" || normalizedDirection == "both")
             {
-                result.Ancestors = await GetAncestorsAsync(targetType, maxDepth);
+                result.Ancestors = GetAncestors(targetType, solution, maxDepth);
             }
 
             // Get descendants (derived classes)
-            if (direction == "descendants" || direction == "both")
+            if (normalizedDirection == "descendants" || normalizedDirection == "both")
             {
-                result.Descendants = await GetDescendantsAsync(targetType, solution, maxDepth);
+                // Scan the solution once and index every source type by its direct base class and interfaces
+                var descendantMap = BuildDirectDescendantMap(await GetSolutionSourceTypesAsync(solution));
+                result.Descendants = GetDescendants(targetType, descendantMap, maxDepth, 0, new HashSet<string>());
             }
 
             return result;
         }
 
         /// <summary>
+        /// Normalize a class hierarchy direction; returns null when the value is not supported
+        /// </summary>
+        public static string? NormalizeHierarchyDirection(string? direction)
+        {
+            var normalized = string.IsNullOrWhiteSpace(direction) ? "both" : direction.Trim().ToLowerInvariant();
+            return normalized is "both" or "ancestors" or "descendants" ? normalized : null;
+        }
+
+        /// <summary>
         /// Get ancestor types (base classes and interfaces) recursively
         /// </summary>
-        private async Task<List<HierarchyNode>> GetAncestorsAsync(INamedTypeSymbol type, int maxDepth, int currentDepth = 0)
+        private static List<HierarchyNode> GetAncestors(INamedTypeSymbol type, Solution solution, int maxDepth, int currentDepth = 0)
         {
             var ancestors = new List<HierarchyNode>();
 
@@ -825,110 +1017,111 @@ namespace RoslynMcpServer.Core.Services
             // Add base class
             if (type.BaseType != null && type.BaseType.SpecialType != SpecialType.System_Object)
             {
-                var baseNode = await CreateHierarchyNodeAsync(type.BaseType, currentDepth + 1);
-                if (baseNode != null)
-                {
-                    // Recursively get ancestors of base class
-                    baseNode.Children = await GetAncestorsAsync(type.BaseType, maxDepth, currentDepth + 1);
-                    ancestors.Add(baseNode);
-                }
+                var baseNode = CreateHierarchyNode(type.BaseType, currentDepth + 1, GetDeclaringProjectName(type.BaseType, solution));
+                // Recursively get ancestors of base class
+                baseNode.Children = GetAncestors(type.BaseType, solution, maxDepth, currentDepth + 1);
+                ancestors.Add(baseNode);
             }
 
             // Add interfaces
             foreach (var iface in type.Interfaces)
             {
-                var ifaceNode = await CreateHierarchyNodeAsync(iface, currentDepth + 1);
-                if (ifaceNode != null)
-                {
-                    // Recursively get base interfaces
-                    ifaceNode.Children = await GetAncestorsAsync(iface, maxDepth, currentDepth + 1);
-                    ancestors.Add(ifaceNode);
-                }
+                var ifaceNode = CreateHierarchyNode(iface, currentDepth + 1, GetDeclaringProjectName(iface, solution));
+                // Recursively get base interfaces
+                ifaceNode.Children = GetAncestors(iface, solution, maxDepth, currentDepth + 1);
+                ancestors.Add(ifaceNode);
             }
 
             return ancestors;
         }
 
         /// <summary>
-        /// Get descendant types (derived classes) by searching the solution
+        /// Index source types by the definition of their direct base class and each directly implemented
+        /// interface (or, for interfaces, each directly extended interface)
         /// </summary>
-        private async Task<List<HierarchyNode>> GetDescendantsAsync(
+        private static Dictionary<string, List<(INamedTypeSymbol Type, Project Project)>> BuildDirectDescendantMap(
+            List<(INamedTypeSymbol Type, Project Project)> sourceTypes)
+        {
+            var map = new Dictionary<string, List<(INamedTypeSymbol Type, Project Project)>>();
+
+            foreach (var entry in sourceTypes)
+            {
+                var directBases = entry.Type.Interfaces.AsEnumerable();
+                if (entry.Type.BaseType != null)
+                    directBases = directBases.Prepend(entry.Type.BaseType);
+
+                // Distinct: implementing IFoo<int> and IFoo<string> is still one direct descendant of IFoo<T>
+                foreach (var baseKey in directBases.Select(GetTypeDefinitionKey).Distinct())
+                {
+                    if (!map.TryGetValue(baseKey, out var derivedTypes))
+                    {
+                        derivedTypes = new List<(INamedTypeSymbol Type, Project Project)>();
+                        map[baseKey] = derivedTypes;
+                    }
+
+                    derivedTypes.Add(entry);
+                }
+            }
+
+            return map;
+        }
+
+        /// <summary>
+        /// Get descendant types (derived classes and implementers) recursively from the prebuilt index
+        /// </summary>
+        private static List<HierarchyNode> GetDescendants(
             INamedTypeSymbol type,
-            Solution solution,
+            Dictionary<string, List<(INamedTypeSymbol Type, Project Project)>> descendantMap,
             int maxDepth,
-            int currentDepth = 0)
+            int currentDepth,
+            HashSet<string> path)
         {
             var descendants = new List<HierarchyNode>();
 
             if (currentDepth >= maxDepth)
                 return descendants;
 
-            // Search all projects for types that inherit from or implement the target type
-            foreach (var project in solution.Projects.Where(p => p.SupportsCompilation))
+            if (!descendantMap.TryGetValue(GetTypeDefinitionKey(type), out var derivedTypes))
+                return descendants;
+
+            foreach (var (derivedType, project) in derivedTypes)
             {
-                var compilation = await project.GetCompilationAsync();
-                if (compilation == null) continue;
+                // Guard against inheritance cycles, which only occur in code that does not compile
+                var derivedKey = GetTypeDefinitionKey(derivedType);
+                if (!path.Add(derivedKey))
+                    continue;
 
-                // Get all types in the project
-                var allTypes = compilation.GlobalNamespace.GetNamespaceMembers()
-                    .SelectMany(ns => GetAllTypesInNamespace(ns))
-                    .Concat(GetAllTypesInNamespace(compilation.GlobalNamespace));
+                var descendantNode = CreateHierarchyNode(derivedType, currentDepth + 1, project.Name);
+                descendantNode.Children = GetDescendants(derivedType, descendantMap, maxDepth, currentDepth + 1, path);
+                descendants.Add(descendantNode);
 
-                foreach (var candidateType in allTypes)
-                {
-                    // Skip the type itself
-                    if (SymbolEqualityComparer.Default.Equals(candidateType, type))
-                        continue;
-
-                    bool isDirectDescendant = false;
-
-                    // Check if candidate directly inherits from type
-                    if (candidateType.BaseType != null &&
-                        SymbolEqualityComparer.Default.Equals(candidateType.BaseType, type))
-                    {
-                        isDirectDescendant = true;
-                    }
-
-                    // Check if candidate directly implements the interface (only for interfaces)
-                    if (type.TypeKind == TypeKind.Interface &&
-                        candidateType.Interfaces.Any(i => SymbolEqualityComparer.Default.Equals(i, type)))
-                    {
-                        isDirectDescendant = true;
-                    }
-
-                    if (isDirectDescendant)
-                    {
-                        var descendantNode = await CreateHierarchyNodeAsync(candidateType, currentDepth + 1, project);
-                        if (descendantNode != null)
-                        {
-                            // Recursively get descendants of this type
-                            descendantNode.Children = await GetDescendantsAsync(
-                                candidateType,
-                                solution,
-                                maxDepth,
-                                currentDepth + 1);
-                            descendants.Add(descendantNode);
-                        }
-                    }
-                }
+                path.Remove(derivedKey);
             }
 
             return descendants.OrderBy(d => d.Name).ToList();
         }
 
         /// <summary>
+        /// Name of the project that declares a source type, or the containing assembly name for
+        /// types from referenced assemblies
+        /// </summary>
+        private static string GetDeclaringProjectName(INamedTypeSymbol type, Solution solution)
+        {
+            var sourceTree = type.Locations.FirstOrDefault(l => l.IsInSource)?.SourceTree;
+            var project = sourceTree != null ? solution.GetDocument(sourceTree)?.Project : null;
+            return project?.Name ?? type.ContainingAssembly?.Name ?? "";
+        }
+
+        /// <summary>
         /// Create HierarchyNode from a type symbol
         /// </summary>
-        private async Task<HierarchyNode?> CreateHierarchyNodeAsync(
+        private static HierarchyNode CreateHierarchyNode(
             INamedTypeSymbol type,
             int depth,
-            Project? project = null)
+            string projectName)
         {
             var location = type.Locations.FirstOrDefault();
             var lineSpan = location?.GetLineSpan();
-
-            // For system types or types not in source, we won't have project info
-            var projectName = project?.Name ?? type.ContainingAssembly?.Name ?? "";
 
             return new HierarchyNode
             {

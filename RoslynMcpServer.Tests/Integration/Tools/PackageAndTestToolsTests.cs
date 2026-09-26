@@ -131,6 +131,7 @@ public class CalculatorTests
         var result = await CodeNavigationTools.AnalyzePackages(
             solutionPath: _solutionPath!,
             checkUpdates: false,
+            checkVulnerabilities: false,
             format: "summary",
             serviceProvider: _serviceProvider);
 

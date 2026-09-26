@@ -16,14 +16,20 @@ public class NavigationTools
 {
     #region Tool Methods
 
-    [McpServerTool, Description("Search for symbols in C# code using wildcard patterns (* and ?)")]
+    [McpServerTool, Description("""
+        Search every project in a solution for types and members whose simple or fully qualified name matches a
+        wildcard pattern (* and ?, matched against the whole name). Symbols from referenced assemblies such as the
+        .NET framework are included, and a symbol visible to several projects is listed once per project. Results
+        are ranked with exact and prefix matches first and returned one page at a time, with a nextCursor when more
+        remain. Nested types and their members are searched at any depth.
+        """)]
     public static async Task<string> SearchSymbols(
-        [Description("Wildcard pattern to search for (e.g., 'User*', '*Service', 'Get*User')")] string pattern,
+        [Description("Wildcard pattern (* and ?) matched against the whole simple name or fully qualified name, e.g. 'User*', '*Service', 'MyApp.Services.*'.")] string pattern,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Symbol types to include: class,interface,method,property,field (comma-separated)")] string symbolTypes = "class,interface,method,property",
+        [Description("Comma-separated kinds: class, interface, struct, enum, method, property, field, event, namespace. class, interface, struct, and enum all select every type declaration, so they cannot be told apart.")] string symbolTypes = "class,interface,method,property",
         [Description("Whether to ignore case in search")] bool ignoreCase = true,
         [Description("Number of results per page (default: 20, max: 100)")] int pageSize = 20,
-        [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
+        [Description("Cursor for pagination: pass nextCursor from the previous response with the same query arguments; if they differ, the first page is returned.")] string? cursor = null,
         SymbolSearchService searchService = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!,
@@ -77,15 +83,23 @@ public class NavigationTools
         }
     }
 
-    [McpServerTool, Description("Find all references to a specific symbol with configurable detail level")]
+    [McpServerTool, Description("""
+        Find source references to the symbols declared in the solution that match symbolName, plus their
+        declaration sites when includeDefinition is true. A simple name combines every match (overloads and
+        same-named members of different types); qualify it with the containing type or namespace to narrow it.
+        Members of referenced assemblies such as the .NET framework are never matched. References are grouped by
+        file, one entry per line, and returned one page at a time with a nextCursor. A name that matches no
+        declared symbol returns a symbol-not-found error; a declared symbol with no references returns a
+        'No references found' message.
+        """)]
     public static async Task<string> FindReferences(
-        [Description("Exact symbol name to find references for")] string symbolName,
+        [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
         string detailLevel = "locations",
-        [Description("Include symbol definition in results")] bool includeDefinition = true,
+        [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
         [Description("Number of results per page (default: 20, max: 100)")] int pageSize = 20,
-        [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
+        [Description("Cursor for pagination: pass nextCursor from the previous response with the same query arguments; if they differ, the first page is returned.")] string? cursor = null,
         SymbolSearchService searchService = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!,
@@ -104,10 +118,15 @@ public class NavigationTools
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
+            var search = await searchService.SearchReferencesAsync(symbolName, solutionPath, includeDefinition);
 
-            if (!results.Any())
+            if (search.MatchedSymbolCount == 0)
                 return McpError.SymbolNotFound(symbolName, solutionPath).ToToolResponse();
+
+            if (search.References.Count == 0)
+                return $"No references found for '{symbolName}'; it is declared in the solution but never referenced.";
+
+            var results = search.References;
 
             var queryHash = paginationRequest.ComputeQueryHash(symbolName, solutionPath, detailLevel, includeDefinition.ToString());
             var paginatedResults = PaginatedResult<ReferenceResult>.FromCursor(
@@ -139,20 +158,27 @@ public class NavigationTools
         }
     }
 
-    [McpServerTool, Description("Find references with advanced filtering options to reduce noise and focus on specific usage patterns")]
+    [McpServerTool, Description("""
+        Find references the way FindReferences does, then narrow them by project name pattern, test-project
+        exclusion, cross-project usage, write access, or public API context. Filters are applied to each
+        reference before lines are merged, so a line that both reads and writes the symbol counts as a write.
+        Declaration sites (includeDefinition) are subject to projectFilter, excludeTests, and publicOnly, and
+        are dropped by crossProjectOnly and writesOnly. Results are grouped by file and returned one page at a
+        time with a nextCursor; an empty result returns 'No references found.'
+        """)]
     public static async Task<string> FindReferencesFiltered(
-        [Description("Exact symbol name to find references for")] string symbolName,
+        [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations")]
         string detailLevel = "locations",
-        [Description("Include symbol definition in results")] bool includeDefinition = true,
-        [Description("Filter by project name pattern (supports wildcards: * and ?)")] string? projectFilter = null,
-        [Description("Exclude test projects (projects with 'Test', 'Tests', 'Testing', 'Spec' in name)")] bool excludeTests = false,
-        [Description("Only show cross-project references (exclude same-project usage)")] bool crossProjectOnly = false,
-        [Description("Only show write operations (assignments, increments, etc.)")] bool writesOnly = false,
-        [Description("Only show references in public API contexts (excludes private/internal usage)")] bool publicOnly = false,
+        [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
+        [Description("Project name wildcard pattern (* and ?), matched case-insensitively against the whole name.")] string? projectFilter = null,
+        [Description("Drop references in projects whose name contains 'test' or 'spec' (case-insensitive substring).")] bool excludeTests = false,
+        [Description("Keep only references located in a project other than the one declaring the referenced symbol (checked per symbol when several match); declaration sites are dropped.")] bool crossProjectOnly = false,
+        [Description("Keep only references that write the symbol: assignment or compound-assignment target (including object initializers and deconstruction), ++/-- operand, or out/ref argument. Reads, including right-hand-side reads inside an assignment, and declaration sites are dropped.")] bool writesOnly = false,
+        [Description("Keep only locations inside a type or member visible outside its assembly: it and every containing type are public, protected, or protected internal, and an accessor's own modifier counts (e.g. a private setter). Code in private or internal members, top-level statements, and using directives is dropped.")] bool publicOnly = false,
         [Description("Number of results per page (default: 20, max: 100)")] int pageSize = 20,
-        [Description("Cursor for pagination - use nextCursor from previous response to get next page")] string? cursor = null,
+        [Description("Cursor for pagination: pass nextCursor from the previous response with the same query arguments; if they differ, the first page is returned.")] string? cursor = null,
         SymbolSearchService searchService = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!,
@@ -171,42 +197,15 @@ public class NavigationTools
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
-
-            // Apply filters
-            var filteredResults = results.AsEnumerable();
-
-            if (!string.IsNullOrEmpty(projectFilter))
-            {
-                var filterPattern = "^" + System.Text.RegularExpressions.Regex.Escape(projectFilter)
-                    .Replace("\\*", ".*").Replace("\\?", ".") + "$";
-                var filterRegex = new System.Text.RegularExpressions.Regex(filterPattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                filteredResults = filteredResults.Where(r => filterRegex.IsMatch(r.ProjectName));
-            }
-
-            if (excludeTests)
-            {
-                var testPatterns = new[] { "test", "tests", "testing", "spec", "specs" };
-                filteredResults = filteredResults.Where(r =>
-                    !testPatterns.Any(p => r.ProjectName.Contains(p, StringComparison.OrdinalIgnoreCase)));
-            }
-
-            if (crossProjectOnly)
-            {
-                var definitionProject = results.FirstOrDefault(r => r.IsDefinition)?.ProjectName;
-                if (!string.IsNullOrEmpty(definitionProject))
-                {
-                    filteredResults = filteredResults.Where(r =>
-                        !r.ProjectName.Equals(definitionProject, StringComparison.OrdinalIgnoreCase) || r.IsDefinition);
-                }
-            }
-
-            if (writesOnly)
-            {
-                var writeKinds = new[] { "assignment", "increment", "decrement", "compound", "out", "ref" };
-                filteredResults = filteredResults.Where(r =>
-                    writeKinds.Any(k => r.ReferenceKind.Contains(k, StringComparison.OrdinalIgnoreCase)) || r.IsDefinition);
-            }
+            var filteredResults = await searchService.FindReferencesFilteredAsync(
+                symbolName,
+                solutionPath,
+                includeDefinition,
+                publicOnly: publicOnly,
+                excludeTests: excludeTests,
+                crossProjectOnly: crossProjectOnly,
+                writesOnly: writesOnly,
+                projectFilter: projectFilter);
 
             var queryHash = paginationRequest.ComputeQueryHash(
                 symbolName, solutionPath, detailLevel, includeDefinition.ToString(),
@@ -241,9 +240,17 @@ public class NavigationTools
         }
     }
 
-    [McpServerTool, Description("Get detailed information about a specific symbol")]
+    [McpServerTool, Description("""
+        Describe one type or member declared in the solution's source: kind, accessibility, namespace, return or
+        property type, and source file and line; the full level adds declaring type, parameters, and the XML
+        documentation comment. Only source declarations are matched (never framework or package members); nested
+        types and their members are included. Exact-case matches win over case-insensitive ones, and without type
+        arguments a non-generic type wins over generic ones. If several declarations still match (for example
+        overloads, or the same name in different types), nothing is described and the candidates are listed with
+        names to call again with. An unknown name returns 'Symbol not found.'
+        """)]
     public static async Task<string> GetSymbolInfo(
-        [Description("Exact symbol name or full qualified name")] string symbolName,
+        [Description("Simple ('Save'), qualified ('UserService.Save', 'App.Services.UserService.Save'), or nested-type ('Outer.Inner') name, matched case-insensitively. Add type arguments ('Result<T>') to select a generic type and a parameter list ('Save(User, bool)', 'Save()') to select an overload.")] string symbolName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Detail level: summary (minimal), basic (balanced), full (comprehensive). Default: basic")]
         string detailLevel = "basic",
@@ -268,6 +275,10 @@ public class NavigationTools
                 _ => FormatSymbolInfoBasic(info)
             };
         }
+        catch (SymbolResolutionException ex)
+        {
+            return ex.Message;
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error getting symbol info for: {SymbolName}", symbolName);
@@ -275,12 +286,18 @@ public class NavigationTools
         }
     }
 
-    [McpServerTool, Description("Get hierarchical structure of projects, namespaces, and types")]
+    [McpServerTool, Description("""
+        List the source-declared types of every project in a solution, grouped by project and namespace, with each
+        type's kind and accessibility and optionally its member signatures. Nested types appear under their
+        namespace without their containing type, and projects with no matching types are omitted. Output is not
+        truncated, so large solutions produce long output unless filtered by namespace. Does not show project
+        references, file paths, or line numbers.
+        """)]
     public static async Task<string> GetProjectStructure(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Include member signatures (default: false)")] bool includeMembers = false,
-        [Description("Filter by namespace pattern (optional, e.g., 'MyProject.Services')")] string? namespaceFilter = null,
-        [Description("Include only public types (default: true)")] bool publicOnly = true,
+        [Description("Keep only types whose namespace contains this text (case-insensitive substring, no wildcards). Optional.")] string? namespaceFilter = null,
+        [Description("Include only public types, and only public members when includeMembers is true (default: true).")] bool publicOnly = true,
         ProjectStructureService structureService = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!,
@@ -305,14 +322,21 @@ public class NavigationTools
         }
     }
 
-    [McpServerTool, Description("Get structural outline of a C# file showing types and members")]
+    [McpServerTool, Description("""
+        Parse a single .cs file on its own, without loading a solution, and outline its classes, interfaces,
+        structs, enums, and records with their constructors, fields, properties, methods, and events, shown by kind
+        and name; detailed mode adds accessibility and type. Signatures and documentation comments are not shown.
+        Only syntax is read, so accessibility comes from written modifiers (none is reported as Private). Nested
+        types are listed separately; enum members, indexers, operators, delegates, and field-like events are
+        omitted.
+        """)]
     public static async Task<string> GetFileOutline(
         [Description("Path to C# source file (.cs)")] string filePath,
         [Description("Output mode: compact (minimal info), normal (balanced), detailed (comprehensive). Default: normal")]
         string mode = "normal",
-        [Description("Maximum members to show per type (default: 10, 0=show all)")] int maxMembers = 10,
-        [Description("Include member details (default: true)")] bool includeMembers = true,
-        [Description("Include documentation comments (default: true)")] bool includeDocumentation = true,
+        [Description("Maximum members listed per type in normal and detailed modes; 0 shows all (default: 10).")] int maxMembers = 10,
+        [Description("List members in normal mode; compact and detailed modes ignore it (default: true).")] bool includeMembers = true,
+        [Description("Currently ignored; no documentation is output.")] bool includeDocumentation = true,
         FileAnalysisService fileAnalysisService = null!,
         McpErrorHandler errorHandler = null!,
         ILogger<NavigationTools> logger = null!,
@@ -343,13 +367,22 @@ public class NavigationTools
         }
     }
 
-    [McpServerTool, Description("Find all implementations of an interface or abstract class")]
+    [McpServerTool, Description("""
+        Find the source types that implement an interface (directly, through a base class, or through an inherited
+        interface) or derive from an abstract class at any depth, including through constructed generics (IRepo<int>
+        counts for IRepo<T>); depending on format it returns names only, names with the declaring project, file, and
+        line, or full details including implemented interfaces. Each type is listed once. The target must be an
+        interface or abstract class declared in the solution's source, so framework types such as IDisposable cannot
+        be the target. Exact-case matches win over case-insensitive ones; if several interfaces or abstract classes
+        still match, the candidates are listed instead. An unknown name, and a name that only matches other kinds of
+        declaration (such as a concrete class), are reported as such rather than as 'no implementations'.
+        """)]
     public static async Task<string> FindImplementations(
-        [Description("Interface or abstract class name to find implementations for")] string typeName,
+        [Description("Simple ('IRepository'), qualified ('App.Data.IRepository'), or nested-type ('Outer.IInner') name of an interface or abstract class, matched case-insensitively. Add type arguments ('IRepository<T>') to select a generic type.")] string typeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (names only), normal (balanced), detailed (comprehensive). Default: normal")]
         string format = "normal",
-        [Description("Include abstract implementations (default: false)")] bool includeAbstractImplementations = false,
+        [Description("Also list abstract classes and, for an interface target, derived interfaces (default: false).")] bool includeAbstractImplementations = false,
         SymbolSearchService searchService = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!,
@@ -373,6 +406,10 @@ public class NavigationTools
                 "normal" => FormatImplementationResults(results, typeName),
                 _ => FormatImplementationResults(results, typeName)
             };
+        }
+        catch (SymbolResolutionException ex)
+        {
+            return ex.Message;
         }
         catch (Exception ex)
         {
@@ -505,8 +542,8 @@ public class NavigationTools
             output.AppendLine($"**{Path.GetFileName(fileGroup.Key)}** ({fileGroup.Count()} references):");
             foreach (var reference in fileGroup.OrderBy(r => r.LineNumber))
             {
-                var icon = reference.IsDefinition ? "[DEFINITION]" : "";
-                output.AppendLine($"  Line {reference.LineNumber}: {reference.ReferenceKind} {icon}");
+                var kind = reference.IsDefinition ? "[DEFINITION]" : reference.ReferenceKind;
+                output.AppendLine($"  Line {reference.LineNumber}: {kind}");
                 if (reference.Context != null && reference.Context.Any())
                 {
                     foreach (var line in reference.Context)
@@ -619,8 +656,8 @@ public class NavigationTools
             output.AppendLine($"**{Path.GetFileName(fileGroup.Key)}** ({fileGroup.Count()} references):");
             foreach (var reference in fileGroup.OrderBy(r => r.LineNumber))
             {
-                var icon = reference.IsDefinition ? "[DEFINITION]" : "";
-                output.AppendLine($"  Line {reference.LineNumber}: {reference.ReferenceKind} {icon}");
+                var kind = reference.IsDefinition ? "[DEFINITION]" : reference.ReferenceKind;
+                output.AppendLine($"  Line {reference.LineNumber}: {kind}");
                 if (reference.Context != null && reference.Context.Any())
                 {
                     foreach (var line in reference.Context)
@@ -701,7 +738,7 @@ public class NavigationTools
             output.AppendLine($"  {type.Kind}: {type.Name} ({type.Members.Count} members)");
         }
 
-        return output.ToString();
+        return output.AppendWarnings(outline.Warnings).ToString();
     }
 
     private static string FormatFileOutlineNormal(FileOutlineResult outline, int maxMembers, bool includeMembers, bool includeDocumentation)
@@ -731,7 +768,7 @@ public class NavigationTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(outline.Warnings).ToString();
     }
 
     private static string FormatFileOutlineDetailed(FileOutlineResult outline, int maxMembers, bool includeDocumentation)
@@ -774,7 +811,7 @@ public class NavigationTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(outline.Warnings).ToString();
     }
 
     private static string FormatImplementationResults(List<ImplementationResult> results, string typeName)

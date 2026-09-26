@@ -12,8 +12,13 @@ namespace RoslynMcpServer.Core.Services
         public string FullName { get; set; } = string.Empty;
         public string FilePath { get; set; } = string.Empty;
         public int LineNumber { get; set; }
+        public int MaxDepth { get; set; }
         public List<CallInfo> Callers { get; set; } = new();
         public List<CallInfo> Callees { get; set; } = new();
+        public int TotalCallers { get; set; }
+        public int TotalCallees { get; set; }
+        public bool CallersTruncated { get; set; }
+        public bool CalleesTruncated { get; set; }
     }
 
     public class CallInfo
@@ -23,10 +28,20 @@ namespace RoslynMcpServer.Core.Services
         public string FilePath { get; set; } = string.Empty;
         public int LineNumber { get; set; }
         public int CallCount { get; set; }
+        public int Depth { get; set; }  // 1 = direct caller/callee of the analyzed method
+        public bool IsRecursive { get; set; }  // Already on the path from the analyzed method, so not expanded again
+        public bool IsRepeated { get; set; }  // Expanded elsewhere in the tree, so not expanded again
+        public List<CallInfo> Children { get; set; } = new();
     }
 
     public class CallHierarchyService
     {
+        /// <summary>Largest maxDepth honored; larger values are clamped</summary>
+        public const int MaxAllowedDepth = 10;
+
+        /// <summary>Maximum entries listed per direction before the tree is truncated</summary>
+        public const int MaxEntriesPerDirection = 200;
+
         private readonly CodeAnalysisService _codeAnalysisService;
         private readonly ILogger<CallHierarchyService> _logger;
 
@@ -44,6 +59,14 @@ namespace RoslynMcpServer.Core.Services
             string direction = "both",
             int maxDepth = 3)
         {
+            var normalizedDirection = string.IsNullOrWhiteSpace(direction) ? "both" : direction.Trim().ToLowerInvariant();
+            if (normalizedDirection is not ("both" or "callers" or "callees"))
+            {
+                return $"Error: Invalid direction '{direction}'. Use both, callers, or callees.";
+            }
+
+            var depth = Math.Clamp(maxDepth, 1, MaxAllowedDepth);
+
             try
             {
                 var solution = await _codeAnalysisService.GetSolutionAsync(solutionPath);
@@ -60,22 +83,29 @@ namespace RoslynMcpServer.Core.Services
                     MethodName = targetMethod.Name,
                     FullName = targetMethod.ToDisplayString(),
                     FilePath = targetMethod.Locations.FirstOrDefault()?.SourceTree?.FilePath ?? "",
-                    LineNumber = targetMethod.Locations.FirstOrDefault()?.GetLineSpan().StartLinePosition.Line + 1 ?? 0
+                    LineNumber = targetMethod.Locations.FirstOrDefault()?.GetLineSpan().StartLinePosition.Line + 1 ?? 0,
+                    MaxDepth = depth
                 };
 
                 // Analyze callers (who calls this method)
-                if (direction == "both" || direction == "callers")
+                if (normalizedDirection == "both" || normalizedDirection == "callers")
                 {
-                    result.Callers = await FindCallersAsync(solution, targetMethod, maxDepth);
+                    var tree = await BuildTreeAsync(targetMethod, depth, symbol => FindDirectCallersAsync(solution, symbol));
+                    result.Callers = tree.Roots;
+                    result.TotalCallers = tree.Count;
+                    result.CallersTruncated = tree.Truncated;
                 }
 
                 // Analyze callees (what this method calls)
-                if (direction == "both" || direction == "callees")
+                if (normalizedDirection == "both" || normalizedDirection == "callees")
                 {
-                    result.Callees = await FindCalleesAsync(solution, targetMethod, maxDepth);
+                    var tree = await BuildTreeAsync(targetMethod, depth, symbol => FindDirectCalleesAsync(solution, symbol));
+                    result.Callees = tree.Roots;
+                    result.TotalCallees = tree.Count;
+                    result.CalleesTruncated = tree.Truncated;
                 }
 
-                return FormatCallHierarchy(result, direction);
+                return FormatCallHierarchy(result, normalizedDirection);
             }
             catch (Exception ex)
             {
@@ -124,46 +154,121 @@ namespace RoslynMcpServer.Core.Services
             return null;
         }
 
-        private async Task<List<CallInfo>> FindCallersAsync(
-            Solution solution,
-            IMethodSymbol methodSymbol,
-            int maxDepth)
+        /// <summary>
+        /// Builds a call tree breadth-first, so that direct callers/callees are always listed before the
+        /// entry budget is spent on deeper levels. Each symbol is expanded once: later occurrences are marked
+        /// as repeated, and occurrences already on the path from the root are marked as recursive.
+        /// </summary>
+        private static async Task<(List<CallInfo> Roots, int Count, bool Truncated)> BuildTreeAsync(
+            ISymbol root,
+            int maxDepth,
+            Func<ISymbol, Task<List<(ISymbol Symbol, CallInfo Info)>>> findDirectRelations)
         {
-            var callers = new List<CallInfo>();
-            var references = await SymbolFinder.FindCallersAsync(methodSymbol, solution);
+            var roots = new List<CallInfo>();
+            var rootKey = GetSymbolKey(root);
+            var expanded = new HashSet<string> { rootKey };
+            var queue = new Queue<(ISymbol Symbol, int Depth, List<CallInfo> Target, HashSet<string> Path)>();
+            queue.Enqueue((root, 1, roots, new HashSet<string> { rootKey }));
 
-            foreach (var caller in references)
+            var count = 0;
+
+            while (queue.Count > 0)
             {
-                if (caller.CallingSymbol is IMethodSymbol callingMethod)
+                var (symbol, depth, target, path) = queue.Dequeue();
+
+                foreach (var (relatedSymbol, info) in await findDirectRelations(symbol))
                 {
-                    var location = caller.Locations.FirstOrDefault();
-                    if (location != null)
+                    if (count >= MaxEntriesPerDirection)
+                        return (roots, count, true);
+
+                    count++;
+                    info.Depth = depth;
+                    target.Add(info);
+
+                    var key = GetSymbolKey(relatedSymbol);
+                    if (path.Contains(key))
                     {
-                        var lineSpan = location.GetLineSpan();
-                        callers.Add(new CallInfo
-                        {
-                            MethodName = callingMethod.Name,
-                            ContainingType = callingMethod.ContainingType?.Name ?? "",
-                            FilePath = lineSpan.Path,
-                            LineNumber = lineSpan.StartLinePosition.Line + 1,
-                            CallCount = caller.Locations.Count()
-                        });
+                        info.IsRecursive = true;
+                        continue;
                     }
+
+                    if (depth >= maxDepth || !CanExpand(relatedSymbol))
+                        continue;
+
+                    if (!expanded.Add(key))
+                    {
+                        info.IsRepeated = true;
+                        continue;
+                    }
+
+                    queue.Enqueue((relatedSymbol, depth + 1, info.Children, new HashSet<string>(path) { key }));
                 }
             }
 
-            return callers.OrderBy(c => c.ContainingType).ThenBy(c => c.MethodName).ToList();
+            return (roots, count, false);
         }
 
-        private async Task<List<CallInfo>> FindCalleesAsync(
-            Solution solution,
-            IMethodSymbol methodSymbol,
-            int maxDepth)
-        {
-            var callees = new List<CallInfo>();
+        // Fields and events can call methods (initializers, accessors) but have no call hierarchy of their own
+        private static bool CanExpand(ISymbol symbol) => symbol is IMethodSymbol or IPropertySymbol;
 
-            // Get the method's syntax node
-            var syntaxReference = methodSymbol.DeclaringSyntaxReferences.FirstOrDefault();
+        /// <summary>
+        /// Identity of a source symbol that is stable across compilations of the same project
+        /// </summary>
+        private static string GetSymbolKey(ISymbol symbol)
+        {
+            var definition = symbol.OriginalDefinition;
+            var location = definition.Locations.FirstOrDefault();
+            return $"{definition.ContainingAssembly?.Name}|{definition.ToDisplayString()}|{location?.SourceTree?.FilePath}:{location?.SourceSpan.Start}";
+        }
+
+        private static async Task<List<(ISymbol Symbol, CallInfo Info)>> FindDirectCallersAsync(
+            Solution solution,
+            ISymbol symbol)
+        {
+            var callers = new List<(ISymbol Symbol, CallInfo Info)>();
+            var references = await SymbolFinder.FindCallersAsync(symbol, solution);
+
+            foreach (var caller in references)
+            {
+                // Callers are methods, or properties/fields/events when the call sits in an accessor or initializer
+                if (caller.CallingSymbol is not (IMethodSymbol or IPropertySymbol or IFieldSymbol or IEventSymbol))
+                    continue;
+
+                var location = caller.Locations.FirstOrDefault();
+                if (location == null)
+                    continue;
+
+                var lineSpan = location.GetLineSpan();
+                callers.Add((caller.CallingSymbol, new CallInfo
+                {
+                    MethodName = caller.CallingSymbol.Name,
+                    ContainingType = caller.CallingSymbol.ContainingType?.Name ?? "",
+                    FilePath = lineSpan.Path,
+                    LineNumber = lineSpan.StartLinePosition.Line + 1,
+                    CallCount = caller.Locations.Count()
+                }));
+            }
+
+            return callers
+                .OrderBy(c => c.Info.ContainingType)
+                .ThenBy(c => c.Info.MethodName)
+                .ThenBy(c => c.Info.FilePath)
+                .ThenBy(c => c.Info.LineNumber)
+                .ToList();
+        }
+
+        private static async Task<List<(ISymbol Symbol, CallInfo Info)>> FindDirectCalleesAsync(
+            Solution solution,
+            ISymbol symbol)
+        {
+            var callees = new List<(ISymbol Symbol, CallInfo Info)>();
+
+            if (symbol is not IMethodSymbol methodSymbol)
+                return callees;
+
+            // Get the method's syntax node (the implementation part, for partial methods)
+            var implementation = methodSymbol.PartialImplementationPart ?? methodSymbol;
+            var syntaxReference = implementation.DeclaringSyntaxReferences.FirstOrDefault();
             if (syntaxReference == null)
                 return callees;
 
@@ -180,47 +285,50 @@ namespace RoslynMcpServer.Core.Services
             if (semanticModel == null)
                 return callees;
 
-            // Find all invocations in the method body
+            // Find all invocations in the method body; each called method (each overload separately) is one entry
             var invocations = methodNode.DescendantNodes()
                 .OfType<InvocationExpressionSyntax>();
 
-            var callInfoMap = new Dictionary<string, CallInfo>();
+            var callInfoMap = new Dictionary<string, (ISymbol Symbol, CallInfo Info)>();
 
             foreach (var invocation in invocations)
             {
                 var symbolInfo = semanticModel.GetSymbolInfo(invocation);
                 var calledSymbol = symbolInfo.Symbol as IMethodSymbol;
 
-                if (calledSymbol != null && !calledSymbol.IsImplicitlyDeclared)
-                {
-                    var key = $"{calledSymbol.ContainingType?.Name}.{calledSymbol.Name}";
+                if (calledSymbol == null || calledSymbol.IsImplicitlyDeclared)
+                    continue;
 
-                    if (callInfoMap.ContainsKey(key))
+                // Map extension-method calls and generic instantiations to their declarations
+                var calledDefinition = (calledSymbol.ReducedFrom ?? calledSymbol).OriginalDefinition;
+                var key = GetSymbolKey(calledDefinition);
+
+                if (callInfoMap.TryGetValue(key, out var existing))
+                {
+                    existing.Info.CallCount++;
+                    continue;
+                }
+
+                var location = calledDefinition.Locations.FirstOrDefault();
+                if (location != null && location.IsInSource)
+                {
+                    var lineSpan = location.GetLineSpan();
+                    callInfoMap[key] = (calledDefinition, new CallInfo
                     {
-                        callInfoMap[key].CallCount++;
-                    }
-                    else
-                    {
-                        var location = calledSymbol.Locations.FirstOrDefault();
-                        if (location != null && location.IsInSource)
-                        {
-                            var lineSpan = location.GetLineSpan();
-                            callInfoMap[key] = new CallInfo
-                            {
-                                MethodName = calledSymbol.Name,
-                                ContainingType = calledSymbol.ContainingType?.Name ?? "",
-                                FilePath = lineSpan.Path,
-                                LineNumber = lineSpan.StartLinePosition.Line + 1,
-                                CallCount = 1
-                            };
-                        }
-                    }
+                        MethodName = calledDefinition.Name,
+                        ContainingType = calledDefinition.ContainingType?.Name ?? "",
+                        FilePath = lineSpan.Path,
+                        LineNumber = lineSpan.StartLinePosition.Line + 1,
+                        CallCount = 1
+                    });
                 }
             }
 
             return callInfoMap.Values
-                .OrderBy(c => c.ContainingType)
-                .ThenBy(c => c.MethodName)
+                .OrderBy(c => c.Info.ContainingType)
+                .ThenBy(c => c.Info.MethodName)
+                .ThenBy(c => c.Info.FilePath)
+                .ThenBy(c => c.Info.LineNumber)
                 .ToList();
         }
 
@@ -230,44 +338,41 @@ namespace RoslynMcpServer.Core.Services
 
             builder.AppendLine($"Call Hierarchy for: {result.FullName}");
             builder.AppendLine($"Location: {Path.GetFileName(result.FilePath)}:{result.LineNumber}");
+            builder.AppendLine($"Max depth: {result.MaxDepth}");
             builder.AppendLine();
 
             if (direction == "both" || direction == "callers")
             {
-                builder.AppendLine($"📞 Callers ({result.Callers.Count} methods call this):");
+                builder.AppendLine($"📞 Callers ({result.Callers.Count} methods call this directly, {result.TotalCallers} listed across all levels):");
                 if (result.Callers.Any())
                 {
-                    foreach (var caller in result.Callers)
-                    {
-                        var fileName = Path.GetFileName(caller.FilePath);
-                        var callText = caller.CallCount > 1 ? $"({caller.CallCount} calls)" : "";
-                        builder.AppendLine($"  ├─> {caller.ContainingType}.{caller.MethodName} {callText}");
-                        builder.AppendLine($"      ({fileName}:{caller.LineNumber})");
-                    }
+                    AppendCallTree(builder, result.Callers, "  ", "callers");
                 }
                 else
                 {
                     builder.AppendLine("  (no callers found)");
+                }
+                if (result.CallersTruncated)
+                {
+                    builder.AppendLine($"  ... truncated after {MaxEntriesPerDirection} entries; lower maxDepth to see a complete tree");
                 }
                 builder.AppendLine();
             }
 
             if (direction == "both" || direction == "callees")
             {
-                builder.AppendLine($"📤 Callees ({result.Callees.Count} methods called by this):");
+                builder.AppendLine($"📤 Callees ({result.Callees.Count} methods called by this directly, {result.TotalCallees} listed across all levels):");
                 if (result.Callees.Any())
                 {
-                    foreach (var callee in result.Callees)
-                    {
-                        var fileName = Path.GetFileName(callee.FilePath);
-                        var callText = callee.CallCount > 1 ? $"({callee.CallCount} calls)" : "";
-                        builder.AppendLine($"  ├─> {callee.ContainingType}.{callee.MethodName} {callText}");
-                        builder.AppendLine($"      ({fileName}:{callee.LineNumber})");
-                    }
+                    AppendCallTree(builder, result.Callees, "  ", "callees");
                 }
                 else
                 {
                     builder.AppendLine("  (no callees found)");
+                }
+                if (result.CalleesTruncated)
+                {
+                    builder.AppendLine($"  ... truncated after {MaxEntriesPerDirection} entries; lower maxDepth to see a complete tree");
                 }
                 builder.AppendLine();
             }
@@ -276,14 +381,34 @@ namespace RoslynMcpServer.Core.Services
             builder.AppendLine("Summary:");
             if (direction == "both" || direction == "callers")
             {
-                builder.AppendLine($"  Incoming calls: {result.Callers.Count}");
+                builder.AppendLine($"  Incoming calls: {result.Callers.Count} direct, {result.TotalCallers} total");
             }
             if (direction == "both" || direction == "callees")
             {
-                builder.AppendLine($"  Outgoing calls: {result.Callees.Count}");
+                builder.AppendLine($"  Outgoing calls: {result.Callees.Count} direct, {result.TotalCallees} total");
             }
 
             return builder.ToString();
+        }
+
+        private static void AppendCallTree(StringBuilder builder, List<CallInfo> calls, string indent, string relation)
+        {
+            foreach (var call in calls)
+            {
+                var fileName = Path.GetFileName(call.FilePath);
+                var callText = call.CallCount > 1 ? $" ({call.CallCount} calls)" : "";
+                var marker = call.IsRecursive
+                    ? " ↺ recursive"
+                    : call.IsRepeated ? $" ({relation} listed above)" : "";
+
+                builder.AppendLine($"{indent}├─> {call.ContainingType}.{call.MethodName}{callText}{marker}");
+                builder.AppendLine($"{indent}    ({fileName}:{call.LineNumber})");
+
+                if (call.Children.Any())
+                {
+                    AppendCallTree(builder, call.Children, indent + "    ", relation);
+                }
+            }
         }
     }
 }

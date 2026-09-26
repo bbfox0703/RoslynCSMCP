@@ -217,8 +217,10 @@ public class CodeNavigationToolsTests : IDisposable
 
         // Assert
         result.Should().NotBeNullOrEmpty();
-        // Summary should show file counts, not individual lines
-        result.Should().Match(r => r.Contains("files") || r.Contains("locations") || r.Contains("references"));
+        // 'User' is declared but never referenced, so only its declaration site is listed.
+        // Summary shows per-file counts and line numbers, not code lines.
+        result.Should().Contain("User.cs").And.Contain("(Definition)").And.Contain("Lines:");
+        result.Should().NotContain("public class User");
     }
 
     [Fact]

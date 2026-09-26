@@ -7,7 +7,8 @@ using NuGet.Protocol.Core.Types;
 using NuGet.Versioning;
 using RoslynMcpServer.Core.Models;
 using System.Collections.Concurrent;
-using System.Xml.Linq;
+using System.Diagnostics;
+using System.Text.Json;
 
 namespace RoslynMcpServer.Core.Services
 {
@@ -16,23 +17,10 @@ namespace RoslynMcpServer.Core.Services
     /// </summary>
     public class PackageAnalysisService
     {
+        private static readonly TimeSpan VulnerabilityCheckTimeout = TimeSpan.FromMinutes(5);
+
         private readonly ILogger<PackageAnalysisService> _logger;
         private readonly UnusedDependencyAnalyzer _unusedDependencyAnalyzer;
-
-        // Common package to namespace mappings
-        private static readonly Dictionary<string, string[]> PackageNamespaceMap = new()
-        {
-            ["Newtonsoft.Json"] = new[] { "Newtonsoft.Json" },
-            ["Serilog"] = new[] { "Serilog" },
-            ["AutoMapper"] = new[] { "AutoMapper" },
-            ["Dapper"] = new[] { "Dapper" },
-            ["FluentValidation"] = new[] { "FluentValidation" },
-            ["MediatR"] = new[] { "MediatR" },
-            ["Polly"] = new[] { "Polly" },
-            ["NUnit"] = new[] { "NUnit.Framework" },
-            ["xunit"] = new[] { "Xunit" },
-            ["Moq"] = new[] { "Moq" }
-        };
 
         public PackageAnalysisService(
             ILogger<PackageAnalysisService> logger,
@@ -49,7 +37,8 @@ namespace RoslynMcpServer.Core.Services
             string solutionPath,
             bool checkUpdates = true,
             bool checkVulnerabilities = true,
-            bool analyzeUsage = true)
+            bool analyzeUsage = true,
+            bool checkConflicts = true)
         {
             var results = new PackageAnalysisResults();
 
@@ -78,16 +67,20 @@ namespace RoslynMcpServer.Core.Services
                 var solution = await workspace.OpenSolutionAsync(solutionPath);
                 results.AnalyzedProjects = solution.Projects.Count();
 
-                // Collect all packages from all projects
+                // Collect all packages from all projects. A multi-targeted project appears once per
+                // target framework but has one project file, so each file is read once.
                 var allPackages = new ConcurrentBag<PackageInfo>();
+                int failedProjects = 0;
 
                 var projectTasks = solution.Projects
                     .Where(p => p.SupportsCompilation && p.FilePath != null)
-                    .Select(async project =>
+                    .GroupBy(p => p.FilePath!, StringComparer.OrdinalIgnoreCase)
+                    .Select(async projectGroup =>
                     {
+                        var project = projectGroup.First();
                         try
                         {
-                            var packages = await ExtractPackagesFromProjectAsync(project, analyzeUsage);
+                            var packages = await ExtractPackagesFromProjectAsync(project, projectGroup.ToList(), analyzeUsage);
                             foreach (var package in packages)
                             {
                                 allPackages.Add(package);
@@ -96,13 +89,17 @@ namespace RoslynMcpServer.Core.Services
                         catch (Exception ex)
                         {
                             _logger.LogWarning(ex, "Failed to analyze packages for project: {ProjectName}", project.Name);
-                            results.FailedProjects++;
+                            Interlocked.Increment(ref failedProjects);
                         }
                     });
 
                 await Task.WhenAll(projectTasks);
 
-                results.AllPackages = allPackages.ToList();
+                results.FailedProjects = failedProjects;
+                results.AllPackages = allPackages
+                    .OrderBy(p => p.ProjectName, StringComparer.Ordinal)
+                    .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
 
                 // Analyze package updates
                 if (checkUpdates)
@@ -112,7 +109,10 @@ namespace RoslynMcpServer.Core.Services
                 }
 
                 // Detect version conflicts
-                results.VersionConflicts = DetectVersionConflicts(results.AllPackages);
+                if (checkConflicts)
+                {
+                    results.VersionConflicts = DetectVersionConflicts(results.AllPackages);
+                }
 
                 // Identify unused packages
                 if (analyzeUsage)
@@ -120,23 +120,18 @@ namespace RoslynMcpServer.Core.Services
                     results.UnusedPackages = results.AllPackages.Where(p => !p.IsUsed).ToList();
                 }
 
-                // Check for vulnerabilities (placeholder - requires external API)
+                // Check for known vulnerabilities with the .NET SDK
                 if (checkVulnerabilities)
                 {
-                    // Note: Vulnerability checking requires NuGet Audit API or similar
-                    // This is a placeholder for future implementation
-                    results.Warnings.Add(new OperationWarning
-                    {
-                        Context = "Vulnerability Check",
-                        Message = "Vulnerability checking is not yet implemented. Consider using 'dotnet list package --vulnerable' manually."
-                    });
+                    results.Vulnerabilities = await CheckVulnerabilitiesAsync(solutionPath, results.Warnings);
                 }
 
                 _logger.LogInformation(
-                    "Package analysis complete: {PackageCount} total packages, {UpdateCount} updates available, {ConflictCount} conflicts",
+                    "Package analysis complete: {PackageCount} total packages, {UpdateCount} updates available, {ConflictCount} conflicts, {VulnerabilityCount} vulnerabilities",
                     results.TotalPackages,
                     results.AvailableUpdates.Count,
-                    results.VersionConflicts.Count);
+                    results.VersionConflicts.Count,
+                    results.Vulnerabilities.Count);
             }
             catch (Exception ex)
             {
@@ -152,9 +147,13 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Extracts package references from a project file
+        /// Extracts package references from a project file. Usage is judged against the using
+        /// directives of every target framework's compilation of that project.
         /// </summary>
-        private async Task<List<PackageInfo>> ExtractPackagesFromProjectAsync(Project project, bool analyzeUsage)
+        private async Task<List<PackageInfo>> ExtractPackagesFromProjectAsync(
+            Project project,
+            IReadOnlyList<Project> targetFrameworkProjects,
+            bool analyzeUsage)
         {
             var packages = new List<PackageInfo>();
 
@@ -163,58 +162,36 @@ namespace RoslynMcpServer.Core.Services
                 if (project.FilePath == null || !File.Exists(project.FilePath))
                     return packages;
 
-                // Parse project file
-                var projectXml = await File.ReadAllTextAsync(project.FilePath);
-                var doc = XDocument.Parse(projectXml);
-
-                var packageReferences = doc.Descendants("PackageReference")
-                    .Select(pr => new
-                    {
-                        Name = pr.Attribute("Include")?.Value ?? string.Empty,
-                        Version = pr.Attribute("Version")?.Value ?? pr.Element("Version")?.Value ?? string.Empty
-                    })
-                    .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
-                    .ToList();
+                var packageReferences = PackageUsageHeuristics.ReadPackageReferences(project.FilePath);
 
                 // Get using directives if analyzing usage
-                HashSet<string> usedNamespaces = new();
-                if (analyzeUsage)
+                var importedNamespaces = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (analyzeUsage && packageReferences.Count > 0)
                 {
-                    var compilation = await project.GetCompilationAsync();
-                    if (compilation != null)
+                    foreach (var targetProject in targetFrameworkProjects)
                     {
-                        foreach (var syntaxTree in compilation.SyntaxTrees)
-                        {
-                            var root = await syntaxTree.GetRootAsync();
-                            var usings = root.DescendantNodes()
-                                .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.UsingDirectiveSyntax>()
-                                .Select(u => u.Name?.ToString() ?? string.Empty)
-                                .Where(n => !string.IsNullOrWhiteSpace(n));
-
-                            foreach (var u in usings)
-                            {
-                                usedNamespaces.Add(u);
-                            }
-                        }
+                        var compilation = await targetProject.GetCompilationAsync();
+                        if (compilation != null)
+                            importedNamespaces.UnionWith(PackageUsageHeuristics.CollectImportedNamespaces(compilation.SyntaxTrees));
                     }
                 }
+
+                var projectName = GetProjectDisplayName(project);
 
                 // Create PackageInfo objects
                 foreach (var pkgRef in packageReferences)
                 {
-                    var expectedNamespaces = GetExpectedNamespaces(pkgRef.Name);
-                    var usedNs = expectedNamespaces.Where(ns => usedNamespaces.Contains(ns)).ToList();
-                    var isUsed = !analyzeUsage || usedNs.Any() || IsAlwaysUsedPackage(pkgRef.Name);
+                    var (isUsed, expectedNamespaces, usedNamespaces) = PackageUsageHeuristics.Evaluate(pkgRef, importedNamespaces);
 
                     packages.Add(new PackageInfo
                     {
                         Name = pkgRef.Name,
                         Version = pkgRef.Version,
-                        ProjectName = project.Name,
+                        ProjectName = projectName,
                         ProjectPath = project.FilePath,
-                        IsUsed = isUsed,
-                        UsedNamespaces = usedNs,
-                        ExpectedNamespaces = expectedNamespaces.ToList()
+                        IsUsed = !analyzeUsage || isUsed,
+                        UsedNamespaces = usedNamespaces,
+                        ExpectedNamespaces = expectedNamespaces
                     });
                 }
             }
@@ -227,6 +204,16 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
+        /// Project name without the "(net8.0)" suffix MSBuildWorkspace adds for multi-targeting.
+        /// </summary>
+        private static string GetProjectDisplayName(Project project)
+        {
+            return project.FilePath != null
+                ? Path.GetFileNameWithoutExtension(project.FilePath)
+                : project.Name;
+        }
+
+        /// <summary>
         /// Checks for available package updates
         /// </summary>
         private async Task<List<PackageUpdate>> CheckForUpdatesAsync(List<PackageInfo> packages)
@@ -236,7 +223,7 @@ namespace RoslynMcpServer.Core.Services
             try
             {
                 // Group packages by name
-                var packageGroups = packages.GroupBy(p => p.Name);
+                var packageGroups = packages.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase);
 
                 // Setup NuGet API
                 var cache = new SourceCacheContext();
@@ -313,11 +300,11 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Detects version conflicts across projects
         /// </summary>
-        private List<PackageConflict> DetectVersionConflicts(List<PackageInfo> packages)
+        internal static List<PackageConflict> DetectVersionConflicts(List<PackageInfo> packages)
         {
             var conflicts = new List<PackageConflict>();
 
-            var packageGroups = packages.GroupBy(p => p.Name);
+            var packageGroups = packages.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase);
 
             foreach (var group in packageGroups)
             {
@@ -354,35 +341,245 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Gets expected namespaces for a package
+        /// Runs "dotnet list &lt;solution&gt; package --vulnerable --include-transitive --format json --no-restore".
+        /// The SDK queries the vulnerability data of the configured NuGet sources (network access), and
+        /// the solution must already be restored. Failures become warnings, never exceptions.
         /// </summary>
-        private string[] GetExpectedNamespaces(string packageName)
+        private async Task<List<PackageVulnerability>> CheckVulnerabilitiesAsync(string solutionPath, List<OperationWarning> warnings)
         {
-            if (PackageNamespaceMap.TryGetValue(packageName, out var namespaces))
+            const string context = "Vulnerability Check";
+
+            var startInfo = new ProcessStartInfo(GetDotnetExecutable())
             {
-                return namespaces;
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(solutionPath)) ?? Environment.CurrentDirectory
+            };
+            foreach (var argument in new[] { "list", solutionPath, "package", "--vulnerable", "--include-transitive", "--format", "json", "--no-restore" })
+                startInfo.ArgumentList.Add(argument);
+
+            startInfo.Environment["DOTNET_CLI_UI_LANGUAGE"] = "en";
+            startInfo.Environment["DOTNET_NOLOGO"] = "1";
+            startInfo.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
+
+            // MSBuildLocator points this process at one SDK's MSBuild; let the child pick its own.
+            foreach (var variable in new[] { "MSBUILD_EXE_PATH", "MSBuildExtensionsPath", "MSBuildSDKsPath" })
+                startInfo.Environment.Remove(variable);
+
+            try
+            {
+                using var process = Process.Start(startInfo);
+                if (process == null)
+                {
+                    warnings.Add(new OperationWarning { Context = context, Message = "Could not start 'dotnet list package --vulnerable'." });
+                    return new List<PackageVulnerability>();
+                }
+
+                var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                var stderrTask = process.StandardError.ReadToEndAsync();
+
+                using var timeout = new CancellationTokenSource(VulnerabilityCheckTimeout);
+                try
+                {
+                    await process.WaitForExitAsync(timeout.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    try { process.Kill(entireProcessTree: true); } catch { /* already exited */ }
+                    warnings.Add(new OperationWarning
+                    {
+                        Context = context,
+                        Message = $"'dotnet list package --vulnerable' did not finish within {VulnerabilityCheckTimeout.TotalMinutes:0} minutes and was stopped."
+                    });
+                    return new List<PackageVulnerability>();
+                }
+
+                var stdout = await stdoutTask;
+                var stderr = await stderrTask;
+
+                try
+                {
+                    return ParseVulnerabilityReport(stdout, warnings);
+                }
+                catch (JsonException)
+                {
+                    var detail = FirstNonEmptyLine(stderr) ?? FirstNonEmptyLine(stdout) ?? $"exit code {process.ExitCode}";
+                    warnings.Add(new OperationWarning
+                    {
+                        Context = context,
+                        Message = $"'dotnet list package --vulnerable' did not return a report: {detail}"
+                    });
+                    return new List<PackageVulnerability>();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Vulnerability check failed");
+                warnings.Add(new OperationWarning
+                {
+                    Context = context,
+                    Message = $"Could not run 'dotnet list package --vulnerable': {ex.Message}"
+                });
+                return new List<PackageVulnerability>();
+            }
+        }
+
+        private static string GetDotnetExecutable()
+        {
+            // When the server itself runs under the dotnet host, reuse that host.
+            var processPath = Environment.ProcessPath;
+            if (processPath != null &&
+                Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            {
+                return processPath;
             }
 
-            // Default: assume namespace matches package name
-            return new[] { packageName.Replace(".", ".") };
+            return "dotnet";
+        }
+
+        private static string? FirstNonEmptyLine(string text)
+        {
+            return text.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0);
         }
 
         /// <summary>
-        /// Checks if a package is always considered used (e.g., build tools, analyzers)
+        /// Parses the JSON report of "dotnet list package --vulnerable --format json" into one entry per
+        /// package, resolved version, and advisory, with the projects that reference it. "problems"
+        /// entries (for example a project that has not been restored) become warnings.
         /// </summary>
-        private bool IsAlwaysUsedPackage(string packageName)
+        internal static List<PackageVulnerability> ParseVulnerabilityReport(string json, List<OperationWarning> warnings)
         {
-            // Packages that don't have direct namespace usage but are still used
-            var alwaysUsedPackages = new[]
-            {
-                "Microsoft.NET.Test.Sdk",
-                "coverlet.collector",
-                "Microsoft.CodeAnalysis.NetAnalyzers",
-                "StyleCop.Analyzers",
-                "SonarAnalyzer.CSharp"
-            };
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
 
-            return alwaysUsedPackages.Any(p => packageName.Contains(p, StringComparison.OrdinalIgnoreCase));
+            AddProblems(root, warnings);
+
+            var byKey = new Dictionary<(string Package, string Version, string Advisory), PackageVulnerability>();
+
+            if (root.TryGetProperty("projects", out var projects) && projects.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var project in projects.EnumerateArray())
+                {
+                    AddProblems(project, warnings);
+
+                    var projectPath = GetString(project, "path");
+                    var projectName = string.IsNullOrEmpty(projectPath) ? "(unknown project)" : Path.GetFileNameWithoutExtension(projectPath);
+
+                    if (!project.TryGetProperty("frameworks", out var frameworks) || frameworks.ValueKind != JsonValueKind.Array)
+                        continue;
+
+                    foreach (var framework in frameworks.EnumerateArray())
+                    {
+                        foreach (var (listName, isTransitive) in new[] { ("topLevelPackages", false), ("transitivePackages", true) })
+                        {
+                            if (!framework.TryGetProperty(listName, out var packages) || packages.ValueKind != JsonValueKind.Array)
+                                continue;
+
+                            foreach (var package in packages.EnumerateArray())
+                            {
+                                if (!package.TryGetProperty("vulnerabilities", out var vulnerabilities) || vulnerabilities.ValueKind != JsonValueKind.Array)
+                                    continue;
+
+                                var id = GetString(package, "id");
+                                var version = GetString(package, "resolvedVersion");
+
+                                foreach (var vulnerability in vulnerabilities.EnumerateArray())
+                                {
+                                    var advisoryUrl = GetString(vulnerability, "advisoryurl");
+                                    var key = (id.ToLowerInvariant(), version, advisoryUrl);
+
+                                    if (!byKey.TryGetValue(key, out var entry))
+                                    {
+                                        var severity = NormalizeSeverity(GetString(vulnerability, "severity"));
+                                        byKey[key] = entry = new PackageVulnerability
+                                        {
+                                            PackageName = id,
+                                            AffectedVersion = version,
+                                            Severity = severity,
+                                            VulnerabilityId = GetAdvisoryId(advisoryUrl),
+                                            AdvisoryUrl = advisoryUrl,
+                                            Description = $"{severity} severity vulnerability in {id} {version}",
+                                            IsTransitive = isTransitive
+                                        };
+                                    }
+
+                                    // Direct in any project wins over transitive.
+                                    entry.IsTransitive &= isTransitive;
+                                    if (!entry.AffectedProjects.Contains(projectName))
+                                        entry.AffectedProjects.Add(projectName);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return byKey.Values
+                .OrderBy(v => SeverityRank(v.Severity))
+                .ThenBy(v => v.PackageName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(v => v.VulnerabilityId, StringComparer.Ordinal)
+                .ToList();
+        }
+
+        private static void AddProblems(JsonElement element, List<OperationWarning> warnings)
+        {
+            if (!element.TryGetProperty("problems", out var problems) || problems.ValueKind != JsonValueKind.Array)
+                return;
+
+            foreach (var problem in problems.EnumerateArray())
+            {
+                var project = GetString(problem, "project");
+                var text = GetString(problem, "text");
+                warnings.Add(new OperationWarning
+                {
+                    Context = "Vulnerability Check",
+                    Message = string.IsNullOrEmpty(project) ? text : $"{Path.GetFileName(project)}: {text}"
+                });
+            }
+        }
+
+        private static string GetString(JsonElement element, string propertyName)
+        {
+            return element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString() ?? string.Empty
+                : string.Empty;
+        }
+
+        /// <summary>
+        /// NuGet reports Low, Moderate, High, Critical; the model uses Medium for Moderate.
+        /// </summary>
+        internal static string NormalizeSeverity(string severity)
+        {
+            return severity.Trim().ToLowerInvariant() switch
+            {
+                "critical" => "Critical",
+                "high" => "High",
+                "moderate" or "medium" => "Medium",
+                "low" => "Low",
+                "" => "Unknown",
+                _ => severity.Trim()
+            };
+        }
+
+        internal static int SeverityRank(string severity) => severity switch
+        {
+            "Critical" => 0,
+            "High" => 1,
+            "Medium" => 2,
+            "Low" => 3,
+            _ => 4
+        };
+
+        private static string GetAdvisoryId(string advisoryUrl)
+        {
+            if (string.IsNullOrEmpty(advisoryUrl))
+                return "(no advisory)";
+
+            var trimmed = advisoryUrl.TrimEnd('/');
+            var lastSlash = trimmed.LastIndexOf('/');
+            return lastSlash >= 0 ? trimmed.Substring(lastSlash + 1) : trimmed;
         }
     }
 }

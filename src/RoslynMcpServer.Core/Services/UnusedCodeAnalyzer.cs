@@ -55,6 +55,9 @@ namespace RoslynMcpServer.Core.Services
                 var solution = await workspace.OpenSolutionAsync(solutionPath);
                 results.AnalyzedProjects = solution.Projects.Count();
 
+                int failedProjects = 0;
+                var projectWarnings = new ConcurrentBag<OperationWarning>();
+
                 // Process projects in parallel
                 var projectTasks = solution.Projects
                     .Where(p => includeTests || !IsTestProject(p))
@@ -67,8 +70,8 @@ namespace RoslynMcpServer.Core.Services
                         catch (Exception ex)
                         {
                             _logger.LogError(ex, "Failed to analyze project: {ProjectName}", project.Name);
-                            results.FailedProjects++;
-                            results.Warnings.Add(new OperationWarning
+                            Interlocked.Increment(ref failedProjects);
+                            projectWarnings.Add(new OperationWarning
                             {
                                 Context = project.Name,
                                 Message = $"Failed to analyze: {ex.Message}"
@@ -77,6 +80,9 @@ namespace RoslynMcpServer.Core.Services
                     });
 
                 await Task.WhenAll(projectTasks);
+
+                results.FailedProjects = failedProjects;
+                results.Warnings.AddRange(projectWarnings.OrderBy(w => w.Context, StringComparer.Ordinal));
 
                 // Convert to list and sort
                 results.UnusedItems = unusedItems
