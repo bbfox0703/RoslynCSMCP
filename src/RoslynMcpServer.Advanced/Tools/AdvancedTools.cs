@@ -131,11 +131,18 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Get complete class hierarchy showing ancestors and descendants")]
+    [McpServerTool, Description("""
+        List the direct ancestors (base class other than System.Object, and declared interfaces, including framework
+        types) and the direct descendants (types that derive from or directly implement it) of one type declared in
+        the solution's source, each with its full name and kind. The starting type must be declared in the
+        solution's source, so a framework type such as Exception cannot be the starting point. Exact-case matches
+        win over case-insensitive ones, and without type arguments a non-generic type wins over generic ones. If
+        several types still match, the candidates are listed instead. An unknown name returns 'Type not found.'
+        """)]
     public static async Task<string> GetClassHierarchy(
-        [Description("Type name to analyze")] string typeName,
+        [Description("Simple ('Shape'), qualified ('App.Geometry.Shape'), or nested-type ('Outer.Inner') type name, matched case-insensitively. Add type arguments ('Repository<T>') to select a generic type.")] string typeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: text, mermaid, json. Default: text")] string format = "text",
+        [Description("Currently ignored; output is always plain text.")] string format = "text",
         SymbolSearchService searchService = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -143,6 +150,10 @@ public class AdvancedTools
         {
             var results = await searchService.GetClassHierarchyAsync(typeName, solutionPath);
             return FormatClassHierarchy(results, format);
+        }
+        catch (SymbolResolutionException ex)
+        {
+            return ex.Message;
         }
         catch (Exception ex)
         {

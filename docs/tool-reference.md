@@ -77,12 +77,22 @@ Use FindReferences tool with:
 ---
 
 ### 5. GetSymbolInfo
-**Description**: Get detailed information about a specific symbol
+**Description**: Describe one type or member declared in the solution's source: kind, accessibility, namespace or declaring type, source file and line, and for methods the return type and parameters or for properties the type (which of these appear depends on `detailLevel` and the build). The name is resolved as described in [Resolving a type or member name](#resolving-a-type-or-member-name), accepting any type or member. If several declarations still match (overloads, the same name in different types), nothing is described and the candidates are listed. A name with no source declaration returns "Symbol not found." (also for framework-only names such as `Exception`).
 
 **Parameters**:
-- `symbolName` (string): Exact symbol name or fully qualified name
+- `symbolName` (string): Simple (`Save`), qualified (`UserService.Save`, `MyApp.Services.UserService.Save`), or nested-type (`Outer.Inner`, `Outer+Inner`) name, matched case-insensitively. Type arguments (`Result<T>`, ``Result`1``) select a generic type; a parameter list (`Save(User, bool)`, `Save()`) selects an overload.
 - `solutionPath` (string): Path to solution file (.sln)
 - `detailLevel` (string, optional): Detail level: summary, basic, full (default: basic)
+
+#### Resolving a type or member name
+
+GetSymbolInfo, FindImplementations, and GetClassHierarchy resolve their name argument the same way:
+
+1. **Source declarations only.** Types and members declared in the solution's projects are matched, including nested types and their members. Types and members of referenced assemblies (the framework, NuGet packages) are never matched, so `Timer` finds your `MyApp.Timer` rather than `System.Threading.Timer`, and `IDisposable` or `Exception` cannot be the target.
+2. **Name and qualifier.** The simple name must match, ignoring case. A qualified name must match whole trailing segments of the namespace and containing types, so `Geometry.Circle` matches `Lib.Geometry.Circle` and `App.Geometry.Circle`, but `Service.Save` does not match `UserService.Save`.
+3. **Kind, type arguments, parameters.** Only the kinds the tool works on are kept (any type or member for GetSymbolInfo, any type for GetClassHierarchy, interfaces and abstract classes for FindImplementations). Type arguments keep only declarations with that many type parameters; a parameter list keeps only methods and indexers whose parameter types match. Parameter types may be written with keywords or type names, qualified or not (`int`, `Int32`, `System.Int32`); modifiers, parameter names, and default values are ignored.
+4. **Preferences.** Exact-case matches win over case-insensitive ones. Without type arguments, a non-generic type wins over generic types of the same name (`Result` means `Result`, not `Result<T>`), as in C#.
+5. **Outcome.** One remaining declaration is used. If several remain, the tool lists them (full name, kind, file:line, project) instead of guessing; each listed name can be passed back as is (only declarations with identical full names, such as the same namespace and type declared in two projects, cannot be told apart). If declarations with the name exist but none survives step 3 (for example FindImplementations on a concrete class, or a parameter list that fits no overload), the tool lists those declarations and says why none was used.
 
 ---
 
@@ -123,10 +133,10 @@ Use FindReferences tool with:
 ---
 
 ### 9. GetClassHierarchy
-**Description**: Get complete class hierarchy showing ancestors (base classes/interfaces) and descendants (derived classes)
+**Description**: Show the inheritance tree of one type declared in the solution's source: ancestors (base-class chain excluding `System.Object`, plus declared interfaces, recursively, including framework types) and descendants (types that derive from or directly implement it, recursively). The type is resolved as described in [Resolving a type or member name](#resolving-a-type-or-member-name); a framework type such as `Exception` cannot be the starting point. If several types match, the candidates are listed instead. The Advanced module's version lists only direct ancestors and direct descendants, has no `direction` or `maxDepth` parameters, and ignores `format`.
 
 **Parameters**:
-- `typeName` (string): Type name to analyze hierarchy for
+- `typeName` (string): Simple (`Shape`), qualified (`MyApp.Geometry.Shape`), or nested-type (`Outer.Inner`) type name, matched case-insensitively. Type arguments (`Repository<T>`) select a generic type.
 - `solutionPath` (string): Path to solution file (.sln)
 - `direction` (string, optional): Direction: ancestors, descendants, or both (default: both)
 - `format` (string, optional): Output format: compact, normal, detailed (default: normal)
@@ -135,10 +145,10 @@ Use FindReferences tool with:
 ---
 
 ### 10. FindImplementations
-**Description**: Find all implementations of an interface or abstract class
+**Description**: Find the source types that implement an interface (directly, through a base class, or through an inherited interface) or derive from an abstract class at any depth. The target is resolved as described in [Resolving a type or member name](#resolving-a-type-or-member-name) and must be an interface or abstract class declared in the solution's source, so framework types such as `IDisposable` cannot be the target. If several interfaces or abstract classes match, the candidates are listed instead. An unknown name, and a name that only matches other kinds of declaration (such as a concrete class), are reported as such, so "No implementations found" always means the target exists. For subclasses of a concrete class, use GetClassHierarchy.
 
 **Parameters**:
-- `typeName` (string): Interface or abstract class name to find implementations for
+- `typeName` (string): Simple (`IRepository`), qualified (`MyApp.Data.IRepository`), or nested-type name of an interface or abstract class, matched case-insensitively. Type arguments (`IRepository<T>`) select a generic type.
 - `solutionPath` (string): Path to solution file (.sln)
 - `format` (string, optional): Output format: summary, normal, detailed (default: normal)
 - `includeAbstractImplementations` (bool, optional): Include abstract implementations (default: false)

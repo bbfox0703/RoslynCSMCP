@@ -512,12 +512,17 @@ namespace RoslynMcpServer.Core.Services
             };
         }
 
+        /// <summary>
+        /// Describes the one type or member declared in the solution's source that the name identifies
+        /// (see <see cref="SourceSymbolResolver.ResolveSingleAsync"/> for the accepted name forms).
+        /// </summary>
+        /// <returns>null when no type or member in the source has that name.</returns>
+        /// <exception cref="SymbolResolutionException">The name is ambiguous, or its type arguments or parameter list fit no declaration.</exception>
         public async Task<SymbolInfo?> GetSymbolInfoAsync(string symbolName, string solutionPath)
         {
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
-            var symbols = await FindSymbolsByNameAsync(solution, symbolName);
-            var symbol = symbols.FirstOrDefault();
-            
+            var symbol = await SourceSymbolResolver.ResolveSingleAsync(solution, symbolName, SymbolTarget.TypeOrMember);
+
             if (symbol == null) return null;
             
             var info = new SymbolInfo
@@ -565,6 +570,10 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Find all implementations of an interface or abstract class
         /// </summary>
+        /// <exception cref="SymbolResolutionException">
+        /// No interface or abstract class in the solution's source has that name, or the name is ambiguous
+        /// (an empty list always means the type exists but has no implementations).
+        /// </exception>
         public async Task<List<ImplementationResult>> FindImplementationsAsync(
             string typeName,
             string solutionPath,
@@ -575,14 +584,14 @@ namespace RoslynMcpServer.Core.Services
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
             var results = new List<ImplementationResult>();
 
-            // Find the target interface or abstract class
-            var targetSymbols = await FindSymbolsByNameAsync(solution, typeName);
-            var targetType = targetSymbols.OfType<INamedTypeSymbol>().FirstOrDefault();
+            // Find the target interface or abstract class among the solution's own declarations
+            var targetType = await SourceSymbolResolver.ResolveSingleAsync(
+                solution, typeName, SymbolTarget.InterfaceOrAbstractClass) as INamedTypeSymbol;
 
             if (targetType == null)
             {
                 _logger.LogWarning("Type not found: {TypeName}", typeName);
-                return results;
+                throw SourceSymbolResolver.NotFound(typeName, SymbolTarget.InterfaceOrAbstractClass);
             }
 
             // Check if target is interface or abstract class
@@ -753,6 +762,8 @@ namespace RoslynMcpServer.Core.Services
         /// <summary>
         /// Get complete class hierarchy (ancestors and descendants) for a type
         /// </summary>
+        /// <returns>null when no type in the solution's source has that name.</returns>
+        /// <exception cref="SymbolResolutionException">The name is ambiguous, or only non-type declarations or other arities have it.</exception>
         public async Task<ClassHierarchyResult?> GetClassHierarchyAsync(
             string typeName,
             string solutionPath,
@@ -763,9 +774,9 @@ namespace RoslynMcpServer.Core.Services
 
             var solution = await _codeAnalysis.GetSolutionAsync(solutionPath);
 
-            // Find the target type
-            var targetSymbols = await FindSymbolsByNameAsync(solution, typeName);
-            var targetType = targetSymbols.OfType<INamedTypeSymbol>().FirstOrDefault();
+            // Find the target type among the solution's own declarations
+            var targetType = await SourceSymbolResolver.ResolveSingleAsync(
+                solution, typeName, SymbolTarget.Type) as INamedTypeSymbol;
 
             if (targetType == null)
             {

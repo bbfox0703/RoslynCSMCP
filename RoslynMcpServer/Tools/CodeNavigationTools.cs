@@ -256,9 +256,17 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get detailed information about a specific symbol")]
+        [McpServerTool, Description("""
+            Describe one type or member declared in the solution's source: kind, accessibility, namespace or
+            declaring type, source file and line, attributes, and for methods the return type and parameters or for
+            properties the type. Only source declarations are matched (never framework or package members); nested
+            types and their members are included. Exact-case matches win over case-insensitive ones, and without type
+            arguments a non-generic type wins over generic ones. If several declarations still match (for example
+            overloads, or the same name in different types), nothing is described and the candidates are listed with
+            names to call again with. An unknown name returns 'Symbol not found.'
+            """)]
         public static async Task<string> GetSymbolInfo(
-            [Description("Exact symbol name or full qualified name")] string symbolName,
+            [Description("Simple ('Save'), qualified ('UserService.Save', 'App.Services.UserService.Save'), or nested-type ('Outer.Inner') name, matched case-insensitively. Add type arguments ('Result<T>') to select a generic type and a parameter list ('Save(User, bool)', 'Save()') to select an overload.")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Detail level: summary (minimal), basic (balanced), full (comprehensive). Default: basic")]
             string detailLevel = "basic",
@@ -290,6 +298,10 @@ namespace RoslynMcpServer.Tools
                     "full" => FormatSymbolInfoFull(info),
                     _ => FormatSymbolInfoBasic(info)
                 };
+            }
+            catch (SymbolResolutionException ex)
+            {
+                return ex.Message;
             }
             catch (Exception ex)
             {
@@ -1182,9 +1194,17 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Find all implementations of an interface or abstract class")]
+        [McpServerTool, Description("""
+            Find the source types that implement an interface (directly, through a base class, or through an
+            inherited interface) or derive from an abstract class at any depth. The target must be an interface or
+            abstract class declared in the solution's source, so framework types such as IDisposable cannot be the
+            target. Exact-case matches win over case-insensitive ones; if several interfaces or abstract classes still
+            match, the candidates are listed instead. An unknown name, and a name that only matches other kinds of
+            declaration (such as a concrete class), are reported as such rather than as 'no implementations'. For
+            subclasses of a concrete class, use GetClassHierarchy.
+            """)]
         public static async Task<string> FindImplementations(
-            [Description("Interface or abstract class name to find implementations for")] string typeName,
+            [Description("Simple ('IRepository'), qualified ('App.Data.IRepository'), or nested-type ('Outer.IInner') name of an interface or abstract class, matched case-insensitively. Add type arguments ('IRepository<T>') to select a generic type.")] string typeName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (names only), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
@@ -1220,6 +1240,10 @@ namespace RoslynMcpServer.Tools
                     "normal" => FormatImplementationResults(results, typeName),
                     _ => FormatImplementationResults(results, typeName)
                 };
+            }
+            catch (SymbolResolutionException ex)
+            {
+                return ex.Message;
             }
             catch (Exception ex)
             {
@@ -1565,9 +1589,17 @@ namespace RoslynMcpServer.Tools
             }
         }
 
-        [McpServerTool, Description("Get complete class hierarchy showing ancestors (base classes/interfaces) and descendants (derived classes)")]
+        [McpServerTool, Description("""
+            Show the inheritance tree of one type declared in the solution's source: ancestors (base-class chain
+            excluding System.Object, plus declared interfaces, recursively, including framework types) and
+            descendants (types that derive from or directly implement it, recursively). The starting type must be
+            declared in the solution's source, so a framework type such as Exception cannot be the starting point.
+            Exact-case matches win over case-insensitive ones, and without type arguments a non-generic type wins over
+            generic ones. If several types still match, the candidates are listed instead. For a flat list of an
+            interface's implementers, use FindImplementations.
+            """)]
         public static async Task<string> GetClassHierarchy(
-            [Description("Type name to analyze hierarchy for")] string typeName,
+            [Description("Simple ('Shape'), qualified ('App.Geometry.Shape'), or nested-type ('Outer.Inner') type name, matched case-insensitively. Add type arguments ('Repository<T>') to select a generic type.")] string typeName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: compact (tree structure only), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
@@ -1610,6 +1642,10 @@ namespace RoslynMcpServer.Tools
                     "normal" => FormatClassHierarchy(result, direction),
                     _ => FormatClassHierarchy(result, direction)
                 };
+            }
+            catch (SymbolResolutionException ex)
+            {
+                return ex.Message;
             }
             catch (Exception ex)
             {
