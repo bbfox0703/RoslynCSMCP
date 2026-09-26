@@ -13,7 +13,13 @@ namespace RoslynMcpServer.Dependencies.Tools;
 [McpServerToolType]
 public class DependencyTools
 {
-    [McpServerTool, Description("Analyze project dependencies and symbol usage patterns")]
+    [McpServerTool, Description("""
+        Summarize the solution's dependencies as one aggregated list: every project reference and every referenced
+        assembly except framework ones (System*, Microsoft*, mscorlib, netstandard), with assembly versions, plus
+        circular project-reference cycles. Assembly names are listed, not NuGet package IDs. summary returns only
+        the counts; normal and detailed return the same full list. For per-project edges use GetDependencyGraph; for
+        unused references use FindUnusedDependencies.
+        """)]
     public static async Task<string> AnalyzeDependencies(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
@@ -36,12 +42,18 @@ public class DependencyTools
         }
     }
 
-    [McpServerTool, Description("Get project dependency graph in various formats")]
+    [McpServerTool, Description("""
+        Return the project-reference graph of the solution: text lists each project with the projects it references,
+        then summary counts; mermaid and dot return diagram source with project-to-project edges only. With
+        includePackages, text output also lists each project's referenced non-framework assemblies, including
+        transitive ones, which requires compiling every project. Does not show type-level dependencies or detect
+        cycles; AnalyzeDependencies reports circular references.
+        """)]
     public static async Task<string> GetDependencyGraph(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: text (hierarchical text), mermaid (diagram), json (structured). Default: text")]
+        [Description("Output format: text (per-project list), mermaid, or dot (Graphviz); other values fall back to text. Default: text")]
         string format = "text",
-        [Description("Include package dependencies (default: false)")] bool includePackages = false,
+        [Description("Also list each project's referenced assemblies (NuGet and other, including transitive; framework assemblies excluded). Affects text format only. Default: false")] bool includePackages = false,
         DependencyGraphService graphService = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
@@ -59,7 +71,14 @@ public class DependencyTools
         }
     }
 
-    [McpServerTool, Description("Find unused dependencies (NuGet packages and project references) in the solution")]
+    [McpServerTool, Description("""
+        Flag package and project references that look unused, per project, using heuristics. A PackageReference
+        counts as used when a using directive starts with the package ID (or, for IDs with three or more segments,
+        the ID minus its last segment); a project reference counts as used when any identifier binds to a symbol
+        from that project. Analyzers, build-time packages, test SDKs, packages whose namespaces differ from their
+        IDs, and packages imported only through csproj <Using> items are reported as unused. Normal groups results
+        by project; detailed adds version and reason. A load failure reads as a clean result.
+        """)]
     public static async Task<string> FindUnusedDependencies(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
@@ -90,13 +109,19 @@ public class DependencyTools
         }
     }
 
-    [McpServerTool, Description("Analyze NuGet packages in solution: check for updates, version conflicts, unused packages, and security vulnerabilities")]
+    [McpServerTool, Description("""
+        List the PackageReference items written in each .csproj and report packages referenced at different versions
+        across projects. Versions from Directory.Packages.props or imported props files are not read. Update checks
+        and unused-package results are not included in this module's output, and vulnerability checking is not
+        implemented. Summary gives package and conflict counts; normal lists up to 10 conflicts; detailed lists
+        every package reference with version and project.
+        """)]
     public static async Task<string> AnalyzePackages(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
-        [Description("Check for available updates (default: true)")] bool checkUpdates = true,
-        [Description("Check for version conflicts (default: true)")] bool checkConflicts = true,
+        [Description("Queries nuget.org for newer versions (network access), but the results are not shown in this module's output, so false only saves time. Default: true")] bool checkUpdates = true,
+        [Description("Currently has no effect; version conflicts are always reported. Default: true")] bool checkConflicts = true,
         PackageAnalysisService analyzer = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
@@ -121,7 +146,14 @@ public class DependencyTools
         }
     }
 
-    [McpServerTool, Description("Analyze dependency injection container configuration for common issues (unregistered dependencies, lifetime mismatches)")]
+    [McpServerTool, Description("""
+        Statically compare dependency-injection registrations with constructor parameters across all projects. Only
+        generic AddSingleton, AddScoped, AddTransient, and TryAdd* calls count as registrations; non-generic, keyed,
+        AddHostedService, AddDbContext, and similar forms are ignored. Reports unregistered constructor-parameter
+        types for every class (ILogger, IOptions, IConfiguration, and System.* excepted), duplicate registrations,
+        and captive-lifetime and circular dependencies, the last two only for classes registered under their own
+        concrete type. Expect false positives for classes the container does not create.
+        """)]
     public static async Task<string> AnalyzeDIContainer(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]

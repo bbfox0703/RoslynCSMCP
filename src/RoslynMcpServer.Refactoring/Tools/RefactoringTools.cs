@@ -53,13 +53,20 @@ public class RefactoringTools
         }
     }
 
-    [McpServerTool, Description("Analyze impact of changing a symbol - identify all dependent code, assess risk, and get recommendations before refactoring")]
+    [McpServerTool, Description("""
+        Estimate the impact of changing one symbol by finding every reference to it across the solution and
+        assigning a heuristic risk level from reference count, project count, and public accessibility, not from the
+        planned change. The name matches a type or a member of a top-level type by exact, case-sensitive simple name
+        or full display name such as Ns.Type.Method(int); the first match wins and can be a framework symbol, so
+        prefer the full name. Indirect references are currently always 0, and an unknown name returns an empty
+        report rather than an error.
+        """)]
     public static async Task<string> GetChangeImpact(
-        [Description("Symbol name to analyze impact for")] string symbolName,
+        [Description("Type or member name: exact, case-sensitive simple name, or full display name (Ns.Type, Ns.Type.Member, Ns.Type.Method(int, string)). The first match wins.")] string symbolName,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+        [Description("Output format: summary (risk and counts), normal (counts, impacted project names, recommendations), detailed (symbol details and up to 50 reference locations with their enclosing member). Default: normal")]
         string format = "normal",
-        [Description("Maximum depth for indirect reference analysis (default: 3)")] int maxDepth = 3,
+        [Description("Currently has no effect; indirect reference expansion finds nothing. Default: 3")] int maxDepth = 3,
         ChangeImpactAnalyzer analyzer = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)

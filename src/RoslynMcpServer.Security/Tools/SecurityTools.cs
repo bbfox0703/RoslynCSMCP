@@ -13,14 +13,20 @@ namespace RoslynMcpServer.Security.Tools;
 [McpServerToolType]
 public class SecurityTools
 {
-    [McpServerTool, Description("Find security issues and anti-patterns in the solution (SQL injection, hardcoded secrets, weak crypto, etc.)")]
+    [McpServerTool, Description("""
+        Scan C# source in every project for five categories with pattern checks, not data-flow analysis, so any
+        non-literal argument to Path.Combine or File.Read*/Write* and any runtime value in a SQL-looking string is
+        flagged regardless of origin. Findings are only ever Critical or High. Returns findings grouped by category,
+        up to 10 per category, with severity, title, file, and line. Does not scan configuration files or detect
+        command injection, XSS, or insecure randomness.
+        """)]
     public static async Task<string> FindSecurityIssues(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
-        [Description("Categories to check (comma-separated): sql-injection, secrets, crypto, path-traversal, deserialization, all. Default: all")]
+        [Description("Comma-separated, lowercase: sql-injection (runtime values in SQL-looking strings), secrets (literals assigned to password, secret, apikey, token, or connectionstring names, and connection-string literals), crypto (MD5, SHA1, DES, TripleDES, RC2), path-traversal (non-literal arguments to Path, File, and Directory APIs), deserialization (BinaryFormatter, JavaScriptSerializer, NetDataContractSerializer), or all. Default: all")]
         string categories = "all",
-        [Description("Minimum severity: Critical, High, Medium, Low. Default: Low")] string minSeverity = "Low",
+        [Description("Exact severity to return, not a minimum (case-insensitive): Critical, High, or all. No check emits Medium or Low. Default: all")] string minSeverity = "all",
         SecurityIssueAnalyzer analyzer = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
@@ -88,12 +94,18 @@ public class SecurityTools
         }
     }
 
-    [McpServerTool, Description("Analyze exception handling patterns and detect anti-patterns (empty catch, swallowed exceptions)")]
+    [McpServerTool, Description("""
+        Check every catch clause in the solution: EmptyCatch (no statements, High), SwallowedException (no throw and
+        no logging-like call, Medium), and GenericException for catching exactly System.Exception (Low, always
+        reported). MissingUsing (Medium) flags every local of an IDisposable type, including using var declarations
+        and returned objects, so it is noisy. Line numbers point to the enclosing try statement. Returns findings
+        grouped by issue type, up to 10 per type; only detailed format includes file paths.
+        """)]
     public static async Task<string> AnalyzeExceptionHandling(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
-        [Description("Issue types to check (comma-separated): EmptyCatch, SwallowedException, GenericCatch, MissingUsing, all. Default: all")]
+        [Description("Comma-separated, case-insensitive: EmptyCatch, SwallowedException, MissingUsing, or all. GenericException findings are always included; GenericCatch is accepted as an alias for SwallowedException. Default: all")]
         string issueTypes = "all",
         Phase2AnalysisService analyzer = null!,
         SecurityValidator validator = null!,

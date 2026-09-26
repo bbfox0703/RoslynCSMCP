@@ -43,16 +43,22 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Find references with advanced filtering options to reduce noise and focus on specific usage patterns")]
+    [McpServerTool, Description("""
+        Find source references to every symbol whose simple name equals symbolName, ignoring case (framework members
+        included, declaration sites not included), and narrow them by project name pattern, test-project exclusion,
+        cross-project usage, or write access. The write filter is a syntax heuristic: references inside an
+        assignment or ++/-- expression count, including right-hand-side reads, while out and ref arguments are
+        missed. Output is a total count and code lines grouped by file, up to 10 per file.
+        """)]
     public static async Task<string> FindReferencesFiltered(
-        [Description("Symbol name to find references for")] string symbolName,
+        [Description("Simple (unqualified) symbol name, matched case-insensitively against every declared symbol, including framework members; forms like 'Ns.Type.Member' do not match.")] string symbolName,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Include definitions (default: true)")] bool includeDefinition = true,
-        [Description("Public only (default: false)")] bool publicOnly = false,
-        [Description("Exclude tests (default: false)")] bool excludeTests = false,
-        [Description("Cross-project references only (default: false)")] bool crossProjectOnly = false,
-        [Description("Writes only (default: false)")] bool writesOnly = false,
-        [Description("Filter by project name pattern (optional)")] string? projectFilter = null,
+        [Description("Currently has no effect; declaration sites are never returned.")] bool includeDefinition = true,
+        [Description("If the first symbol matching the name is not declared public, nothing is returned; otherwise no references are filtered out.")] bool publicOnly = false,
+        [Description("Drop references in projects whose name contains 'test' or 'spec' (case-insensitive substring).")] bool excludeTests = false,
+        [Description("Keep only references outside the project that declares the symbol (the first match when several share the name).")] bool crossProjectOnly = false,
+        [Description("Keep only references inside an assignment, compound assignment, or ++/-- expression (syntax heuristic: right-hand-side reads are also kept; out and ref arguments are missed).")] bool writesOnly = false,
+        [Description("Project name wildcard pattern (* and ?), matched case-insensitively against the whole name.")] string? projectFilter = null,
         SymbolSearchService searchService = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -69,9 +75,15 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Find all references to a symbol across multiple solutions")]
+    [McpServerTool, Description("""
+        Find source references to a symbol in each of several solutions and merge them, dropping duplicate
+        locations. symbolName is a simple name matched ignoring case, and every same-named symbol is combined,
+        framework members included; qualified names do not match. Output groups references by project (under
+        headings labeled as solutions), up to 5 file:line locations each. Declaration sites are not included, and a
+        solution that fails to load contributes nothing without an error.
+        """)]
     public static async Task<string> FindReferencesAcrossSolutions(
-        [Description("Symbol name to find references for")] string symbolName,
+        [Description("Simple (unqualified) symbol name, matched case-insensitively against every declared symbol, including framework members; forms like 'Ns.Type.Member' do not match.")] string symbolName,
         [Description("Comma-separated paths to solution files")] string solutionPaths,
         SymbolSearchService searchService = null!,
         McpErrorHandler errorHandler = null!)
@@ -93,11 +105,16 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Get compilation errors and warnings from solution")]
+    [McpServerTool, Description("""
+        Report compiler diagnostics (CS codes) for every project by compiling the solution in memory, without
+        running a build. Analyzer rules (CA, IDE, StyleCop), NuGet and MSBuild errors, and diagnostics without a
+        source location are not included. Results are grouped by severity with file:line, up to 10 per severity (50
+        in detailed) without noting omissions; summary gives only error and warning counts.
+        """)]
     public static async Task<string> GetCompilationErrors(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Minimum severity: Error, Warning, Info. Default: Warning")] string minSeverity = "Warning",
-        [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
+        [Description("Severity to return, case-insensitive: Error, Warning, or Info returns only that severity (not that level and above); All returns every severity, including hidden ones (default: All).")] string minSeverity = "All",
+        [Description("Output format, lowercase: summary (error and warning counts), normal (first 10 per severity), detailed (first 50 per severity). Default: normal")] string format = "normal",
         DiagnosticsService diagnosticsService = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -112,12 +129,18 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Get call hierarchy showing callers and callees for a method")]
+    [McpServerTool, Description("""
+        List the direct callers and direct callees of one method; only one level is returned. The method is found by
+        exact, case-sensitive simple name among method declarations in source, and the first declaration found is
+        used, so other overloads and same-named methods in other types are ignored. Callers show one entry per
+        calling method with a call count. Callees include only calls to methods declared in source, merged across
+        overloads; framework calls, constructors, and property accesses are omitted.
+        """)]
     public static async Task<string> GetCallHierarchy(
-        [Description("Method name to analyze")] string methodName,
+        [Description("Simple method name, case-sensitive, without type or parameters (e.g., 'SaveAsync'); the first matching declaration in the solution is used.")] string methodName,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Direction: callers, callees, both. Default: both")] string direction = "both",
-        [Description("Maximum depth (default: 3)")] int maxDepth = 3,
+        [Description("Direction: both, callers, or callees, in lowercase; other values return no results (default: both).")] string direction = "both",
+        [Description("Currently ignored; only direct callers and callees are returned (default: 3).")] int maxDepth = 3,
         CallHierarchyService callService = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -131,11 +154,17 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Get complete class hierarchy showing ancestors and descendants")]
+    [McpServerTool, Description("""
+        List the immediate relatives of one type: its direct base class (excluding System.Object) and declared
+        interfaces, and the types that directly derive from or implement it, each with full name and kind; deeper
+        levels are not shown. The name is a simple type name matched case-insensitively; qualified names are not
+        accepted, and the first match wins, which may be a framework type. Types deriving from a constructed generic
+        such as Base<int> are not found, and a descendant can be listed more than once.
+        """)]
     public static async Task<string> GetClassHierarchy(
-        [Description("Type name to analyze")] string typeName,
+        [Description("Simple type name without namespace or generic arguments, matched case-insensitively; the first matching type is used.")] string typeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: text, mermaid, json. Default: text")] string format = "text",
+        [Description("Currently ignored; output is always plain text.")] string format = "text",
         SymbolSearchService searchService = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -150,17 +179,23 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Get type signature with members but without implementation")]
+    [McpServerTool, Description("""
+        Return a C#-style outline of one type: its declaration (modifiers, type parameters, base class, interfaces)
+        and member signatures without bodies, grouped as fields, constructors, properties, events, and methods, with
+        <summary> doc text. Nested types, operators, attributes, generic constraints, parameter modifiers, and
+        default values are omitted. The name is matched case-sensitively and the first match in project order wins;
+        a namespace-qualified name can also resolve a framework type.
+        """)]
     public static async Task<string> GetTypeSignature(
-        [Description("Type name to get signature for")] string typeName,
+        [Description("Type name, case-sensitive: simple ('UserService'), namespace-qualified ('MyProject.Services.UserService'), generic ('MyProject.Repo<T>'), or nested metadata form ('MyProject.Outer+Inner').")] string typeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Include private members (default: false)")] bool includePrivate = false,
+        [Description("Include non-public members (private, internal, private protected). When false, only public, protected, and protected internal members are listed (default: false).")] bool includePrivate = false,
         TypeSignatureService signatureService = null!,
         McpErrorHandler errorHandler = null!)
     {
         try
         {
-            return await signatureService.GetTypeSignatureAsync(solutionPath, typeName, includePrivate);
+            return await signatureService.GetTypeSignatureAsync(typeName: typeName, solutionPath: solutionPath, includePrivate: includePrivate);
         }
         catch (Exception ex)
         {
@@ -168,17 +203,24 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Find all usages of a specific attribute across the solution")]
+    [McpServerTool, Description("""
+        Find where an attribute is applied in source across all projects and list each target's name and file:line,
+        grouped by target kind (class, method, property, parameter, and so on), up to 10 per kind; attribute
+        arguments are not shown. The attribute is matched by simple class name, case-insensitively, with or without
+        the Attribute suffix; qualified names do not match, and same-named attributes from different namespaces are
+        combined. Attributes on regular fields, field-like events, and the assembly are not found. For call sites of
+        [Obsolete] members, use FindDeprecatedAPIs.
+        """)]
     public static async Task<string> FindAttributeUsages(
-        [Description("Attribute name (e.g., 'Obsolete', 'Serializable')")] string attributeName,
+        [Description("Attribute class simple name, with or without the 'Attribute' suffix (e.g., 'Obsolete'), matched case-insensitively; namespace-qualified names do not match.")] string attributeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
+        [Description("Currently ignored.")] string format = "normal",
         AttributeSearchService searchService = null!,
         McpErrorHandler errorHandler = null!)
     {
         try
         {
-            var results = await searchService.FindAttributeUsagesAsync(solutionPath, attributeName);
+            var results = await searchService.FindAttributeUsagesAsync(attributeName: attributeName, solutionPath: solutionPath);
             return FormatAttributeUsages(results, attributeName, format);
         }
         catch (Exception ex)
@@ -187,10 +229,17 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Find usages of deprecated/obsolete APIs in the solution")]
+    [McpServerTool, Description("""
+        Find references to symbols marked [Obsolete], declared in the solution or in referenced assemblies, plus any
+        use of six legacy types regardless of attributes: BinaryFormatter, WebRequest, HttpWebRequest,
+        ServicePointManager, MD5, and SHA1. Only simple identifiers are checked, so obsolete constructors and
+        explicitly generic calls such as M<int>() are missed. Returns up to 20 APIs (50 in detailed), each with its
+        obsolete message, usage count, and first 5 locations. A path that fails to load returns the same text as a
+        clean result.
+        """)]
     public static async Task<string> FindDeprecatedAPIs(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
+        [Description("Output format: 'detailed' lists up to 50 APIs instead of 20; 'summary' and 'normal' are identical. Default: normal")] string format = "normal",
         DeprecatedAPIAnalyzer analyzer = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -205,11 +254,17 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Find TODO, FIXME, HACK, and other special comments in code")]
+    [McpServerTool, Description("""
+        Scan every comment in the solution's compiled files, including XML doc comments, for TODO, FIXME, HACK,
+        NOTE, BUG, XXX, OPTIMIZE, and REFACTOR markers. Matching is case-insensitive and ignores word boundaries, so
+        words like 'debug' or 'notes' register as BUG or NOTE, and each comment yields at most one marker. Returns
+        up to 10 entries per marker type with file:line and the first 50 characters of the text. A path that fails
+        to load returns the same text as a clean result.
+        """)]
     public static async Task<string> FindTODOComments(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
-        [Description("Comment types to find: TODO, FIXME, HACK, NOTE, BUG, all. Default: all")] string types = "all",
+        [Description("Currently ignored; all values produce the same output. Default: normal")] string format = "normal",
+        [Description("Comma-separated marker types (case-insensitive): TODO, FIXME, HACK, NOTE, BUG, XXX, OPTIMIZE, REFACTOR, or all. Default: all")] string types = "all",
         TODOCommentAnalyzer analyzer = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -228,11 +283,16 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Find large source files that may need refactoring")]
+    [McpServerTool, Description("""
+        List source files whose physical line count (blank and comment lines included) is at least minLines, largest
+        first, skipping generated files (.g.cs, .designer.cs, .Generated.cs) and obj/bin output. Returns the number
+        of large files, their average and maximum line counts, and the top 20 with type and method counts. A path
+        that fails to load returns the same text as a clean result.
+        """)]
     public static async Task<string> FindLargeFiles(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Minimum lines to consider large (default: 500)")] int minLines = 500,
-        [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
+        [Description("Minimum physical line count, inclusive; values below 100 are replaced with 500 (default: 500)")] int minLines = 500,
+        [Description("Currently ignored; all values produce the same output. Default: normal")] string format = "normal",
         LargeFileAnalyzer analyzer = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -247,11 +307,18 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Analyze API changes between two versions of a solution")]
+    [McpServerTool, Description("""
+        Compare the public types, methods, properties, fields, and events of two solutions (protected and internal
+        members are not compared) and recommend a Major, Minor, or Patch version bump. Removals, signature and
+        property-type changes, base-type changes, and abstract/sealed changes count as breaking. Members are keyed
+        by simple name, so overloads and same-named members in different types collapse and member-level results are
+        unreliable; types are keyed by full name. Lists at most 20 breaking changes and only counts additions; a
+        load failure shows zero counts.
+        """)]
     public static async Task<string> AnalyzeAPIChanges(
         [Description("Path to old version solution file")] string oldSolutionPath,
         [Description("Path to new version solution file")] string newSolutionPath,
-        [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
+        [Description("Currently ignored; all values produce the same output. Default: normal")] string format = "normal",
         APIChangeAnalyzer analyzer = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -267,11 +334,18 @@ public class AdvancedTools
         }
     }
 
-    [McpServerTool, Description("Find common performance anti-patterns and issues in C# code")]
+    [McpServerTool, Description("""
+        Run five name- and syntax-based heuristics over every file in the solution, with frequent false positives:
+        LinqMisuse (every Enumerable.Count() call, nested ToList(), ToList() inside a foreach), StringConcatenation
+        (+= in loops whose target name contains 'string', 'str', or 'text'), SyncOverAsync (any .Result or .Wait
+        inside an async method), DisposableNotDisposed (IDisposable-typed fields; local variables are never
+        reported), and ExceptionHandling (empty catch blocks). Groups issues by type, 5 per type (20 in detailed). A
+        path that fails to load returns the same text as a clean result.
+        """)]
     public static async Task<string> FindPerformanceIssues(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: summary, normal, detailed. Default: normal")] string format = "normal",
-        [Description("Issue types to check (comma-separated): BoxingInLoop, StringConcatInLoop, LinqInLoop, all. Default: all")] string issueTypes = "all",
+        [Description("Output format: 'detailed' shows 20 issues per type with recommendations; 'summary' and 'normal' both show 5. Default: normal")] string format = "normal",
+        [Description("Comma-separated, case-sensitive: LinqMisuse, StringConcatenation, SyncOverAsync, DisposableNotDisposed, ExceptionHandling, or all. Unrecognized names run no checks. Default: all")] string issueTypes = "all",
         PerformanceIssueAnalyzer analyzer = null!,
         McpErrorHandler errorHandler = null!)
     {

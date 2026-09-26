@@ -13,10 +13,16 @@ namespace RoslynMcpServer.Metrics.Tools;
 [McpServerToolType]
 public class MetricsTools
 {
-    [McpServerTool, Description("Get code metrics and statistics for entire solution")]
+    [McpServerTool, Description("""
+        Compute solution-wide totals: projects, .cs files, total, code, comment, and blank lines, and counts of
+        classes, interfaces, structs, enums, methods, and properties. Reports cyclomatic complexity of method
+        declarations (average, maximum, count above 10) and lists the 5 largest types and the 5 most complex
+        methods. Lines are classified by text prefix, and generated files under obj are included. For one file, use
+        GetFileStatistics.
+        """)]
     public static async Task<string> GetCodeMetrics(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+        [Description("Output format: summary and normal produce identical output with a per-project breakdown; detailed omits the per-project breakdown. Default: normal")]
         string format = "normal",
         CodeMetricsService metricsService = null!,
         SecurityValidator validator = null!,
@@ -37,10 +43,16 @@ public class MetricsTools
         }
     }
 
-    [McpServerTool, Description("Get comprehensive statistics for a C# file (LOC, complexity, dependencies, documentation coverage)")]
+    [McpServerTool, Description("""
+        Parse a single .cs file on its own, without its project, and report line counts, element counts, cyclomatic
+        complexity summed over method declarations with the most complex method, using directives, and XML
+        documentation coverage of explicitly public types, methods, and properties. Which sections appear depends on
+        format: normal omits documentation coverage and using directives. For solution-wide totals, use
+        GetCodeMetrics.
+        """)]
     public static async Task<string> GetFileStatistics(
         [Description("Path to C# source file (.cs)")] string filePath,
-        [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
+        [Description("Output format: summary (line counts, total complexity, documentation coverage), normal (line counts, element counts, complexity), detailed (every section, including using directives and file size). Default: normal")]
         string format = "normal",
         FileStatisticsAnalyzer analyzer = null!,
         McpErrorHandler errorHandler = null!)
@@ -68,12 +80,18 @@ public class MetricsTools
         }
     }
 
-    [McpServerTool, Description("Analyze XML documentation coverage for types and members")]
+    [McpServerTool, Description("""
+        Measure XML documentation coverage across the solution for each class, struct, interface, or record in scope
+        and its declared members, counting constructors and property accessors as separate methods. Top-level enums
+        and delegates are skipped, and partial and nested types are counted more than once, which skews totals.
+        Returns the coverage percentage and undocumented symbols grouped by kind, 10 per kind; detailed shows the
+        first 50 with a generated XML-doc stub. A load failure shows 0.0% coverage rather than an error.
+        """)]
     public static async Task<string> AnalyzeDocumentationCoverage(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (with suggestions). Default: normal")]
         string format = "normal",
-        [Description("Scope filter: public (public only), all (all symbols). Default: public")]
+        [Description("public: only public symbols, skipping all members of non-public types; all: every accessibility, including private. Default: public")]
         string scope = "public",
         DocumentationAnalyzer analyzer = null!,
         SecurityValidator validator = null!,

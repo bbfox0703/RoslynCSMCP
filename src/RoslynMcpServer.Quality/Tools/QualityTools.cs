@@ -16,10 +16,16 @@ public class QualityTools
 {
     #region Tool Methods
 
-    [McpServerTool, Description("Analyze code complexity and identify high-complexity methods")]
+    [McpServerTool, Description("""
+        Report ordinary methods (not constructors, accessors, or operators) whose cyclomatic complexity is at or
+        above threshold: 1 plus one per branch, loop, catch, case label, switch-expression arm, when guard, ?:, ??,
+        ?., &&, ||, and pattern and/or, with lambdas and local functions counted toward their enclosing method.
+        Returns every match, grouped by file name and sorted by complexity, with class, method, and line. For method
+        length and parameter counts, use FindCodeSmells.
+        """)]
     public static async Task<string> AnalyzeCodeComplexity(
         [Description("Path to solution file")] string solutionPath,
-        [Description("Complexity threshold (1-10)")] int threshold = 5,
+        [Description("Minimum cyclomatic complexity for a method to be reported, inclusive; any positive integer (default: 5)")] int threshold = 5,
         CodeAnalysisService analysisService = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
@@ -70,14 +76,20 @@ public class QualityTools
         }
     }
 
-    [McpServerTool, Description("Find code smells and anti-patterns in the solution")]
+    [McpServerTool, Description("""
+        Run syntactic heuristics for ten code smells across all projects, including tests and generated code.
+        Method-level smells examine ordinary methods only; DataClumps compares methods within one file, and
+        SpeculativeGenerality flags every abstract class with abstract methods and every single-member interface
+        without counting implementations. FeatureEnvy and MiddleMan are noisy. Returns findings grouped by smell
+        type with severity, symbol, file, and line, up to 10 per type (100 in detailed).
+        """)]
     public static async Task<string> FindCodeSmells(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: summary (counts only), normal (grouped list), detailed (with metrics). Default: normal")]
+        [Description("Output format: summary (severity counts only), normal (up to 10 findings per smell type), detailed (up to 100 per type, adding description and recommendation). Default: normal")]
         string format = "normal",
-        [Description("Comma-separated smell types: LongMethod, LargeClass, LongParameterList, FeatureEnvy, DataClumps, PrimitiveObsession, SwitchStatements, SpeculativeGenerality, MessageChains, MiddleMan. Default: all")]
+        [Description("Comma-separated, case-insensitive: LongMethod (20+ lines), LargeClass (300+ lines or 20+ members), LongParameterList (4+ parameters), FeatureEnvy, DataClumps (same 3+ parameter types on 2+ methods in a file), PrimitiveObsession (3+ parameters of one primitive type), SwitchStatements (5+ sections), SpeculativeGenerality, MessageChains (3+ dots), MiddleMan. Default: all")]
         string smellTypes = "all",
-        [Description("Severity filter: High, Medium, Low, All (default: All)")] string severity = "All",
+        [Description("Return only findings of exactly this severity (case-insensitive): High, Medium, Low, or All (default: All)")] string severity = "All",
         Phase1AnalysisService phase1Service = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -97,14 +109,21 @@ public class QualityTools
         }
     }
 
-    [McpServerTool, Description("Find unused code (dead code) in the solution - types, methods, properties, and fields with no references")]
+    [McpServerTool, Description("""
+        Find types, methods, properties, fields, and events with no reference in the solution other than their own
+        declaration; references from test projects count as usage. Skips static Main, test methods, overrides,
+        explicit interface implementations, instance constructors, Program and Startup types, and
+        serialization-attributed symbols. Code used only through reflection, framework conventions (controller
+        actions, deserialized properties), implicit calls (foreach GetEnumerator, Deconstruct), or callers outside
+        the solution is still reported. Returns items grouped by kind, up to 20 per kind.
+        """)]
     public static async Task<string> FindUnusedCode(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
-        [Description("Scope: private (private members only), internal (internal members only), public (public members only), all (all members). Default: all")]
+        [Description("Declared accessibility to analyze: private, internal, public, or all (those three together); protected members are never analyzed. Default: all")]
         string scope = "all",
-        [Description("Include test projects in analysis (default: false)")] bool includeTests = false,
+        [Description("Also report unused symbols declared in test projects (name contains Test or Spec); references from test projects count as usage either way (default: false)")] bool includeTests = false,
         UnusedCodeAnalyzer analyzer = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
@@ -129,13 +148,18 @@ public class QualityTools
         }
     }
 
-    [McpServerTool, Description("Find duplicate code blocks across the solution")]
+    [McpServerTool, Description("""
+        Find whole methods whose entire declaration (signature and body, including comments) is textually identical
+        after whitespace normalization. Copies with a different name or signature, near-duplicates, and duplicated
+        fragments inside methods are not detected, and a multi-targeted project reports each method as a duplicate
+        of itself. Returns up to 20 groups, largest first, with file, line range, and method name per instance.
+        """)]
     public static async Task<string> FindDuplicateCode(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (counts only), normal (grouped list), detailed (full information). Default: normal")]
         string format = "normal",
-        [Description("Minimum lines to consider duplicate (default: 5)")] int minLines = 5,
-        [Description("Similarity threshold percentage 70-100 (default: 90)")] int similarity = 90,
+        [Description("Minimum line span of a method's whole declaration for it to be compared; values below 3 are replaced with 5 (default: 5)")] int minLines = 5,
+        [Description("Currently has no effect: only exact matches are found (default: 90)")] int similarity = 90,
         DuplicateCodeAnalyzer analyzer = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
@@ -187,14 +211,20 @@ public class QualityTools
         }
     }
 
-    [McpServerTool, Description("Analyze C# naming convention compliance and detect violations")]
+    [McpServerTool, Description("""
+        Check declared names against fixed rules (.editorconfig is ignored): PascalCase without underscores for
+        types, methods, properties, and public or internal fields; an I or T prefix for interfaces and type
+        parameters (a bare T is flagged); _camelCase for private and protected fields; camelCase for parameters.
+        Test and generated code are included, so underscore-style test names are reported. Returns a compliance
+        score and violations grouped by type, up to 10 per type, each with a suggested name and location.
+        """)]
     public static async Task<string> AnalyzeNamingConventions(
         [Description("Path to solution file (.sln)")] string solutionPath,
         [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
         string format = "normal",
-        [Description("Comma-separated violation types to check: InterfaceNaming, TypeNaming, MethodNaming, PropertyNaming, FieldNaming, ParameterNaming, TypeParameterNaming. Default: all")]
+        [Description("Comma-separated, case-sensitive: InterfaceNaming, TypeNaming, MethodNaming, PropertyNaming, FieldNaming, ParameterNaming, TypeParameterNaming, or all. FieldNaming results are reported as ConstantNaming, PrivateFieldNaming, or PublicFieldNaming. Default: all")]
         string? violationTypes = null,
-        [Description("Analysis scope: all, public, internal. Default: all")]
+        [Description("Declared accessibility to check: all; public (public only); internal (internal and public). public and internal skip parameters, type parameters, and private or protected members. Default: all")]
         string scope = "all",
         NamingConventionAnalyzer analyzer = null!,
         SecurityValidator validator = null!,
@@ -206,7 +236,7 @@ public class QualityTools
             if (pathError != null) return pathError;
 
             string[]? violationTypesArray = null;
-            if (!string.IsNullOrWhiteSpace(violationTypes))
+            if (!string.IsNullOrWhiteSpace(violationTypes) && !violationTypes.Equals("all", StringComparison.OrdinalIgnoreCase))
             {
                 violationTypesArray = violationTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             }
