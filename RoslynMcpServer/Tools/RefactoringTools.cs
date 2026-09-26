@@ -108,12 +108,7 @@ namespace RoslynMcpServer.Tools
             else if (score >= 50) output.AppendLine("  Fair — meaningful boilerplate reduction possible.");
             else output.AppendLine("  Poor — significant source generator adoption opportunities.");
 
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine();
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }
@@ -125,7 +120,7 @@ namespace RoslynMcpServer.Tools
                 var ok = new StringBuilder();
                 ok.AppendLine("No source generator opportunities found.");
                 ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-                return ok.ToString();
+                return ok.AppendWarnings(results.Warnings).ToString();
             }
 
             var output = new StringBuilder();
@@ -149,9 +144,7 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine();
             }
 
-            if (results.Warnings.Count > 0)
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }
@@ -159,7 +152,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatSrcGenDetailed(SourceGeneratorAnalysisResults results)
         {
             if (results.TotalOpportunities == 0)
-                return $"No source generator opportunities found. Analyzed {results.AnalyzedProjects} project(s).";
+                return $"No source generator opportunities found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine("# Source Generator Opportunities — Detailed Report");
@@ -205,12 +198,7 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine("## Warnings");
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"- {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }

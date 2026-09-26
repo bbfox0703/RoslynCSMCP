@@ -5,7 +5,8 @@ namespace RoslynMcpServer.Core.Services
 {
     public class SecurityValidator
     {
-        private readonly HashSet<string> _allowedExtensions = new() { ".sln", ".csproj" };
+        // Every tool opens the path with MSBuildWorkspace.OpenSolutionAsync, which accepts solution files only
+        private static readonly HashSet<string> SolutionExtensions = new(StringComparer.OrdinalIgnoreCase) { ".sln", ".slnx" };
 
         // Windows path: C:\path\to\file or D:/path/to/file
         private readonly Regex _windowsPath = new(@"^[a-zA-Z]:[\\/][^<>:|?*]+$", RegexOptions.Compiled);
@@ -45,10 +46,9 @@ namespace RoslynMcpServer.Core.Services
             }
 
             // Check file extension
-            var extension = Path.GetExtension(path);
-            if (!_allowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+            if (!HasSolutionExtension(path))
             {
-                _logger.LogDebug("Path validation failed: extension {Extension} not allowed", extension);
+                _logger.LogDebug("Path validation failed: extension {Extension} not allowed", Path.GetExtension(path));
                 return false;
             }
 
@@ -68,6 +68,12 @@ namespace RoslynMcpServer.Core.Services
                 return false;
             }
         }
+
+        /// <summary>
+        /// Returns true when the path names a solution file (.sln or .slnx)
+        /// </summary>
+        public static bool HasSolutionExtension(string path)
+            => SolutionExtensions.Contains(Path.GetExtension(path));
 
         /// <summary>
         /// Validates a C# source file path (.cs files)

@@ -78,8 +78,8 @@ public class DependencyTools
         a sub-namespace of either; packages without compile assets and known build, test, and analyzer packages are
         never flagged. AnalyzePackages applies the same rule. A project reference counts as used when any identifier
         binds to a symbol from that project in any target framework. Packages whose namespaces differ from their IDs
-        are still reported as unused. Normal groups results by project; detailed adds version and reason. A load
-        failure reads as a clean result.
+        are still reported as unused. Normal groups results by project; detailed adds version and reason. Load and
+        analysis failures are listed as warnings.
         """)]
     public static async Task<string> FindUnusedDependencies(
         [Description("Path to solution file (.sln)")] string solutionPath,
@@ -209,7 +209,7 @@ public class DependencyTools
             output.AppendLine($"Dependency Analysis for {results.ProjectName}:");
             output.AppendLine($"  Dependencies: {results.Dependencies.Count}");
             output.AppendLine($"  Circular: {results.CircularDependencyCount}");
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         output.AppendLine($"# Dependency Analysis: {results.ProjectName}");
@@ -233,7 +233,7 @@ public class DependencyTools
             }
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatUnusedDependenciesSummary(UnusedDependencyResults results)
@@ -243,13 +243,13 @@ public class DependencyTools
         output.AppendLine($"  Total: {results.TotalUnusedDependencies}");
         output.AppendLine($"  NuGet packages: {results.UnusedNuGetPackages}");
         output.AppendLine($"  Project references: {results.UnusedProjectReferences}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatUnusedDependenciesNormal(UnusedDependencyResults results)
     {
         if (!results.UnusedDependencies.Any())
-            return "No unused dependencies found.";
+            return "No unused dependencies found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"Found {results.TotalUnusedDependencies} unused dependencies:\n");
@@ -265,13 +265,13 @@ public class DependencyTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatUnusedDependenciesDetailed(UnusedDependencyResults results)
     {
         if (!results.UnusedDependencies.Any())
-            return "No unused dependencies found.";
+            return "No unused dependencies found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"# Unused Dependencies Analysis");
@@ -288,7 +288,7 @@ public class DependencyTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatPackageAnalysisSummary(PackageAnalysisResults results)
@@ -301,9 +301,7 @@ public class DependencyTools
         output.AppendLine($"  Updates available: {results.AvailableUpdates.Count}");
         output.AppendLine($"  Version conflicts: {results.ConflictingPackages}");
         output.AppendLine($"  Unused packages: {results.UnusedPackagesCount}");
-        if (results.Warnings.Any())
-            output.AppendLine($"  Warnings: {results.Warnings.Count}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatPackageAnalysisNormal(PackageAnalysisResults results)
@@ -313,7 +311,7 @@ public class DependencyTools
         output.AppendLine($"Total: {results.TotalPackages} packages, {results.UniquePackages} unique\n");
 
         AppendPackageFindings(output, results, limit: 10);
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatPackageAnalysisDetailed(PackageAnalysisResults results)
@@ -330,7 +328,7 @@ public class DependencyTools
             output.AppendLine($"  - {pkg.Name} v{pkg.Version} ({pkg.ProjectName})");
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static void AppendPackageFindings(StringBuilder output, PackageAnalysisResults results, int limit)
@@ -391,16 +389,6 @@ public class DependencyTools
             if (more.Length > 0) output.AppendLine(more);
             output.AppendLine();
         }
-
-        if (results.Warnings.Any())
-        {
-            output.AppendLine("## Warnings:");
-            foreach (var warning in results.Warnings)
-            {
-                output.AppendLine($"  - {warning.Context}: {warning.Message}");
-            }
-            output.AppendLine();
-        }
     }
 
     private static string FormatDIContainerSummary(DIContainerResults results)
@@ -412,13 +400,13 @@ public class DependencyTools
         output.AppendLine($"  Unregistered: {results.UnregisteredCount}");
         output.AppendLine($"  Lifetime mismatches: {results.LifetimeMismatchCount}");
         output.AppendLine($"  Circular: {results.CircularDependencyCount}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatDIContainerNormal(DIContainerResults results)
     {
         if (!results.Issues.Any())
-            return "No DI container issues found.";
+            return "No DI container issues found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"Found {results.TotalIssues} DI container issues in {results.Applications.Count} applications:\n");
@@ -437,13 +425,13 @@ public class DependencyTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatDIContainerDetailed(DIContainerResults results)
     {
         if (!results.Issues.Any())
-            return "No DI container issues found.";
+            return "No DI container issues found.".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine($"# DI Container Analysis");
@@ -462,7 +450,7 @@ public class DependencyTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     #endregion

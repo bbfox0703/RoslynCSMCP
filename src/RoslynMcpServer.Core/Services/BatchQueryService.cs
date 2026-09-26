@@ -25,6 +25,7 @@ namespace RoslynMcpServer.Core.Services
         private readonly DependencyGraphService _dependencyGraphService;
         private readonly CallHierarchyService _callHierarchyService;
         private readonly CodeAnalysisService _codeAnalysisService;
+        private readonly SecurityValidator _securityValidator;
         private readonly ILogger<BatchQueryService> _logger;
 
         public BatchQueryService(
@@ -33,6 +34,7 @@ namespace RoslynMcpServer.Core.Services
             DependencyGraphService dependencyGraphService,
             CallHierarchyService callHierarchyService,
             CodeAnalysisService codeAnalysisService,
+            SecurityValidator securityValidator,
             ILogger<BatchQueryService> logger)
         {
             _symbolSearchService = symbolSearchService;
@@ -40,6 +42,7 @@ namespace RoslynMcpServer.Core.Services
             _dependencyGraphService = dependencyGraphService;
             _callHierarchyService = callHierarchyService;
             _codeAnalysisService = codeAnalysisService;
+            _securityValidator = securityValidator;
             _logger = logger;
         }
 
@@ -88,6 +91,17 @@ namespace RoslynMcpServer.Core.Services
         {
             try
             {
+                var solutionPath = GetParameter<string>(query.Parameters, "solutionPath");
+                if (!string.IsNullOrEmpty(solutionPath) && !_securityValidator.ValidateSolutionPath(solutionPath))
+                {
+                    return new BatchQueryResult
+                    {
+                        Tool = query.Tool,
+                        Success = false,
+                        Result = $"Error: Invalid solution path '{solutionPath}'. Expected an existing absolute path to a .sln or .slnx file."
+                    };
+                }
+
                 var result = query.Tool.ToLower() switch
                 {
                     "searchsymbols" => await ExecuteSearchSymbols(query.Parameters),

@@ -306,8 +306,7 @@ public class TypeHierarchyTests : IDisposable
     [InlineData("detailed")]
     public async Task AdvancedGetClassHierarchy_PrintsNestedLevels(string format)
     {
-        var output = await AdvancedModuleTools.GetClassHierarchy(
-            "RepositoryBase", SolutionPath, format, _service, new McpErrorHandler(NullLogger<McpErrorHandler>.Instance));
+        var output = await AdvancedClassHierarchy("RepositoryBase", format);
 
         var lines = output.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
         var userRepositoryLine = lines.Single(l => l.Contains("UserRepository") && !l.Contains("Cached"));
@@ -321,11 +320,9 @@ public class TypeHierarchyTests : IDisposable
     [Fact]
     public async Task AdvancedGetClassHierarchy_FormatsDiffer()
     {
-        var errorHandler = new McpErrorHandler(NullLogger<McpErrorHandler>.Instance);
-
-        var compact = await AdvancedModuleTools.GetClassHierarchy("RepositoryBase", SolutionPath, "compact", _service, errorHandler);
-        var normal = await AdvancedModuleTools.GetClassHierarchy("RepositoryBase", SolutionPath, "normal", _service, errorHandler);
-        var detailed = await AdvancedModuleTools.GetClassHierarchy("RepositoryBase", SolutionPath, "detailed", _service, errorHandler);
+        var compact = await AdvancedClassHierarchy("RepositoryBase", "compact");
+        var normal = await AdvancedClassHierarchy("RepositoryBase", "normal");
+        var detailed = await AdvancedClassHierarchy("RepositoryBase", "detailed");
 
         compact.Should().Contain("- UserRepository").And.NotContain("App.UserRepository");
         normal.Should().Contain("App.UserRepository (Class) @ App.cs:");
@@ -350,6 +347,18 @@ public class TypeHierarchyTests : IDisposable
         services.AddSingleton<CodeAnalysisService>(_codeAnalysis);
         services.AddSingleton(_service);
         return services.BuildServiceProvider();
+    }
+
+    // The tool validates that the solution file exists, so serve the in-memory solution from a real path
+    private async Task<string> AdvancedClassHierarchy(string typeName, string format)
+    {
+        using var placeholder = new PlaceholderSolutionFile();
+        _codeAnalysis.Register(placeholder.FilePath, await _codeAnalysis.GetSolutionAsync(SolutionPath));
+
+        return await AdvancedModuleTools.GetClassHierarchy(
+            typeName, placeholder.FilePath, format, _service,
+            new SecurityValidator(NullLogger<SecurityValidator>.Instance),
+            new McpErrorHandler(NullLogger<McpErrorHandler>.Instance));
     }
 
     private static int Indentation(string line) => line.Length - line.TrimStart().Length;

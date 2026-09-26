@@ -15,14 +15,13 @@ public class MetricsTools
 {
     [McpServerTool, Description("""
         Compute solution-wide totals: projects, .cs files, total, code, comment, and blank lines, and counts of
-        classes, interfaces, structs, enums, methods, and properties. Reports cyclomatic complexity of method
-        declarations (average, maximum, count above 10) and lists the 5 largest types and the 5 most complex
-        methods. Lines are classified by text prefix, and generated files under obj are included. For one file, use
-        GetFileStatistics.
+        classes, interfaces, structs, enums, methods, and properties, plus cyclomatic complexity of method
+        declarations (average, maximum, count above 10). Lines are classified by text prefix, and generated files
+        under obj are included. For one file, use GetFileStatistics.
         """)]
     public static async Task<string> GetCodeMetrics(
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: summary and normal produce identical output with a per-project breakdown; detailed omits the per-project breakdown. Default: normal")]
+        [Description("Output format: summary (totals only), normal (adds the 5 largest types, the 5 most complex methods, and a per-project breakdown), detailed (also adds per-namespace and per-type breakdowns, largest first, up to 30 namespaces and 20 types). Default: normal")]
         string format = "normal",
         CodeMetricsService metricsService = null!,
         SecurityValidator validator = null!,
@@ -34,8 +33,12 @@ public class MetricsTools
             if (pathError != null) return pathError;
 
             // GetMetricsAsync returns formatted string directly
-            var groupBy = format.ToLowerInvariant() == "detailed" ? "namespace" : "project";
-            return await metricsService.GetMetricsAsync(solutionPath, groupBy);
+            return format.ToLowerInvariant() switch
+            {
+                "summary" => await metricsService.GetMetricsAsync(solutionPath, "none", summaryOnly: true),
+                "detailed" => await metricsService.GetMetricsAsync(solutionPath, "project,namespace,type"),
+                _ => await metricsService.GetMetricsAsync(solutionPath, "project")
+            };
         }
         catch (Exception ex)
         {
@@ -85,7 +88,7 @@ public class MetricsTools
         and its declared members, counting constructors and property accessors as separate methods. Top-level enums
         and delegates are skipped, and partial and nested types are counted more than once, which skews totals.
         Returns the coverage percentage and undocumented symbols grouped by kind, 10 per kind; detailed shows the
-        first 50 with a generated XML-doc stub. A load failure shows 0.0% coverage rather than an error.
+        first 50 with a generated XML-doc stub. Load and analysis failures are listed as warnings.
         """)]
     public static async Task<string> AnalyzeDocumentationCoverage(
         [Description("Path to solution file (.sln)")] string solutionPath,
@@ -215,12 +218,7 @@ public class MetricsTools
         else if (score >= 50) output.AppendLine("  Fair — several allocation hotspots to address.");
         else output.AppendLine("  Poor — significant allocation overhead requiring attention.");
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine();
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -232,7 +230,7 @@ public class MetricsTools
             var ok = new StringBuilder();
             ok.AppendLine("No memory allocation issues found.");
             ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-            return ok.ToString();
+            return ok.AppendWarnings(results.Warnings).ToString();
         }
 
         var output = new StringBuilder();
@@ -257,9 +255,7 @@ public class MetricsTools
             output.AppendLine();
         }
 
-        if (results.Warnings.Count > 0)
-            foreach (var w in results.Warnings)
-                output.AppendLine($"Warning: {w.Message}");
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -267,7 +263,7 @@ public class MetricsTools
     private static string FormatMemoryDetailed(MemoryAllocationResults results)
     {
         if (results.TotalIssues == 0)
-            return $"No memory allocation issues found. Analyzed {results.AnalyzedProjects} project(s).";
+            return $"No memory allocation issues found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
 
         var output = new StringBuilder();
         output.AppendLine("# Memory Allocation Analysis — Detailed Report");
@@ -314,12 +310,7 @@ public class MetricsTools
             }
         }
 
-        if (results.Warnings.Count > 0)
-        {
-            output.AppendLine("## Warnings");
-            foreach (var w in results.Warnings)
-                output.AppendLine($"- {w.Message}");
-        }
+        output.AppendWarnings(results.Warnings);
 
         return output.ToString();
     }
@@ -327,7 +318,7 @@ public class MetricsTools
     private static string FormatFileStatisticsSummary(FileStatisticsResults results)
     {
         if (results.Statistics == null)
-            return "Unable to analyze file statistics.";
+            return "Unable to analyze file statistics.".WithWarnings(results.Warnings);
 
         var stats = results.Statistics;
         var output = new StringBuilder();
@@ -335,13 +326,13 @@ public class MetricsTools
         output.AppendLine($"  Lines: {stats.TotalLines} (Code: {stats.CodeLines}, Comments: {stats.CommentLines})");
         output.AppendLine($"  Complexity: {stats.CyclomaticComplexity}");
         output.AppendLine($"  Doc coverage: {stats.DocumentationCoverage:F1}%");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatFileStatisticsNormal(FileStatisticsResults results)
     {
         if (results.Statistics == null)
-            return "Unable to analyze file statistics.";
+            return "Unable to analyze file statistics.".WithWarnings(results.Warnings);
 
         var stats = results.Statistics;
         var output = new StringBuilder();
@@ -365,13 +356,13 @@ public class MetricsTools
         if (!string.IsNullOrEmpty(stats.MostComplexMethod))
             output.AppendLine($"  Most complex: {stats.MostComplexMethod}");
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatFileStatisticsDetailed(FileStatisticsResults results)
     {
         if (results.Statistics == null)
-            return "Unable to analyze file statistics.";
+            return "Unable to analyze file statistics.".WithWarnings(results.Warnings);
 
         var stats = results.Statistics;
         var output = new StringBuilder();
@@ -415,7 +406,7 @@ public class MetricsTools
                 output.AppendLine($"    - {ns}");
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatDocCoverageSummary(DocumentationCoverageResults results)
@@ -425,7 +416,7 @@ public class MetricsTools
         output.AppendLine($"  Coverage: {results.CoveragePercentage:F1}%");
         output.AppendLine($"  Documented: {results.DocumentedSymbols}/{results.TotalSymbols}");
         output.AppendLine($"  Undocumented: {results.UndocumentedCount}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatDocCoverageNormal(DocumentationCoverageResults results)
@@ -451,7 +442,7 @@ public class MetricsTools
             }
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     private static string FormatDocCoverageDetailed(DocumentationCoverageResults results)
@@ -483,7 +474,7 @@ public class MetricsTools
             }
         }
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
     #endregion

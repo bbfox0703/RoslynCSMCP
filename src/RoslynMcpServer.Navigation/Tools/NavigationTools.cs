@@ -745,7 +745,7 @@ public class NavigationTools
             output.AppendLine($"  {type.Kind}: {type.Name} ({type.Members.Count} members)");
         }
 
-        return output.ToString();
+        return output.AppendWarnings(outline.Warnings).ToString();
     }
 
     private static string FormatFileOutlineNormal(FileOutlineResult outline, int maxMembers, bool includeMembers, bool includeDocumentation)
@@ -775,7 +775,7 @@ public class NavigationTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(outline.Warnings).ToString();
     }
 
     private static string FormatFileOutlineDetailed(FileOutlineResult outline, int maxMembers, bool includeDocumentation)
@@ -818,7 +818,7 @@ public class NavigationTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        return output.AppendWarnings(outline.Warnings).ToString();
     }
 
     private static string FormatImplementationResults(List<ImplementationResult> results, string typeName)

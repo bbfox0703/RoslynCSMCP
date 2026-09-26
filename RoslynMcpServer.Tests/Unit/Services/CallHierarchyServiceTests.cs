@@ -150,8 +150,14 @@ public class CallHierarchyServiceTests : IDisposable
     [Fact]
     public async Task AdvancedTool_PassesMaxDepthThrough()
     {
+        // The tool validates that the solution file exists, so serve the in-memory solution from a real path
+        using var placeholder = new PlaceholderSolutionFile();
+        _codeAnalysis.Register(placeholder.FilePath, await _codeAnalysis.GetSolutionAsync(SolutionPath));
+
         var output = await AdvancedModuleTools.GetCallHierarchy(
-            "Leaf", SolutionPath, "callers", 3, _service, new McpErrorHandler(NullLogger<McpErrorHandler>.Instance));
+            "Leaf", placeholder.FilePath, "callers", 3, _service,
+            new SecurityValidator(NullLogger<SecurityValidator>.Instance),
+            new McpErrorHandler(NullLogger<McpErrorHandler>.Instance));
 
         output.Should().Contain("Service.Root");
     }

@@ -166,12 +166,7 @@ namespace RoslynMcpServer.Tools
             else if (score >= 75) output.AppendLine("  Good — minor IPC improvements possible.");
             else if (score >= 50) output.AppendLine("  Fair — several IPC reliability issues to address.");
             else output.AppendLine("  Poor — significant IPC risks requiring attention.");
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine();
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
             return output.ToString();
         }
 
@@ -182,7 +177,7 @@ namespace RoslynMcpServer.Tools
                 var ok = new StringBuilder();
                 ok.AppendLine("No IPC issues found.");
                 ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-                return ok.ToString();
+                return ok.AppendWarnings(results.Warnings).ToString();
             }
             var output = new StringBuilder();
             output.AppendLine($"Found {results.TotalIssues} IPC issue(s) " +
@@ -204,16 +199,14 @@ namespace RoslynMcpServer.Tools
                     output.AppendLine($"  ... and {group.Count() - 10} more (use format=detailed to see all)");
                 output.AppendLine();
             }
-            if (results.Warnings.Count > 0)
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
+            output.AppendWarnings(results.Warnings);
             return output.ToString();
         }
 
         private static string FormatIpcDetailed(IpcAnalysisResults results)
         {
             if (results.TotalIssues == 0)
-                return $"No IPC issues found. Analyzed {results.AnalyzedProjects} project(s).";
+                return $"No IPC issues found. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
             var output = new StringBuilder();
             output.AppendLine("# IPC Pattern Analysis — Detailed Report");
             output.AppendLine();
@@ -255,12 +248,7 @@ namespace RoslynMcpServer.Tools
                     output.AppendLine();
                 }
             }
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine("## Warnings");
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"- {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
             return output.ToString();
         }
 
@@ -296,12 +284,7 @@ namespace RoslynMcpServer.Tools
             else
                 output.AppendLine("No high-severity patterns found. Review medium/low findings for completeness.");
 
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine();
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }
@@ -313,7 +296,7 @@ namespace RoslynMcpServer.Tools
                 var ok = new StringBuilder();
                 ok.AppendLine("No integrity/protection patterns detected.");
                 ok.AppendLine($"Analyzed {results.AnalyzedProjects} project(s), {results.AnalyzedFiles} file(s).");
-                return ok.ToString();
+                return ok.AppendWarnings(results.Warnings).ToString();
             }
 
             var output = new StringBuilder();
@@ -338,9 +321,7 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine();
             }
 
-            if (results.Warnings.Count > 0)
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"Warning: {w.Message}");
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }
@@ -348,7 +329,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatIntegrityDetailed(IntegrityAnalysisResults results)
         {
             if (results.TotalIssues == 0)
-                return $"No integrity/protection patterns detected. Analyzed {results.AnalyzedProjects} project(s).";
+                return $"No integrity/protection patterns detected. Analyzed {results.AnalyzedProjects} project(s).".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine("# Integrity Pattern Analysis — Detailed Report");
@@ -388,12 +369,7 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            if (results.Warnings.Count > 0)
-            {
-                output.AppendLine("## Warnings");
-                foreach (var w in results.Warnings)
-                    output.AppendLine($"- {w.Message}");
-            }
+            output.AppendWarnings(results.Warnings);
 
             return output.ToString();
         }

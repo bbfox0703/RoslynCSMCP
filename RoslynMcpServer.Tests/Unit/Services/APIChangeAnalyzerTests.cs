@@ -179,11 +179,18 @@ public class APIChangeAnalyzerTests : IDisposable
     [Fact]
     public async Task AdvancedTool_LoadFailure_IsReportedAsWarning()
     {
-        var output = await AdvancedModuleTools.AnalyzeAPIChanges(
-            OldPath, "InMemory/Missing.sln", "normal", _analyzer, new McpErrorHandler(NullLogger<McpErrorHandler>.Instance));
+        // Both files exist so path validation passes; only the old one has a solution, so loading the new one fails
+        using var oldFile = new PlaceholderSolutionFile();
+        using var missing = new PlaceholderSolutionFile();
+        _codeAnalysis.Register(oldFile.FilePath, await _codeAnalysis.GetSolutionAsync(OldPath));
 
-        output.Should().Contain("## Warnings:");
-        output.Should().Contain("Missing.sln");
+        var output = await AdvancedModuleTools.AnalyzeAPIChanges(
+            oldFile.FilePath, missing.FilePath, "normal", _analyzer,
+            new SecurityValidator(NullLogger<SecurityValidator>.Instance),
+            new McpErrorHandler(NullLogger<McpErrorHandler>.Instance));
+
+        output.Should().Contain("Warnings (");
+        output.Should().Contain(missing.FilePath);
     }
 
     private static APIChange Single(APIChangeResults results, string changeType, string fullSymbolName) =>

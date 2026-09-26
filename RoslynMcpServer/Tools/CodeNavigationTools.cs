@@ -336,13 +336,14 @@ namespace RoslynMcpServer.Tools
         [McpServerTool, Description("""
             Compute solution-wide totals: projects, .cs files, total, code, comment, and blank lines, and counts of
             classes, interfaces, structs, enums, methods, and properties. Reports cyclomatic complexity of method
-            declarations (average, maximum, count above 10) and lists the 5 largest types and the 5 most complex
-            methods. Lines are classified by text prefix, and generated files under obj are included. For one file use
-            GetFileStatistics; to list methods above a complexity threshold use AnalyzeCodeComplexity.
+            declarations (average, maximum, count above 10), lists the 5 largest types and the 5 most complex methods,
+            then appends the breakdowns selected by groupBy. Lines are classified by text prefix, and generated files
+            under obj are included. For one file use GetFileStatistics; to list methods above a complexity threshold
+            use AnalyzeCodeComplexity.
             """)]
         public static async Task<string> GetCodeMetrics(
             [Description("Path to solution file (.sln)")] string solutionPath,
-            [Description("'project' appends a per-project breakdown of files, lines, classes, and methods; any other value omits it (namespace and type grouping are not implemented). Default: project")] string groupBy = "project",
+            [Description("Breakdowns to append, comma-separated: project (files, lines, classes, methods per project), namespace (files, types, lines inside types, methods per namespace; up to 30, largest first), type (lines, methods, properties, and maximum method complexity per type declaration, partial parts listed separately; up to 20, largest first), or none. Other values return an error. Default: project")] string groupBy = "project",
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -351,6 +352,11 @@ namespace RoslynMcpServer.Tools
                 if (!validator?.ValidateSolutionPath(solutionPath) ?? false)
                 {
                     return "Error: Invalid solution path provided.";
+                }
+
+                if (!CodeMetricsService.TryParseGroupBy(groupBy, out _))
+                {
+                    return $"Error: {CodeMetricsService.GroupByErrorMessage}.";
                 }
 
                 var metricsService = serviceProvider?.GetService<CodeMetricsService>();
@@ -1236,8 +1242,9 @@ namespace RoslynMcpServer.Tools
         [McpServerTool, Description("""
             Report compiler diagnostics (CS codes) for every project by compiling the solution in memory, without
             running a build. Analyzer rules (CA, IDE, StyleCop), NuGet and MSBuild errors, and diagnostics without a
-            source location are not included, and projects that fail to load are skipped silently. Results are grouped
-            by severity and then project; normal mode shows up to 10 per project per severity with the source line.
+            source location are not included. Projects that fail to load or compile are reported as warnings, so an
+            empty result is not proof that the solution builds. Results are grouped by severity and then project;
+            normal mode shows up to 10 per project per severity with the source line.
             """)]
         public static async Task<string> GetCompilationErrors(
             [Description("Path to solution file (.sln)")] string solutionPath,
@@ -2289,7 +2296,11 @@ namespace RoslynMcpServer.Tools
             var errors = errorResults.Errors;
 
             if (!errors.Any())
-                return $"No compilation {severityFilter.ToLower()} issues found. Solution builds successfully!";
+            {
+                return errorResults.Warnings.Any()
+                    ? $"No compilation {severityFilter.ToLower()} issues found in the {errorResults.AnalyzedProjects} projects analyzed, but some projects could not be loaded or analyzed, so this does not mean the solution builds.".WithWarnings(errorResults.Warnings)
+                    : $"No compilation {severityFilter.ToLower()} issues found. Solution builds successfully!";
+            }
 
             var output = new StringBuilder();
             output.AppendLine($"**Compilation Diagnostics** (Severity: {severityFilter})\n");
@@ -2364,7 +2375,11 @@ namespace RoslynMcpServer.Tools
             var errors = errorResults.Errors;
 
             if (!errors.Any())
-                return $"✅ No {severityFilter.ToLower()} issues ({errorResults.AnalyzedProjects} projects OK)";
+            {
+                return errorResults.Warnings.Any()
+                    ? $"No {severityFilter.ToLower()} issues in {errorResults.AnalyzedProjects} projects analyzed; some projects could not be loaded or analyzed.".WithWarnings(errorResults.Warnings)
+                    : $"✅ No {severityFilter.ToLower()} issues ({errorResults.AnalyzedProjects} projects OK)";
+            }
 
             var output = new StringBuilder();
             output.AppendLine($"Issues: {errors.Count} ({errorResults.AnalyzedProjects} projects, {errorResults.FailedProjects} failed)\n");
@@ -2401,7 +2416,7 @@ namespace RoslynMcpServer.Tools
             var warningCount = errors.Count(e => e.Severity == "Warning");
             output.AppendLine($"\nTotal: {errorCount} errors, {warningCount} warnings");
 
-            return output.ToString();
+            return output.AppendWarnings(errorResults.Warnings).ToString();
         }
 
         // Detailed mode: Comprehensive information with code snippets
@@ -2410,7 +2425,12 @@ namespace RoslynMcpServer.Tools
             var errors = errorResults.Errors;
 
             if (!errors.Any())
-                return $"✅ No compilation {severityFilter.ToLower()} issues found. Solution builds successfully!\n\n**Analysis Summary:**\n  • Projects analyzed: {errorResults.AnalyzedProjects}\n  • Projects failed: {errorResults.FailedProjects}\n  • Diagnostics failed: {errorResults.FailedDiagnostics}";
+            {
+                var headline = errorResults.Warnings.Any()
+                    ? $"No compilation {severityFilter.ToLower()} issues found in the projects analyzed, but some projects could not be loaded or analyzed, so this does not mean the solution builds."
+                    : $"✅ No compilation {severityFilter.ToLower()} issues found. Solution builds successfully!";
+                return $"{headline}\n\n**Analysis Summary:**\n  • Projects analyzed: {errorResults.AnalyzedProjects}\n  • Projects failed: {errorResults.FailedProjects}\n  • Diagnostics failed: {errorResults.FailedDiagnostics}".WithWarnings(errorResults.Warnings);
+            }
 
             var output = new StringBuilder();
             output.AppendLine($"**Compilation Diagnostics** (Severity: {severityFilter})\n");
@@ -2502,7 +2522,7 @@ namespace RoslynMcpServer.Tools
             if (!outline.Types.Any())
             {
                 output.AppendLine("No types found.");
-                return output.ToString();
+                return output.AppendWarnings(outline.Warnings).ToString();
             }
 
             foreach (var type in outline.Types)
@@ -2551,7 +2571,7 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine();
             }
 
-            return output.ToString();
+            return output.AppendWarnings(outline.Warnings).ToString();
         }
 
         // Normal mode: Balanced information
@@ -2639,7 +2659,7 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine("No types found in this file.");
             }
 
-            return output.ToString();
+            return output.AppendWarnings(outline.Warnings).ToString();
         }
 
         // Detailed mode: Comprehensive information (original behavior)
@@ -3372,7 +3392,7 @@ namespace RoslynMcpServer.Tools
                 output.AppendLine();
             }
 
-            return output.ToString();
+            return output.AppendWarnings(searchResults.Warnings).ToString();
         }
 
         // Detailed mode: Comprehensive information with all details
@@ -3616,7 +3636,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatUnusedCodeSummary(UnusedCodeResults results)
         {
             if (!results.UnusedItems.Any())
-                return $"✅ No unused code found ({results.AnalyzedProjects} projects analyzed)";
+                return $"✅ No unused code found ({results.AnalyzedProjects} projects analyzed)".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"Unused code: {results.UnusedItems.Count} items ({results.AnalyzedProjects} projects, {results.FailedProjects} failed)\n");
@@ -3669,14 +3689,14 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         // Normal mode: Balanced format with grouped listings
         private static string FormatUnusedCodeNormal(UnusedCodeResults results)
         {
             if (!results.UnusedItems.Any())
-                return $"✅ No unused code found. All symbols have references!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}";
+                return $"✅ No unused code found. All symbols have references!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Unused Code Analysis**\n");
@@ -3776,7 +3796,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatUnusedCodeDetailed(UnusedCodeResults results)
         {
             if (!results.UnusedItems.Any())
-                return $"✅ No unused code found. All symbols have references!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Symbols analyzed: {results.AnalyzedSymbols}\n  • Projects failed: {results.FailedProjects}";
+                return $"✅ No unused code found. All symbols have references!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Symbols analyzed: {results.AnalyzedSymbols}\n  • Projects failed: {results.FailedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Unused Code Analysis (Detailed)**\n");
@@ -3924,7 +3944,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatUnusedDependenciesSummary(UnusedDependencyResults results)
         {
             if (!results.UnusedDependencies.Any())
-                return $"✅ No unused dependencies found ({results.AnalyzedProjects} projects analyzed)";
+                return $"✅ No unused dependencies found ({results.AnalyzedProjects} projects analyzed)".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"Unused dependencies: {results.TotalUnusedDependencies} items ({results.AnalyzedProjects} projects, {results.FailedProjects} failed)\n");
@@ -3955,14 +3975,14 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         // Normal mode: Balanced format with grouped listings
         private static string FormatUnusedDependenciesNormal(UnusedDependencyResults results)
         {
             if (!results.UnusedDependencies.Any())
-                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}";
+                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Unused Dependencies Analysis**\n");
@@ -4037,7 +4057,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatUnusedDependenciesDetailed(UnusedDependencyResults results)
         {
             if (!results.UnusedDependencies.Any())
-                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}";
+                return $"✅ No unused dependencies found!\n\n**Analysis Summary:**\n  • Projects analyzed: {results.AnalyzedProjects}\n  • Projects failed: {results.FailedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Unused Dependencies Analysis (Detailed)**\n");
@@ -4132,7 +4152,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatSecurityIssuesSummary(SecurityIssueResults results)
         {
             if (!results.Issues.Any())
-                return $"✅ No security issues found ({results.AnalyzedFiles} files analyzed)";
+                return $"✅ No security issues found ({results.AnalyzedFiles} files analyzed)".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"Security issues: {results.TotalIssues} found ({results.AnalyzedFiles} files, {results.AnalyzedProjects} projects)\n");
@@ -4183,14 +4203,14 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         // Normal mode: Balanced format with grouped listings
         private static string FormatSecurityIssuesNormal(SecurityIssueResults results)
         {
             if (!results.Issues.Any())
-                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Security Issues Analysis**\n");
@@ -4297,7 +4317,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatSecurityIssuesDetailed(SecurityIssueResults results)
         {
             if (!results.Issues.Any())
-                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+                return $"✅ No security issues found!\n\n**Analysis Summary:**\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Security Issues Analysis (Detailed)**\n");
@@ -4452,7 +4472,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDuplicateCodeSummary(DuplicateCodeResults results)
         {
             if (!results.DuplicateBlocks.Any())
-                return $"✅ No duplicate code found ({results.AnalyzedMethods} methods analyzed)";
+                return $"✅ No duplicate code found ({results.AnalyzedMethods} methods analyzed)".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"Duplicate code: {results.TotalDuplicateBlocks} blocks, {results.TotalDuplicateInstances} instances ({results.AnalyzedMethods} methods analyzed)\n");
@@ -4491,14 +4511,14 @@ namespace RoslynMcpServer.Tools
                 }
             }
 
-            return output.ToString();
+            return output.AppendWarnings(results.Warnings).ToString();
         }
 
         // Normal mode: Balanced format with grouped listings
         private static string FormatDuplicateCodeNormal(DuplicateCodeResults results)
         {
             if (!results.DuplicateBlocks.Any())
-                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Duplicate Code Analysis**\n");
@@ -4568,7 +4588,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDuplicateCodeDetailed(DuplicateCodeResults results)
         {
             if (!results.DuplicateBlocks.Any())
-                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}";
+                return $"✅ No duplicate code found!\n\n**Analysis Summary:**\n  • Methods analyzed: {results.AnalyzedMethods}\n  • Files analyzed: {results.AnalyzedFiles}\n  • Projects analyzed: {results.AnalyzedProjects}".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Duplicate Code Analysis (Detailed)**\n");
@@ -4659,7 +4679,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDocumentationCoverageSummary(DocumentationCoverageResults results)
         {
             if (results.TotalSymbols == 0)
-                return "✅ No symbols found to analyze.";
+                return "✅ No symbols found to analyze.".WithWarnings(results.Warnings);
 
             var coverageIcon = results.CoveragePercentage >= 80 ? "✅" : results.CoveragePercentage >= 50 ? "⚠️" : "❌";
 
@@ -4713,7 +4733,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDocumentationCoverageNormal(DocumentationCoverageResults results)
         {
             if (results.TotalSymbols == 0)
-                return "✅ No symbols found to analyze.";
+                return "✅ No symbols found to analyze.".WithWarnings(results.Warnings);
 
             var coverageIcon = results.CoveragePercentage >= 80 ? "✅" : results.CoveragePercentage >= 50 ? "⚠️" : "❌";
 
@@ -4792,7 +4812,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDocumentationCoverageDetailed(DocumentationCoverageResults results)
         {
             if (results.TotalSymbols == 0)
-                return "✅ No symbols found to analyze.";
+                return "✅ No symbols found to analyze.".WithWarnings(results.Warnings);
 
             var coverageIcon = results.CoveragePercentage >= 80 ? "✅" : results.CoveragePercentage >= 50 ? "⚠️" : "❌";
 
@@ -4938,7 +4958,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatTODOCommentsSummary(TODOCommentResults results)
         {
             if (results.TotalComments == 0)
-                return "✅ No TODO/FIXME/HACK comments found.";
+                return "✅ No TODO/FIXME/HACK comments found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"📝 **TODO Comments Found: {results.TotalComments}**\n");
@@ -4999,7 +5019,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatTODOCommentsNormal(TODOCommentResults results)
         {
             if (results.TotalComments == 0)
-                return "✅ No TODO/FIXME/HACK comments found.";
+                return "✅ No TODO/FIXME/HACK comments found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**TODO Comments Analysis**\n");
@@ -5083,7 +5103,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatTODOCommentsDetailed(TODOCommentResults results)
         {
             if (results.TotalComments == 0)
-                return "✅ No TODO/FIXME/HACK comments found.";
+                return "✅ No TODO/FIXME/HACK comments found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**TODO Comments Analysis (Detailed)**\n");
@@ -5217,7 +5237,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatLargeFilesSummary(LargeFileResults results, int threshold)
         {
             if (results.TotalLargeFiles == 0)
-                return $"✅ No files found above {threshold} lines.";
+                return $"✅ No files found above {threshold} lines.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"📄 **Large Files Found: {results.TotalLargeFiles}** (> {threshold} lines)\n");
@@ -5255,7 +5275,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatLargeFilesNormal(LargeFileResults results, int threshold)
         {
             if (results.TotalLargeFiles == 0)
-                return $"✅ No files found above {threshold} lines.";
+                return $"✅ No files found above {threshold} lines.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Large Files Analysis**\n");
@@ -5311,7 +5331,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatLargeFilesDetailed(LargeFileResults results, int threshold)
         {
             if (results.TotalLargeFiles == 0)
-                return $"✅ No files found above {threshold} lines.";
+                return $"✅ No files found above {threshold} lines.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Large Files Analysis (Detailed)**\n");
@@ -5460,7 +5480,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDeprecatedAPIsSummary(DeprecatedAPIResults results)
         {
             if (results.TotalDeprecatedAPIs == 0)
-                return "✅ No deprecated APIs found.";
+                return "✅ No deprecated APIs found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"⚠️ **Deprecated APIs Found: {results.TotalDeprecatedAPIs}** ({results.TotalUsages} usages)\n");
@@ -5501,7 +5521,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDeprecatedAPIsNormal(DeprecatedAPIResults results)
         {
             if (results.TotalDeprecatedAPIs == 0)
-                return "✅ No deprecated APIs found.";
+                return "✅ No deprecated APIs found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Deprecated API Analysis**\n");
@@ -5568,7 +5588,7 @@ namespace RoslynMcpServer.Tools
         private static string FormatDeprecatedAPIsDetailed(DeprecatedAPIResults results)
         {
             if (results.TotalDeprecatedAPIs == 0)
-                return "✅ No deprecated APIs found.";
+                return "✅ No deprecated APIs found.".WithWarnings(results.Warnings);
 
             var output = new StringBuilder();
             output.AppendLine($"**Deprecated API Analysis (Detailed)**\n");

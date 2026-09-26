@@ -61,7 +61,7 @@ public class TestingTools
         [Description("Output format: summary (coverage percentages and risk counts), normal (up to 20 Critical/High-risk types and per-project statistics), detailed (up to 50 types with no matching test class, with file, complexity, and risk). Default: normal")]
         string format = "normal",
         [Description("Which top-level classes and interfaces to include: public, or all (any accessibility). Only public members are counted either way. Default: public")] string scope = "public",
-        [Description("Grouping for the statistics section; only project statistics are printed in this module. Default: project")] string groupBy = "project",
+        [Description("Statistics section grouping in normal and detailed output: project or namespace. Default: project")] string groupBy = "project",
         TestCoverageAnalyzer coverageAnalyzer = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
@@ -71,13 +71,19 @@ public class TestingTools
             var pathError = validator.ValidateSolutionPath(solutionPath, errorHandler);
             if (pathError != null) return pathError;
 
+            if (!groupBy.Equals("project", StringComparison.OrdinalIgnoreCase) &&
+                !groupBy.Equals("namespace", StringComparison.OrdinalIgnoreCase))
+            {
+                return errorHandler.ValidationError("groupBy", "groupBy must be project or namespace");
+            }
+
             var results = await coverageAnalyzer.AnalyzeTestCoverageAsync(solutionPath, scope, groupBy);
 
             return format.ToLowerInvariant() switch
             {
                 "summary" => FormatTestCoverageSummary(results),
-                "detailed" => FormatTestCoverageDetailed(results),
-                _ => FormatTestCoverageNormal(results)
+                "detailed" => FormatTestCoverageDetailed(results, groupBy),
+                _ => FormatTestCoverageNormal(results, groupBy)
             };
         }
         catch (Exception ex)
@@ -162,10 +168,10 @@ public class TestingTools
         output.AppendLine($"  Member coverage: {results.OverallMemberCoverage:F1}% ({results.TestedPublicMembers}/{results.TotalPublicMembers})");
         output.AppendLine($"  Critical risk: {results.CriticalRiskTypes}");
         output.AppendLine($"  High risk: {results.HighRiskTypes}");
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
-    private static string FormatTestCoverageNormal(TestCoverageResults results)
+    private static string FormatTestCoverageNormal(TestCoverageResults results, string groupBy)
     {
         var output = new StringBuilder();
         output.AppendLine($"# Test Coverage Analysis");
@@ -184,16 +190,12 @@ public class TestingTools
             output.AppendLine();
         }
 
-        output.AppendLine("## Project Statistics:");
-        foreach (var (project, stats) in results.ProjectStatistics)
-        {
-            output.AppendLine($"  {project}: {stats.TypeCoveragePercentage:F1}% types, {stats.MemberCoveragePercentage:F1}% members");
-        }
+        AppendCoverageStatistics(output, results, groupBy);
 
-        return output.ToString();
+        return output.AppendWarnings(results.Warnings).ToString();
     }
 
-    private static string FormatTestCoverageDetailed(TestCoverageResults results)
+    private static string FormatTestCoverageDetailed(TestCoverageResults results, string groupBy)
     {
         var output = new StringBuilder();
         output.AppendLine($"# Test Coverage Analysis");
@@ -219,7 +221,21 @@ public class TestingTools
             output.AppendLine();
         }
 
-        return output.ToString();
+        AppendCoverageStatistics(output, results, groupBy);
+
+        return output.AppendWarnings(results.Warnings).ToString();
+    }
+
+    private static void AppendCoverageStatistics(StringBuilder output, TestCoverageResults results, string groupBy)
+    {
+        var byNamespace = groupBy.Equals("namespace", StringComparison.OrdinalIgnoreCase);
+        var statistics = byNamespace ? results.NamespaceStatistics : results.ProjectStatistics;
+
+        output.AppendLine(byNamespace ? "## Namespace Statistics:" : "## Project Statistics:");
+        foreach (var (name, stats) in statistics)
+        {
+            output.AppendLine($"  {name}: {stats.TypeCoveragePercentage:F1}% types, {stats.MemberCoveragePercentage:F1}% members");
+        }
     }
 
     #endregion
