@@ -262,20 +262,32 @@ Get call hierarchy for DeleteUser in MySolution.sln
 ```
 Call Hierarchy for: MyProject.Services.UserService.DeleteUser(int)
 Location: UserService.cs:89
+Max depth: 3
 
-📞 Callers (5 methods call this):
+📞 Callers (3 methods call this directly, 5 listed across all levels):
   ├─> UserController.DeleteUserAccount (2 calls)
+      (UserController.cs:42)
+      ├─> AdminController.BulkDelete
+          (AdminController.cs:17)
   ├─> AdminService.PurgeUser
-  ├─> CleanupJob.RemoveInactiveUsers
-  ├─> IntegrationTests.TestUserDeletion (38 calls)
+      (AdminService.cs:63)
+      ├─> CleanupJob.RemoveInactiveUsers
+          (CleanupJob.cs:25)
+  ├─> IntegrationTests.TestUserDeletion
+      (UserTests.cs:88)
 
-📤 Callees (8 methods called by this):
+📤 Callees (3 methods called by this directly, 4 listed across all levels):
   ├─> UserRepository.FindById
+      (UserRepository.cs:31)
   ├─> UserRepository.Delete
+      (UserRepository.cs:54)
+      ├─> AuditLog.Record
+          (AuditLog.cs:12)
   ├─> LoggingService.LogInfo (2 calls)
-  ├─> EventPublisher.Publish
-  ├─> CacheManager.Remove
+      (LoggingService.cs:9)
 ```
+
+Use `maxDepth: 1` for direct callers and callees only; methods already expanded elsewhere in the tree are marked `(callers listed above)`, and recursive calls `↺ recursive`.
 
 #### Callers Only
 

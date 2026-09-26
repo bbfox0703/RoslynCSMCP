@@ -2,7 +2,6 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.Extensions.Logging;
 using RoslynMcpServer.Core.Models;
-using System.Collections.Concurrent;
 
 namespace RoslynMcpServer.Core.Services
 {
@@ -11,6 +10,11 @@ namespace RoslynMcpServer.Core.Services
     /// </summary>
     public class ChangeImpactAnalyzer
     {
+        /// <summary>
+        /// Maximum number of members whose references are followed during indirect analysis
+        /// </summary>
+        public const int MaxFollowedSymbols = 200;
+
         private readonly ILogger<ChangeImpactAnalyzer> _logger;
         private readonly CodeAnalysisService _codeAnalysis;
         private readonly SymbolSearchService _symbolSearch;
@@ -62,34 +66,39 @@ namespace RoslynMcpServer.Core.Services
                 var directReferences = await FindDirectReferencesAsync(targetSymbol, solution);
                 results.DirectReferences = directReferences.Count;
 
-                // Analyze impacted symbols
-                var impactedSymbols = new ConcurrentBag<ImpactedSymbol>();
-                var processedSymbols = new HashSet<string>();
+                // Analyze impacted symbols: one entry per reference location
+                var impactedSymbols = new List<ImpactedSymbol>();
+                var recordedLocations = new HashSet<string>();
 
-                // Add direct references
+                // Add direct references, remembering the member that encloses each one
+                var directEnclosingSymbols = new List<ISymbol>();
                 foreach (var reference in directReferences)
                 {
-                    var impacted = await CreateImpactedSymbolAsync(reference, "Direct", 0, "Usage", solution);
-                    if (impacted != null)
+                    var (impacted, enclosingSymbol) = await CreateImpactedSymbolAsync(reference, targetSymbol, "Direct", 0, "Usage");
+                    if (impacted != null && recordedLocations.Add(GetLocationKey(reference)))
                     {
                         impactedSymbols.Add(impacted);
-                        processedSymbols.Add(impacted.FullSymbolName);
+                    }
+                    if (enclosingSymbol != null)
+                    {
+                        directEnclosingSymbols.Add(enclosingSymbol);
                     }
                 }
 
-                // Find indirect references if requested
+                // Find indirect references if requested (maxDepth counts levels, direct references being level 1)
                 if (includeIndirectReferences && maxDepth > 1)
                 {
                     await FindIndirectReferencesAsync(
-                        directReferences,
+                        targetSymbol,
+                        directEnclosingSymbols,
                         solution,
                         impactedSymbols,
-                        processedSymbols,
+                        recordedLocations,
                         maxDepth,
-                        1);
+                        results.Warnings);
                 }
 
-                results.ImpactedSymbols = impactedSymbols.ToList();
+                results.ImpactedSymbols = impactedSymbols;
                 results.IndirectReferences = results.ImpactedSymbols.Count(s => s.ReferenceKind == "Indirect");
 
                 // Calculate statistics
@@ -149,11 +158,28 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Gets all symbols in a compilation
+        /// Gets all types (nested types included) and their members declared in a compilation's own source.
+        /// Referenced assemblies such as the framework are not searched.
         /// </summary>
         private List<ISymbol> GetAllSymbols(Compilation compilation)
         {
             var symbols = new List<ISymbol>();
+
+            void VisitType(INamedTypeSymbol type)
+            {
+                symbols.Add(type);
+                foreach (var typeMember in type.GetMembers())
+                {
+                    if (typeMember is INamedTypeSymbol nestedType)
+                    {
+                        VisitType(nestedType);
+                    }
+                    else
+                    {
+                        symbols.Add(typeMember);
+                    }
+                }
+            }
 
             void VisitNamespace(INamespaceSymbol ns)
             {
@@ -165,17 +191,12 @@ namespace RoslynMcpServer.Core.Services
                     }
                     else if (member is INamedTypeSymbol type)
                     {
-                        symbols.Add(type);
-                        // Add type members
-                        foreach (var typeMember in type.GetMembers())
-                        {
-                            symbols.Add(typeMember);
-                        }
+                        VisitType(type);
                     }
                 }
             }
 
-            VisitNamespace(compilation.GlobalNamespace);
+            VisitNamespace(compilation.Assembly.GlobalNamespace);
             return symbols;
         }
 
@@ -207,18 +228,21 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Finds all direct references to a symbol
+        /// Finds all direct references to a symbol, one per source location
         /// </summary>
         private async Task<List<ReferenceLocation>> FindDirectReferencesAsync(ISymbol symbol, Solution solution)
         {
             var references = await SymbolFinder.FindReferencesAsync(symbol, solution);
             var locations = new List<ReferenceLocation>();
+            var seenLocations = new HashSet<string>();
 
             foreach (var reference in references)
             {
                 foreach (var location in reference.Locations)
                 {
-                    if (location.Document != null)
+                    // A location can be reported for several cascaded symbols (e.g. a type and its
+                    // constructor in 'new Foo()'), and once per target framework of a multi-targeted project
+                    if (location.Document != null && seenLocations.Add(GetLocationKey(location)))
                     {
                         locations.Add(location);
                     }
@@ -229,114 +253,103 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Finds indirect references (references to symbols that reference the target)
+        /// Finds indirect references level by level: references to the members that enclose the previous
+        /// level's references (for example the callers of the methods that use the target). Each member is
+        /// followed once, and each location is recorded once across all levels.
         /// </summary>
         private async Task FindIndirectReferencesAsync(
-            List<ReferenceLocation> directReferences,
+            ISymbol targetSymbol,
+            List<ISymbol> directEnclosingSymbols,
             Solution solution,
-            ConcurrentBag<ImpactedSymbol> impactedSymbols,
-            HashSet<string> processedSymbols,
+            List<ImpactedSymbol> impactedSymbols,
+            HashSet<string> recordedLocations,
             int maxDepth,
-            int currentDepth)
+            List<OperationWarning> warnings)
         {
-            if (currentDepth >= maxDepth)
-                return;
+            var followedSymbols = new HashSet<ISymbol>(SymbolEqualityComparer.Default) { targetSymbol };
+            var followedCount = 0;
+            var frontier = directEnclosingSymbols;
 
-            var nextLevelReferences = new List<ReferenceLocation>();
-
-            foreach (var reference in directReferences)
+            // Direct references are level 1 (Distance 0); each further level is one step farther away
+            for (var distance = 1; distance < maxDepth && frontier.Count > 0; distance++)
             {
-                try
+                var nextFrontier = new List<ISymbol>();
+
+                foreach (var symbol in frontier)
                 {
-                    // Get the containing symbol
-                    var document = reference.Document;
-                    if (document == null)
+                    if (!followedSymbols.Add(symbol))
                         continue;
 
-                    var semanticModel = await document.GetSemanticModelAsync();
-                    if (semanticModel == null)
-                        continue;
-
-                    var root = await document.GetSyntaxRootAsync();
-                    if (root == null)
-                        continue;
-
-                    var node = root.FindNode(reference.Location.SourceSpan);
-                    var containingSymbol = semanticModel.GetEnclosingSymbol(node.SpanStart);
-
-                    if (containingSymbol != null && !processedSymbols.Contains(containingSymbol.ToDisplayString()))
+                    if (followedCount == MaxFollowedSymbols)
                     {
-                        processedSymbols.Add(containingSymbol.ToDisplayString());
-
-                        // Find references to this containing symbol
-                        var secondaryRefs = await FindDirectReferencesAsync(containingSymbol, solution);
-
-                        foreach (var secondaryRef in secondaryRefs)
+                        warnings.Add(new OperationWarning
                         {
-                            var impacted = await CreateImpactedSymbolAsync(
-                                secondaryRef,
-                                "Indirect",
-                                currentDepth,
-                                "Usage",
-                                solution);
+                            Context = "Indirect References",
+                            Message = $"Stopped after following references to {MaxFollowedSymbols} members; indirect results are partial. Lower maxDepth for a complete result."
+                        });
+                        return;
+                    }
+                    followedCount++;
 
-                            if (impacted != null && !processedSymbols.Contains(impacted.FullSymbolName))
+                    try
+                    {
+                        foreach (var reference in await FindDirectReferencesAsync(symbol, solution))
+                        {
+                            var (impacted, enclosingSymbol) = await CreateImpactedSymbolAsync(reference, symbol, "Indirect", distance, "Usage");
+
+                            if (impacted != null && recordedLocations.Add(GetLocationKey(reference)))
                             {
                                 impactedSymbols.Add(impacted);
-                                processedSymbols.Add(impacted.FullSymbolName);
-                                nextLevelReferences.Add(secondaryRef);
+                            }
+                            if (enclosingSymbol != null)
+                            {
+                                nextFrontier.Add(enclosingSymbol);
                             }
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to analyze indirect references of {Symbol}", symbol.ToDisplayString());
+                    }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Failed to analyze indirect reference");
-                }
-            }
 
-            // Recursively find next level
-            if (nextLevelReferences.Any() && currentDepth + 1 < maxDepth)
-            {
-                await FindIndirectReferencesAsync(
-                    nextLevelReferences,
-                    solution,
-                    impactedSymbols,
-                    processedSymbols,
-                    maxDepth,
-                    currentDepth + 1);
+                frontier = nextFrontier;
             }
         }
 
         /// <summary>
-        /// Creates an ImpactedSymbol from a reference location
+        /// Creates an ImpactedSymbol from a reference location, and returns the member that encloses the
+        /// reference (null for references outside any member, such as in a using directive)
         /// </summary>
-        private async Task<ImpactedSymbol?> CreateImpactedSymbolAsync(
+        private async Task<(ImpactedSymbol? Impacted, ISymbol? EnclosingMember)> CreateImpactedSymbolAsync(
             ReferenceLocation reference,
+            ISymbol referencedSymbol,
             string referenceKind,
             int distance,
-            string impactType,
-            Solution solution)
+            string impactType)
         {
             try
             {
                 var document = reference.Document;
                 if (document == null)
-                    return null;
+                    return (null, null);
 
                 var semanticModel = await document.GetSemanticModelAsync();
                 if (semanticModel == null)
-                    return null;
+                    return (null, null);
 
                 var root = await document.GetSyntaxRootAsync();
                 if (root == null)
-                    return null;
+                    return (null, null);
 
                 var node = root.FindNode(reference.Location.SourceSpan);
-                var symbol = semanticModel.GetEnclosingSymbol(node.SpanStart);
+                var enclosingSymbol = semanticModel.GetEnclosingSymbol(node.SpanStart);
 
-                if (symbol == null)
-                    return null;
+                if (enclosingSymbol == null)
+                    return (null, null);
+
+                var enclosingMember = GetEnclosingMember(enclosingSymbol);
+                var symbol = enclosingMember ?? enclosingSymbol;
 
                 // Get code context
                 var lineSpan = reference.Location.GetLineSpan();
@@ -344,7 +357,7 @@ namespace RoslynMcpServer.Core.Services
                 var lineNumber = lineSpan.StartLinePosition.Line;
                 var codeLine = lineNumber < lines.Count ? lines[lineNumber].ToString() : string.Empty;
 
-                return new ImpactedSymbol
+                var impacted = new ImpactedSymbol
                 {
                     SymbolName = symbol.Name,
                     FullSymbolName = symbol.ToDisplayString(),
@@ -354,15 +367,54 @@ namespace RoslynMcpServer.Core.Services
                     ProjectName = document.Project.Name,
                     LineNumber = lineNumber + 1,
                     ReferenceKind = referenceKind,
+                    ReferencedSymbol = referencedSymbol.ToDisplayString(),
                     Distance = distance,
                     ImpactType = impactType,
                     CodeContext = codeLine.Trim()
                 };
+
+                return (impacted, enclosingMember);
             }
             catch
             {
-                return null;
+                return (null, null);
             }
+        }
+
+        /// <summary>
+        /// Maps the symbol enclosing a reference to the member whose own references carry the impact further:
+        /// lambdas and local functions map to their containing member, and accessors to their property or event.
+        /// Returns null for namespaces, which are not followed.
+        /// </summary>
+        private static ISymbol? GetEnclosingMember(ISymbol symbol)
+        {
+            for (var current = symbol; current != null; current = current.ContainingSymbol)
+            {
+                switch (current)
+                {
+                    case IMethodSymbol { MethodKind: MethodKind.AnonymousFunction or MethodKind.LocalFunction }:
+                        continue;
+                    case IMethodSymbol
+                    {
+                        MethodKind: MethodKind.PropertyGet or MethodKind.PropertySet
+                            or MethodKind.EventAdd or MethodKind.EventRemove or MethodKind.EventRaise,
+                        AssociatedSymbol: { } associated
+                    }:
+                        return associated;
+                    case IMethodSymbol or IPropertySymbol or IFieldSymbol or IEventSymbol or INamedTypeSymbol:
+                        return current;
+                    default:
+                        return null;
+                }
+            }
+
+            return null;
+        }
+
+        private static string GetLocationKey(ReferenceLocation location)
+        {
+            var span = location.Location.SourceSpan;
+            return $"{location.Document.FilePath ?? location.Document.Name}|{span.Start}|{span.Length}";
         }
 
         /// <summary>
@@ -387,7 +439,8 @@ namespace RoslynMcpServer.Core.Services
         }
 
         /// <summary>
-        /// Builds dependency chains
+        /// Builds dependency chains by following real links: each step is a member that references the
+        /// previous one (the first step references the target directly)
         /// </summary>
         private List<DependencyChain> BuildDependencyChains(
             List<ImpactedSymbol> impactedSymbols,
@@ -396,14 +449,17 @@ namespace RoslynMcpServer.Core.Services
         {
             var chains = new List<DependencyChain>();
 
-            // Group by distance and create chains
-            var byDistance = impactedSymbols
-                .OrderBy(s => s.Distance)
-                .GroupBy(s => s.Distance)
+            // Index impacted locations by the symbol they reference
+            var usersByReferencedSymbol = impactedSymbols
+                .GroupBy(s => s.ReferencedSymbol)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
-            // Create representative chains (limit to avoid too many)
-            var directSymbols = byDistance.ContainsKey(0) ? byDistance[0].Take(5) : Enumerable.Empty<ImpactedSymbol>();
+            // Create representative chains (limit to avoid too many), one per directly impacted member
+            var directSymbols = impactedSymbols
+                .Where(s => s.Distance == 0)
+                .GroupBy(s => s.FullSymbolName)
+                .Select(g => g.First())
+                .Take(5);
 
             foreach (var direct in directSymbols)
             {
@@ -413,25 +469,26 @@ namespace RoslynMcpServer.Core.Services
                     ProjectsInvolved = new List<string> { direct.ProjectName }
                 };
 
-                // Try to extend chain with indirect references
-                for (int i = 1; i < maxLength && byDistance.ContainsKey(i); i++)
+                // Extend the chain with a member that references the current end of the chain
+                var visited = new HashSet<string> { direct.FullSymbolName };
+                var current = direct;
+                for (int i = 1; i < maxLength; i++)
                 {
-                    var nextLevel = byDistance[i]
-                        .Where(s => s.ProjectName == chain.ProjectsInvolved.Last() || !chain.ProjectsInvolved.Contains(s.ProjectName))
-                        .FirstOrDefault();
+                    var next = usersByReferencedSymbol.TryGetValue(current.FullSymbolName, out var users)
+                        ? users.FirstOrDefault(u => !visited.Contains(u.FullSymbolName))
+                        : null;
 
-                    if (nextLevel != null)
-                    {
-                        chain.Chain.Add(nextLevel.SymbolName);
-                        if (!chain.ProjectsInvolved.Contains(nextLevel.ProjectName))
-                        {
-                            chain.ProjectsInvolved.Add(nextLevel.ProjectName);
-                        }
-                    }
-                    else
-                    {
+                    if (next == null)
                         break;
+
+                    chain.Chain.Add(next.SymbolName);
+                    if (!chain.ProjectsInvolved.Contains(next.ProjectName))
+                    {
+                        chain.ProjectsInvolved.Add(next.ProjectName);
                     }
+
+                    visited.Add(next.FullSymbolName);
+                    current = next;
                 }
 
                 chains.Add(chain);

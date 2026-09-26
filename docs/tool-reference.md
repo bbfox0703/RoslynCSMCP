@@ -123,19 +123,19 @@ Use FindReferences tool with:
 ---
 
 ### 9. GetClassHierarchy
-**Description**: Get complete class hierarchy showing ancestors (base classes/interfaces) and descendants (derived classes)
+**Description**: Get complete class hierarchy showing ancestors (base classes/interfaces) and descendants (derived classes, including through constructed generic bases such as `Base<int>`). Each descendant is listed once per direct parent, under the project that declares it. Source types (nested types included) are matched before framework types.
 
 **Parameters**:
-- `typeName` (string): Type name to analyze hierarchy for
+- `typeName` (string): Simple type name to analyze hierarchy for (case-insensitive)
 - `solutionPath` (string): Path to solution file (.sln)
-- `direction` (string, optional): Direction: ancestors, descendants, or both (default: both)
+- `direction` (string, optional): Direction: ancestors, descendants, or both, case-insensitive; other values return an error (default: both)
 - `format` (string, optional): Output format: compact, normal, detailed (default: normal)
 - `maxDepth` (int, optional): Maximum depth to traverse (default: 10)
 
 ---
 
 ### 10. FindImplementations
-**Description**: Find all implementations of an interface or abstract class
+**Description**: Find all implementations of an interface or abstract class, including through constructed generics (`IRepo<int>` counts for `IRepo<T>`). Each type is listed once, under the project that declares it.
 
 **Parameters**:
 - `typeName` (string): Interface or abstract class name to find implementations for
@@ -297,13 +297,13 @@ Use AnalyzePackages tool with:
 ## 🔧 Development Tools
 
 ### 22. GetCallHierarchy
-**Description**: Get call hierarchy showing callers and callees for a method
+**Description**: Get call hierarchy showing callers and callees for a method, as trees up to `maxDepth` levels (callers of callers, callees of callees). Each method is expanded once; repeats and recursive calls are marked, and each direction stops after 200 entries.
 
 **Parameters**:
 - `solutionPath` (string): Path to solution file (.sln)
 - `methodName` (string): Method name to analyze
-- `direction` (string, optional): Direction: both, callers, callees (default: both)
-- `maxDepth` (int, optional): Maximum depth for hierarchy traversal (default: 3)
+- `direction` (string, optional): Direction: both, callers, callees, case-insensitive; other values return an error (default: both)
+- `maxDepth` (int, optional): Number of levels to follow, 1–10; 1 lists only direct callers and callees (default: 3)
 
 ---
 
@@ -376,8 +376,8 @@ Use GetTestCoverage tool with:
 - `symbolName` (string): Symbol name to analyze (class, method, property, etc.)
 - `solutionPath` (string): Path to solution file (.sln)
 - `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
-- `maxDepth` (int, optional): Maximum depth for indirect dependency analysis (default: 3)
-- `includeIndirectReferences` (bool, optional): Include indirect references (default: true)
+- `maxDepth` (int, optional): Number of reference levels to follow, counting direct references as level 1 (default: 3)
+- `includeIndirectReferences` (bool, optional): Follow references to the members that contain each reference (for example, callers of the callers), up to `maxDepth` levels (default: true)
 
 **Example Usage**:
 ```
@@ -595,7 +595,7 @@ Use AnalyzeNamingConventions tool with:
 - `format` (string, optional): Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal
 - `oldVersionLabel` (string, optional): Label for old version (e.g., 'v1.0.0', 'main'). Default: 'Old'
 - `newVersionLabel` (string, optional): Label for new version (e.g., 'v2.0.0', 'develop'). Default: 'New'
-- `includeInternal` (bool, optional): Include internal API changes (default: false)
+- `includeInternal` (bool, optional): Also compare internal symbols; changes invisible outside the assembly are classified as Internal and call for at most a Patch bump (default: false). Public and protected members are always compared, and symbols are matched by documentation comment ID, so each overload is compared separately.
 
 **Example Usage**:
 ```

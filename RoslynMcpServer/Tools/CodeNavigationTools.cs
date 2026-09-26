@@ -18,8 +18,8 @@ namespace RoslynMcpServer.Tools
             Search every project in a solution for types and members whose simple or fully qualified name matches a
             wildcard pattern (* and ?, matched against the whole name). Symbols from referenced assemblies such as the
             .NET framework are included, and a symbol visible to several projects is listed once per project. Results
-            are ranked with exact and prefix matches first, grouped by kind, and capped at 20 per kind. Members of
-            nested types are not searched.
+            are ranked with exact and prefix matches first, grouped by kind, and capped at 20 per kind. Nested types
+            and their members are searched at any depth.
             """)]
         public static async Task<string> SearchSymbols(
             [Description("Wildcard pattern (* and ?) matched against the whole simple name or fully qualified name, e.g. 'User*', '*Service', 'MyApp.Services.*'.")] string pattern,
@@ -407,17 +407,19 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            List the direct callers and direct callees of one method; only one level is returned. The method is found by
-            exact, case-sensitive simple name among method declarations in source, and the first declaration found is
-            used, so other overloads and same-named methods in other types are ignored. Callers show one entry per
-            calling method with a call count. Callees include only calls to methods declared in source, merged across
-            overloads; framework calls, constructors, and property accesses are omitted.
+            List the callers and callees of one method as trees up to maxDepth levels deep (callers of callers, callees
+            of callees). The method is found by exact, case-sensitive simple name among method declarations in source,
+            and the first declaration found is used, so other overloads and same-named methods in other types are
+            ignored. Callers show one entry per calling member with a call count. Callees include only calls to methods
+            declared in source, one entry per overload; framework calls, constructors, and property accesses are
+            omitted. Each method is expanded once (later repeats and recursive calls are marked, not expanded), and
+            each direction stops after 200 entries, listing shallower levels first.
             """)]
         public static async Task<string> GetCallHierarchy(
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Simple method name, case-sensitive, without type or parameters (e.g., 'SaveAsync'); the first matching declaration in the solution is used.")] string methodName,
-            [Description("Direction: both, callers, or callees, in lowercase; other values return no results (default: both).")] string direction = "both",
-            [Description("Currently ignored; only direct callers and callees are returned (default: 3).")] int maxDepth = 3,
+            [Description("Direction: both, callers, or callees, case-insensitive; other values return an error (default: both).")] string direction = "both",
+            [Description("Number of levels to follow: 1 lists only direct callers and callees; values below 1 count as 1 and above 10 as 10 (default: 3).")] int maxDepth = 3,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -1342,14 +1344,15 @@ namespace RoslynMcpServer.Tools
 
         [McpServerTool, Description("""
             Find source types that implement an interface (directly, through a base class, or through an inherited
-            interface) or derive from an abstract class at any depth, grouped by project with file, line, namespace,
-            base class, and other interfaces. The target is the first type whose simple name matches, ignoring case, and
-            can be a framework type such as IDisposable. A concrete class, an unknown name, and no matches all return
-            the same no-implementations message, and the same type can be listed more than once. For subclasses of a
-            concrete class, use GetClassHierarchy.
+            interface) or derive from an abstract class at any depth, including through constructed generics (IRepo<int>
+            counts for IRepo<T>), grouped by the declaring project with file, line, namespace, base class, and other
+            interfaces; each type is listed once. The target is the first source type (nested types included) whose
+            simple name matches, ignoring case; referenced types such as IDisposable are used only when no source type
+            matches. A concrete class, an unknown name, and no matches all return the same no-implementations message.
+            For subclasses of a concrete class, use GetClassHierarchy.
             """)]
         public static async Task<string> FindImplementations(
-            [Description("Simple (unqualified) name of an interface or abstract class, matched case-insensitively; the first matching type is used.")] string typeName,
+            [Description("Simple (unqualified) name of an interface or abstract class, without generic arguments, matched case-insensitively; source types are searched before referenced assemblies and the first match is used.")] string typeName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (names with file:line, grouped by project), normal (adds accessibility, namespace, doc summary, base class, other interfaces), detailed (adds all interfaces and counts by accessibility). Default: normal")]
             string format = "normal",
@@ -1500,20 +1503,23 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            Estimate the impact of changing one symbol by finding every reference to it across the solution, listing the
-            enclosing member, file, and project of each, and assigning a heuristic risk level from reference count,
-            project count, and public accessibility; any public symbol or interface is labeled a breaking change. The
-            name matches a type or a member of a top-level type by exact, case-sensitive simple name or full display
-            name such as Ns.Type.Method(int); the first match wins and can be a framework symbol, so prefer the full
-            name. Indirect references are currently always 0.
+            Estimate the impact of changing one symbol. Direct references are every reference to it across the
+            solution; indirect references follow the members that contain them, level by level (references to the
+            callers, then to their callers), up to maxDepth. Each location is listed with its enclosing member, file,
+            and project, along with dependency chains, and a heuristic risk level comes from reference count, project
+            count, and public accessibility; any public symbol or interface is labeled a breaking change. The name
+            matches a type (nested types included) or member declared in the solution's source by exact, case-sensitive
+            simple name or full display name such as Ns.Type.Method(int); the first match wins, so prefer the full name.
+            Framework symbols are not matched, and an unknown name returns a not-found warning. Indirect analysis stops
+            with a warning after following 200 members.
             """)]
         public static async Task<string> GetChangeImpact(
-            [Description("Type or member name: exact, case-sensitive simple name, or full display name (Ns.Type, Ns.Type.Member, Ns.Type.Method(int, string)). The first match wins.")] string symbolName,
+            [Description("Type or member declared in the solution: exact, case-sensitive simple name, or full display name (Ns.Type, Ns.Type.Member, Ns.Type.Method(int, string)). The first match wins.")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: summary (key metrics), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
-            [Description("Currently has no effect; indirect reference expansion finds nothing. Default: 3")] int maxDepth = 3,
-            [Description("Currently has no effect; indirect reference expansion finds nothing. Default: true")] bool includeIndirectReferences = true,
+            [Description("Number of reference levels to follow, counting direct references as level 1 (1 = direct references only). Default: 3")] int maxDepth = 3,
+            [Description("Follow references to the members that contain each reference, up to maxDepth levels; false reports direct references only. Default: true")] bool includeIndirectReferences = true,
             IServiceProvider? serviceProvider = null)
         {
             var logger = serviceProvider?.GetService<ILogger<ChangeImpactAnalyzer>>();
@@ -1702,12 +1708,14 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            Compare the public types, methods, properties, fields, and events of two solutions, optionally including
-            internal ones (protected members are not compared), and recommend a Major, Minor, or Patch version bump.
-            Removals, signature and property-type changes, base-type changes, abstract/sealed changes, and reduced
-            accessibility count as breaking. Members are keyed by simple name, so overloads and same-named members in
-            different types collapse and member-level results are unreliable; types are keyed by full name. Normal lists
-            10 breaking changes and 10 additions; detailed lists every change.
+            Compare the public API (public and protected types, methods, properties, fields, and events) of two
+            solutions, optionally including internal ones, and recommend a Major, Minor, or Patch version bump. Symbols
+            are matched by documentation comment ID, so each overload and each same-named member of another type is
+            compared separately; a changed parameter list shows as a removal plus an addition, and a changed return
+            type as a signature change. Removals, return-type and property-type changes, base-type changes,
+            abstract/sealed changes, and reduced visibility outside the assembly count as breaking; changes that code
+            outside the assembly cannot see are Internal. Normal lists 10 breaking changes and 10 additions; detailed
+            lists every change.
             """)]
         public static async Task<string> AnalyzeAPIChanges(
             [Description("Path to old version solution file (.sln)")] string oldSolutionPath,
@@ -1716,7 +1724,7 @@ namespace RoslynMcpServer.Tools
             string format = "normal",
             [Description("Label for old version (e.g., 'v1.0.0', 'main'). Default: 'Old'")] string oldVersionLabel = "Old",
             [Description("Label for new version (e.g., 'v2.0.0', 'develop'). Default: 'New'")] string newVersionLabel = "New",
-            [Description("Also compare internal symbols; their changes are classified as breaking exactly like public ones and can raise the recommendation to Major (default: false)")] bool includeInternal = false,
+            [Description("Also compare internal and private protected symbols; changes that code outside the assembly cannot see are classified as Internal and call for at most a Patch bump (default: false)")] bool includeInternal = false,
             IServiceProvider? serviceProvider = null)
         {
             var logger = serviceProvider?.GetService<ILogger<APIChangeAnalyzer>>();
@@ -1775,18 +1783,19 @@ namespace RoslynMcpServer.Tools
 
         [McpServerTool, Description("""
             Show the inheritance tree of one type: ancestors (base-class chain excluding System.Object, plus declared
-            interfaces, recursively, including framework types) and descendants (types that derive from or directly
-            implement it, recursively). The name is a simple type name matched case-insensitively; qualified names are
-            not accepted, and the first match wins, which may be a framework type. Descendants through constructed
-            generic bases such as Base<int> are not found, and a descendant can be listed more than once. For a flat
-            list of an interface's implementers, use FindImplementations.
+            interfaces, recursively, including framework types) and descendants (source types that derive from or
+            directly implement it, recursively, including through constructed generic bases such as Base<int>). The
+            name is a simple type name matched case-insensitively; qualified names are not accepted. Source types,
+            nested ones included, are searched first and the first match wins; framework types are used only when no
+            source type matches. A descendant appears once under each type it directly derives from or implements. For
+            a flat list of an interface's implementers, use FindImplementations.
             """)]
         public static async Task<string> GetClassHierarchy(
-            [Description("Simple type name without namespace or generic arguments, matched case-insensitively; the first matching type is used.")] string typeName,
+            [Description("Simple type name without namespace or generic arguments, matched case-insensitively; source types are searched before referenced assemblies and the first match is used.")] string typeName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Output format: compact (tree structure only), normal (balanced), detailed (comprehensive). Default: normal")]
             string format = "normal",
-            [Description("Direction: ancestors, descendants, or both, in lowercase; other values return nothing (default: both).")] string direction = "both",
+            [Description("Direction: ancestors, descendants, or both, case-insensitive; other values return an error (default: both).")] string direction = "both",
             [Description("Maximum depth to traverse (default: 10)")] int maxDepth = 10,
             IServiceProvider? serviceProvider = null)
         {
@@ -1798,6 +1807,12 @@ namespace RoslynMcpServer.Tools
                     return "Error: Invalid solution path provided.";
                 }
 
+                var normalizedDirection = SymbolSearchService.NormalizeHierarchyDirection(direction);
+                if (normalizedDirection == null)
+                {
+                    return $"Error: Invalid direction '{direction}'. Use both, ancestors, or descendants.";
+                }
+
                 var searchService = serviceProvider?.GetService<SymbolSearchService>();
                 if (searchService == null)
                 {
@@ -1807,7 +1822,7 @@ namespace RoslynMcpServer.Tools
                 var result = await searchService.GetClassHierarchyAsync(
                     typeName,
                     solutionPath,
-                    direction,
+                    normalizedDirection,
                     maxDepth);
 
                 if (result == null)
@@ -1820,10 +1835,10 @@ namespace RoslynMcpServer.Tools
 
                 return normalizedFormat switch
                 {
-                    "compact" => FormatClassHierarchyCompact(result, direction),
-                    "detailed" => FormatClassHierarchyDetailed(result, direction),
-                    "normal" => FormatClassHierarchy(result, direction),
-                    _ => FormatClassHierarchy(result, direction)
+                    "compact" => FormatClassHierarchyCompact(result, normalizedDirection),
+                    "detailed" => FormatClassHierarchyDetailed(result, normalizedDirection),
+                    "normal" => FormatClassHierarchy(result, normalizedDirection),
+                    _ => FormatClassHierarchy(result, normalizedDirection)
                 };
             }
             catch (Exception ex)
@@ -6832,7 +6847,7 @@ namespace RoslynMcpServer.Tools
             output.AppendLine($"🔄 Change Impact Summary: {results.TargetSymbol}");
             output.AppendLine();
 
-            // Show warnings if any
+            // Show warnings if any; stop only when the symbol could not be analyzed
             if (results.Warnings.Any())
             {
                 output.AppendLine("⚠️ Warnings:");
@@ -6841,7 +6856,8 @@ namespace RoslynMcpServer.Tools
                     output.AppendLine($"  - {warning.Message}");
                 }
                 output.AppendLine();
-                return output.ToString();
+                if (string.IsNullOrEmpty(results.TargetSymbolFullName))
+                    return output.ToString();
             }
 
             // Symbol info
@@ -6897,7 +6913,7 @@ namespace RoslynMcpServer.Tools
             output.AppendLine($"🔄 Change Impact Analysis: {results.TargetSymbol}");
             output.AppendLine();
 
-            // Show warnings if any
+            // Show warnings if any; stop only when the symbol could not be analyzed
             if (results.Warnings.Any())
             {
                 output.AppendLine("⚠️ Warnings:");
@@ -6906,7 +6922,8 @@ namespace RoslynMcpServer.Tools
                     output.AppendLine($"  [{warning.Context}] {warning.Message}");
                 }
                 output.AppendLine();
-                return output.ToString();
+                if (string.IsNullOrEmpty(results.TargetSymbolFullName))
+                    return output.ToString();
             }
 
             // Symbol information
@@ -7030,7 +7047,8 @@ namespace RoslynMcpServer.Tools
                     }
                 }
                 output.AppendLine();
-                return output.ToString();
+                if (string.IsNullOrEmpty(results.TargetSymbolFullName))
+                    return output.ToString();
             }
 
             // Complete symbol information

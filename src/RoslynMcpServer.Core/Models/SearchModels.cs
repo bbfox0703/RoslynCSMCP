@@ -893,6 +893,7 @@ namespace RoslynMcpServer.Core.Models
         public string ProjectName { get; set; } = string.Empty;
         public int LineNumber { get; set; }
         public string ReferenceKind { get; set; } = string.Empty; // Direct, Indirect
+        public string ReferencedSymbol { get; set; } = string.Empty; // Symbol used at this location: the changed symbol, or an intermediate member for indirect references
         public int Distance { get; set; } // Distance from changed symbol (0 = direct reference)
         public string ImpactType { get; set; } = string.Empty; // Usage, Inheritance, Implementation
         public string CodeContext { get; set; } = string.Empty; // Code snippet showing usage

@@ -130,17 +130,19 @@ public class AdvancedTools
     }
 
     [McpServerTool, Description("""
-        List the direct callers and direct callees of one method; only one level is returned. The method is found by
-        exact, case-sensitive simple name among method declarations in source, and the first declaration found is
-        used, so other overloads and same-named methods in other types are ignored. Callers show one entry per
-        calling method with a call count. Callees include only calls to methods declared in source, merged across
-        overloads; framework calls, constructors, and property accesses are omitted.
+        List the callers and callees of one method as trees up to maxDepth levels deep (callers of callers, callees
+        of callees). The method is found by exact, case-sensitive simple name among method declarations in source,
+        and the first declaration found is used, so other overloads and same-named methods in other types are
+        ignored. Callers show one entry per calling member with a call count. Callees include only calls to methods
+        declared in source, one entry per overload; framework calls, constructors, and property accesses are
+        omitted. Each method is expanded once (later repeats and recursive calls are marked, not expanded), and
+        each direction stops after 200 entries, listing shallower levels first.
         """)]
     public static async Task<string> GetCallHierarchy(
         [Description("Simple method name, case-sensitive, without type or parameters (e.g., 'SaveAsync'); the first matching declaration in the solution is used.")] string methodName,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Direction: both, callers, or callees, in lowercase; other values return no results (default: both).")] string direction = "both",
-        [Description("Currently ignored; only direct callers and callees are returned (default: 3).")] int maxDepth = 3,
+        [Description("Direction: both, callers, or callees, case-insensitive; other values return an error (default: both).")] string direction = "both",
+        [Description("Number of levels to follow: 1 lists only direct callers and callees; values below 1 count as 1 and above 10 as 10 (default: 3).")] int maxDepth = 3,
         CallHierarchyService callService = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -155,16 +157,18 @@ public class AdvancedTools
     }
 
     [McpServerTool, Description("""
-        List the immediate relatives of one type: its direct base class (excluding System.Object) and declared
-        interfaces, and the types that directly derive from or implement it, each with full name and kind; deeper
-        levels are not shown. The name is a simple type name matched case-insensitively; qualified names are not
-        accepted, and the first match wins, which may be a framework type. Types deriving from a constructed generic
-        such as Base<int> are not found, and a descendant can be listed more than once.
+        Show the inheritance tree of one type, up to 10 levels each way: ancestors (base-class chain excluding
+        System.Object, plus declared interfaces, recursively, including framework types) and descendants (source
+        types that derive from or directly implement it, recursively, including through constructed generic bases
+        such as Base<int>). The name is a simple type name matched case-insensitively; qualified names are not
+        accepted. Source types, nested ones included, are searched first and the first match wins; framework types
+        are used only when no source type matches. A descendant appears once under each type it directly derives
+        from or implements.
         """)]
     public static async Task<string> GetClassHierarchy(
-        [Description("Simple type name without namespace or generic arguments, matched case-insensitively; the first matching type is used.")] string typeName,
+        [Description("Simple type name without namespace or generic arguments, matched case-insensitively; source types are searched before referenced assemblies and the first match is used.")] string typeName,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Currently ignored; output is always plain text.")] string format = "text",
+        [Description("Output format: compact (indented type names), normal (full names, kinds, and file:line), detailed (adds project, namespace, abstract marker, and the target's documentation). Default: normal")] string format = "normal",
         SymbolSearchService searchService = null!,
         McpErrorHandler errorHandler = null!)
     {
@@ -309,12 +313,13 @@ public class AdvancedTools
     }
 
     [McpServerTool, Description("""
-        Compare the public types, methods, properties, fields, and events of two solutions (protected and internal
-        members are not compared) and recommend a Major, Minor, or Patch version bump. Removals, signature and
-        property-type changes, base-type changes, and abstract/sealed changes count as breaking. Members are keyed
-        by simple name, so overloads and same-named members in different types collapse and member-level results are
-        unreliable; types are keyed by full name. Lists at most 20 breaking changes and only counts additions; a
-        load failure shows zero counts.
+        Compare the public API (public and protected types, methods, properties, fields, and events; internal
+        members are not compared) of two solutions and recommend a Major, Minor, or Patch version bump. Symbols are
+        matched by documentation comment ID, so each overload and each same-named member of another type is compared
+        separately; a changed parameter list shows as a removal plus an addition, and a changed return type as a
+        signature change. Removals, return-type and property-type changes, base-type changes, abstract/sealed
+        changes, and reduced visibility outside the assembly count as breaking. Lists at most 20 breaking changes and
+        only counts additions; a load failure is reported as a warning.
         """)]
     public static async Task<string> AnalyzeAPIChanges(
         [Description("Path to old version solution file")] string oldSolutionPath,
@@ -855,28 +860,73 @@ public class AdvancedTools
         if (result == null)
             return "Type not found.";
 
+        // "text" was the historical default and is treated as normal, as is any unknown value
+        var normalizedFormat = (format ?? "normal").Trim().ToLowerInvariant();
+
         var output = new StringBuilder();
         output.AppendLine($"# Class Hierarchy: {result.TypeName}");
         output.AppendLine($"Kind: {result.TypeKind}");
-        output.AppendLine($"Namespace: {result.Namespace}\n");
+        output.AppendLine($"Namespace: {result.Namespace}");
+
+        if (normalizedFormat == "detailed")
+        {
+            var modifiers = (result.IsAbstract ? ", abstract" : "") + (result.IsSealed ? ", sealed" : "");
+            output.AppendLine($"Accessibility: {result.Accessibility}{modifiers}");
+            if (result.LineNumber > 0)
+                output.AppendLine($"Location: {result.FilePath}:{result.LineNumber}");
+            if (!string.IsNullOrWhiteSpace(result.Documentation))
+                output.AppendLine($"Documentation: {result.Documentation}");
+        }
+
+        output.AppendLine();
 
         if (result.Ancestors.Any())
         {
-            output.AppendLine("## Ancestors:");
-            foreach (var ancestor in result.Ancestors)
-                output.AppendLine($"  - {ancestor.FullName} ({ancestor.TypeKind})");
+            output.AppendLine($"## Ancestors ({CountHierarchyNodes(result.Ancestors)}):");
+            AppendHierarchyNodes(output, result.Ancestors, "  ", normalizedFormat);
             output.AppendLine();
         }
 
         if (result.Descendants.Any())
         {
-            output.AppendLine("## Descendants:");
-            foreach (var desc in result.Descendants)
-                output.AppendLine($"  - {desc.FullName} ({desc.TypeKind})");
+            output.AppendLine($"## Descendants ({CountHierarchyNodes(result.Descendants)}):");
+            AppendHierarchyNodes(output, result.Descendants, "  ", normalizedFormat);
         }
 
         return output.ToString();
     }
+
+    private static void AppendHierarchyNodes(StringBuilder output, List<HierarchyNode> nodes, string indent, string format)
+    {
+        foreach (var node in nodes)
+        {
+            switch (format)
+            {
+                case "compact":
+                    output.AppendLine($"{indent}- {node.Name}");
+                    break;
+
+                case "detailed":
+                    var abstractMarker = node.IsAbstract && !node.IsInterface ? ", abstract" : "";
+                    output.AppendLine($"{indent}- {node.FullName} ({node.TypeKind}{abstractMarker})");
+                    output.AppendLine($"{indent}  Project: {node.ProjectName} | Namespace: {node.Namespace}");
+                    if (node.LineNumber > 0)
+                        output.AppendLine($"{indent}  Location: {node.FilePath}:{node.LineNumber}");
+                    break;
+
+                default:
+                    var location = node.LineNumber > 0 ? $" @ {Path.GetFileName(node.FilePath)}:{node.LineNumber}" : "";
+                    output.AppendLine($"{indent}- {node.FullName} ({node.TypeKind}){location}");
+                    break;
+            }
+
+            if (node.Children.Any())
+                AppendHierarchyNodes(output, node.Children, indent + "  ", format);
+        }
+    }
+
+    private static int CountHierarchyNodes(List<HierarchyNode> nodes) =>
+        nodes.Sum(n => 1 + CountHierarchyNodes(n.Children));
 
     private static string FormatAttributeUsages(AttributeSearchResults results, string attributeName, string format)
     {
@@ -967,6 +1017,15 @@ public class AdvancedTools
     {
         var output = new StringBuilder();
         output.AppendLine($"# API Changes Analysis");
+
+        if (results.Warnings.Any())
+        {
+            output.AppendLine("## Warnings:");
+            foreach (var warning in results.Warnings)
+                output.AppendLine($"  - [{warning.Context}] {warning.Message}");
+            output.AppendLine();
+        }
+
         output.AppendLine($"Breaking changes: {results.BreakingChanges}");
         output.AppendLine($"Added: {results.AddedSymbols} | Removed: {results.RemovedSymbols} | Modified: {results.ModifiedSymbols}");
         output.AppendLine($"Recommended version bump: {results.RecommendedVersionBump}\n");

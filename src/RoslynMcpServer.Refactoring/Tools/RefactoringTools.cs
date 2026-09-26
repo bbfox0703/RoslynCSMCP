@@ -54,19 +54,21 @@ public class RefactoringTools
     }
 
     [McpServerTool, Description("""
-        Estimate the impact of changing one symbol by finding every reference to it across the solution and
-        assigning a heuristic risk level from reference count, project count, and public accessibility, not from the
-        planned change. The name matches a type or a member of a top-level type by exact, case-sensitive simple name
-        or full display name such as Ns.Type.Method(int); the first match wins and can be a framework symbol, so
-        prefer the full name. Indirect references are currently always 0, and an unknown name returns an empty
-        report rather than an error.
+        Estimate the impact of changing one symbol. Direct references are every reference to it across the
+        solution; indirect references follow the members that contain them, level by level (references to the
+        callers, then to their callers), up to maxDepth. A heuristic risk level comes from reference count, project
+        count, and public accessibility, not from the planned change. The name matches a type (nested types
+        included) or member declared in the solution's source by exact, case-sensitive simple name or full display
+        name such as Ns.Type.Method(int); the first match wins, so prefer the full name. Framework symbols are not
+        matched, an unknown name returns a not-found warning, and indirect analysis stops with a warning after
+        following 200 members.
         """)]
     public static async Task<string> GetChangeImpact(
-        [Description("Type or member name: exact, case-sensitive simple name, or full display name (Ns.Type, Ns.Type.Member, Ns.Type.Method(int, string)). The first match wins.")] string symbolName,
+        [Description("Type or member declared in the solution: exact, case-sensitive simple name, or full display name (Ns.Type, Ns.Type.Member, Ns.Type.Method(int, string)). The first match wins.")] string symbolName,
         [Description("Path to solution file (.sln)")] string solutionPath,
-        [Description("Output format: summary (risk and counts), normal (counts, impacted project names, recommendations), detailed (symbol details and up to 50 reference locations with their enclosing member). Default: normal")]
+        [Description("Output format: summary (risk and counts), normal (counts, impacted project names, recommendations), detailed (symbol details and up to 50 direct and indirect reference locations with their enclosing member). Default: normal")]
         string format = "normal",
-        [Description("Currently has no effect; indirect reference expansion finds nothing. Default: 3")] int maxDepth = 3,
+        [Description("Number of reference levels to follow, counting direct references as level 1 (1 = direct references only). Default: 3")] int maxDepth = 3,
         ChangeImpactAnalyzer analyzer = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
@@ -226,10 +228,23 @@ public class RefactoringTools
         return output.ToString();
     }
 
+    /// <summary>
+    /// Appends analysis warnings; returns true when the symbol could not be analyzed, so there is nothing else to report
+    /// </summary>
+    private static bool AppendChangeImpactWarnings(StringBuilder output, ChangeImpactResults results)
+    {
+        foreach (var warning in results.Warnings)
+            output.AppendLine($"  ⚠️ [{warning.Context}] {warning.Message}");
+
+        return string.IsNullOrEmpty(results.TargetSymbolFullName);
+    }
+
     private static string FormatChangeImpactSummary(ChangeImpactResults results)
     {
         var output = new StringBuilder();
         output.AppendLine($"Change Impact Summary for '{results.TargetSymbol}':");
+        if (AppendChangeImpactWarnings(output, results))
+            return output.ToString();
         output.AppendLine($"  Risk Level: {results.RiskLevel}");
         output.AppendLine($"  Direct references: {results.DirectReferences}");
         output.AppendLine($"  Indirect references: {results.IndirectReferences}");
@@ -242,6 +257,8 @@ public class RefactoringTools
     {
         var output = new StringBuilder();
         output.AppendLine($"# Change Impact: {results.TargetSymbol}");
+        if (AppendChangeImpactWarnings(output, results))
+            return output.ToString();
         output.AppendLine($"Risk: {results.RiskLevel} | Direct: {results.DirectReferences} | Indirect: {results.IndirectReferences}\n");
 
         if (results.ImpactedProjectNames.Any())
@@ -266,6 +283,8 @@ public class RefactoringTools
     {
         var output = new StringBuilder();
         output.AppendLine($"# Change Impact Analysis: {results.TargetSymbol}");
+        if (AppendChangeImpactWarnings(output, results))
+            return output.ToString();
         output.AppendLine($"Full name: {results.TargetSymbolFullName}");
         output.AppendLine($"Kind: {results.SymbolKind}");
         output.AppendLine($"Accessibility: {results.Accessibility}");
@@ -283,9 +302,10 @@ public class RefactoringTools
         if (results.ImpactedSymbols.Any())
         {
             output.AppendLine("## Impacted Symbols:");
-            foreach (var symbol in results.ImpactedSymbols.Take(50))
+            foreach (var symbol in results.ImpactedSymbols.OrderBy(s => s.Distance).Take(50))
             {
-                output.AppendLine($"  - {symbol.SymbolName} ({symbol.SymbolKind}) @ {symbol.FileName}:{symbol.LineNumber}");
+                var level = symbol.Distance == 0 ? "" : $" [indirect, via {symbol.ReferencedSymbol}]";
+                output.AppendLine($"  - {symbol.SymbolName} ({symbol.SymbolKind}) @ {symbol.FileName}:{symbol.LineNumber}{level}");
             }
         }
 
