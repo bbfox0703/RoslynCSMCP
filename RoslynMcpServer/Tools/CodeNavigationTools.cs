@@ -76,16 +76,19 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            Find source references to every symbol whose simple name equals symbolName, ignoring case; overloads,
-            same-named members of other types, and same-named framework members are combined, and qualified names are
-            not supported. References are grouped by file, one entry per line. Declaration sites are not included.
+            Find source references to the symbols declared in the solution that match symbolName, plus their
+            declaration sites when includeDefinition is true. A simple name combines every match (overloads and
+            same-named members of different types); qualify it with the containing type or namespace to narrow it.
+            Members of referenced assemblies such as the .NET framework are never matched. References are grouped by
+            file, one entry per line, with declarations marked; a name that matches no declared symbol returns a
+            'not found' message.
             """)]
         public static async Task<string> FindReferences(
-            [Description("Simple (unqualified) symbol name, matched case-insensitively against every declared symbol, including framework members; forms like 'Ns.Type.Member' do not match.")] string symbolName,
+            [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Detail level: summary (reference count and up to 10 line numbers per file), locations (code line per reference; files with more than 5 references list line numbers only), full (every reference with 5-line context). Default: locations")]
             string detailLevel = "locations",
-            [Description("Currently has no effect; declaration sites are never returned.")] bool includeDefinition = true,
+            [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -102,7 +105,13 @@ namespace RoslynMcpServer.Tools
                     return "Error: Symbol search service not available.";
                 }
 
-                var results = await searchService.FindReferencesAsync(symbolName, solutionPath, includeDefinition);
+                var search = await searchService.SearchReferencesAsync(symbolName, solutionPath, includeDefinition);
+                if (search.MatchedSymbolCount == 0)
+                {
+                    return $"Symbol '{symbolName}' not found: no symbol with that name is declared in the solution.";
+                }
+
+                var results = search.References;
 
                 // Format based on detail level
                 return detailLevel.ToLower() switch
@@ -122,17 +131,18 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            Run the FindReferences search in each listed solution and merge the results, dropping duplicate locations.
-            Names are matched the same way: simple name, ignoring case, with every same-named symbol combined. Output
-            lists the solutions searched, then references grouped by file without saying which solution each came from.
-            Declaration sites are not included, and a solution that fails to load contributes nothing without an error.
+            Run the FindReferences search in each listed solution and merge the results into one entry per file line,
+            so a line in a file shared by several solutions appears once. symbolName is resolved in each solution the
+            same way as in FindReferences. Output lists the solutions searched, then references grouped by file
+            without saying which solution each came from, with declarations marked. A solution that fails to load
+            contributes nothing, without an error.
             """)]
         public static async Task<string> FindReferencesAcrossSolutions(
-            [Description("Simple (unqualified) symbol name, matched case-insensitively against every declared symbol, including framework members; forms like 'Ns.Type.Member' do not match.")] string symbolName,
+            [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
             [Description("Comma-separated list of solution file paths (.sln)")] string solutionPaths,
             [Description("Detail level: summary (reference count and up to 10 line numbers per file), locations (code line per reference; files with more than 5 references list line numbers only), full (every reference with 5-line context). Default: locations")]
             string detailLevel = "locations",
-            [Description("Currently has no effect; declaration sites are never returned.")] bool includeDefinition = true,
+            [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
             IServiceProvider? serviceProvider = null)
         {
             try
@@ -1154,22 +1164,22 @@ namespace RoslynMcpServer.Tools
         }
 
         [McpServerTool, Description("""
-            Find references the way FindReferences does (simple name, ignoring case, every same-named symbol combined,
-            declaration sites not included) and narrow them by project name pattern, test-project exclusion,
-            cross-project usage, or write access. The write filter is a syntax heuristic: references inside an
-            assignment or ++/-- expression count, including right-hand-side reads, while out and ref arguments are
-            missed. Output lists the active filters, then references grouped by file.
+            Find references the way FindReferences does, then narrow them by project name pattern, test-project
+            exclusion, cross-project usage, write access, or public API context. Filters are applied to each reference
+            before lines are merged, so a line that both reads and writes the symbol counts as a write. Declaration
+            sites (includeDefinition) are subject to projectFilter, excludeTests, and publicOnly, and are dropped by
+            crossProjectOnly and writesOnly. Output lists the active filters, then references grouped by file.
             """)]
         public static async Task<string> FindReferencesFiltered(
-            [Description("Simple (unqualified) symbol name, matched case-insensitively against every declared symbol, including framework members; forms like 'Ns.Type.Member' do not match.")] string symbolName,
+            [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
             [Description("Path to solution file (.sln)")] string solutionPath,
             [Description("Detail level: summary (reference count and up to 10 line numbers per file), locations (code line per reference; files with more than 5 references list line numbers only), full (every reference with 5-line context). Default: locations")]
             string detailLevel = "locations",
-            [Description("Currently has no effect; declaration sites are never returned.")] bool includeDefinition = true,
-            [Description("If the first symbol matching the name is not declared public, nothing is returned; otherwise no references are filtered out.")] bool publicOnly = false,
+            [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
+            [Description("Keep only locations inside a type or member visible outside its assembly: it and every containing type are public, protected, or protected internal, and an accessor's own modifier counts (e.g. a private setter). Code in private or internal members, top-level statements, and using directives is dropped.")] bool publicOnly = false,
             [Description("Drop references in projects whose name contains 'test' or 'spec' (case-insensitive substring).")] bool excludeTests = false,
-            [Description("Keep only references outside the project that declares the symbol (the first match when several share the name).")] bool crossProjectOnly = false,
-            [Description("Keep only references inside an assignment, compound assignment, or ++/-- expression (syntax heuristic: right-hand-side reads are also kept; out and ref arguments are missed).")] bool writesOnly = false,
+            [Description("Keep only references located in a project other than the one declaring the referenced symbol (checked per symbol when several match); declaration sites are dropped.")] bool crossProjectOnly = false,
+            [Description("Keep only references that write the symbol: assignment or compound-assignment target (including object initializers and deconstruction), ++/-- operand, or out/ref argument. Reads, including right-hand-side reads inside an assignment, and declaration sites are dropped.")] bool writesOnly = false,
             [Description("Project name wildcard pattern (* and ?), matched case-insensitively against the whole name.")] string? projectFilter = null,
             IServiceProvider? serviceProvider = null)
         {

@@ -46,20 +46,23 @@ public class AdvancedTools
     }
 
     [McpServerTool, Description("""
-        Find source references to every symbol whose simple name equals symbolName, ignoring case (framework members
-        included, declaration sites not included), and narrow them by project name pattern, test-project exclusion,
-        cross-project usage, or write access. The write filter is a syntax heuristic: references inside an
-        assignment or ++/-- expression count, including right-hand-side reads, while out and ref arguments are
-        missed. Output is a total count and code lines grouped by file, up to 10 per file.
+        Find source references to the symbols declared in the solution that match symbolName, plus their
+        declaration sites when includeDefinition is true, and narrow them by project name pattern, test-project
+        exclusion, cross-project usage, write access, or public API context. A simple name combines every match
+        (overloads and same-named members of different types); qualify it to narrow it. Members of referenced
+        assemblies such as the .NET framework are never matched. Filters are applied to each reference before
+        lines are merged, so a line that both reads and writes the symbol counts as a write. Declaration sites are
+        subject to projectFilter, excludeTests, and publicOnly, and are dropped by crossProjectOnly and writesOnly.
+        Output is a total count and code lines grouped by file, up to 10 per file, with declarations marked.
         """)]
     public static async Task<string> FindReferencesFiltered(
-        [Description("Simple (unqualified) symbol name, matched case-insensitively against every declared symbol, including framework members; forms like 'Ns.Type.Member' do not match.")] string symbolName,
+        [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
         [Description("Path to solution file (.sln or .slnx)")] string solutionPath,
-        [Description("Currently has no effect; declaration sites are never returned.")] bool includeDefinition = true,
-        [Description("If the first symbol matching the name is not declared public, nothing is returned; otherwise no references are filtered out.")] bool publicOnly = false,
+        [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
+        [Description("Keep only locations inside a type or member visible outside its assembly: it and every containing type are public, protected, or protected internal, and an accessor's own modifier counts (e.g. a private setter). Code in private or internal members, top-level statements, and using directives is dropped.")] bool publicOnly = false,
         [Description("Drop references in projects whose name contains 'test' or 'spec' (case-insensitive substring).")] bool excludeTests = false,
-        [Description("Keep only references outside the project that declares the symbol (the first match when several share the name).")] bool crossProjectOnly = false,
-        [Description("Keep only references inside an assignment, compound assignment, or ++/-- expression (syntax heuristic: right-hand-side reads are also kept; out and ref arguments are missed).")] bool writesOnly = false,
+        [Description("Keep only references located in a project other than the one declaring the referenced symbol (checked per symbol when several match); declaration sites are dropped.")] bool crossProjectOnly = false,
+        [Description("Keep only references that write the symbol: assignment or compound-assignment target (including object initializers and deconstruction), ++/-- operand, or out/ref argument. Reads, including right-hand-side reads inside an assignment, and declaration sites are dropped.")] bool writesOnly = false,
         [Description("Project name wildcard pattern (* and ?), matched case-insensitively against the whole name.")] string? projectFilter = null,
         SymbolSearchService searchService = null!,
         SecurityValidator validator = null!,
@@ -82,16 +85,18 @@ public class AdvancedTools
     }
 
     [McpServerTool, Description("""
-        Find source references to a symbol in each of several solutions and merge them, dropping duplicate
-        locations. symbolName is a simple name matched ignoring case, and every same-named symbol is combined,
-        framework members included; qualified names do not match. Output groups references by project (under
-        headings labeled as solutions), up to 5 file:line locations each. Declaration sites are not included. A path
-        that does not name an existing .sln or .slnx file returns an error, but a solution that exists and fails to
-        load contributes nothing without an error.
+        Find source references to a symbol in each of several solutions and merge them into one entry per file
+        line; a line found in more than one solution (shared files) is listed under the first solution given.
+        symbolName is resolved in each solution as in FindReferencesFiltered: simple or qualified name, matched
+        against symbols declared in that solution's source, never framework members. Output groups references by
+        solution, up to 5 file:line (project) locations each, with declarations marked. A path that does not name an
+        existing .sln or .slnx file returns an error, but a solution that exists and fails to load contributes
+        nothing without an error.
         """)]
     public static async Task<string> FindReferencesAcrossSolutions(
-        [Description("Simple (unqualified) symbol name, matched case-insensitively against every declared symbol, including framework members; forms like 'Ns.Type.Member' do not match.")] string symbolName,
+        [Description("Symbol name: simple ('Save') or qualified by containing type and/or namespace ('UserService.Save', 'MyApp.Services.UserService.Save'); generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match, never framework or package members; exact-case matches are preferred, otherwise case is ignored.")] string symbolName,
         [Description("Comma-separated absolute paths to solution files (.sln or .slnx)")] string solutionPaths,
+        [Description("Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true).")] bool includeDefinition = true,
         SymbolSearchService searchService = null!,
         SecurityValidator validator = null!,
         McpErrorHandler errorHandler = null!)
@@ -108,13 +113,15 @@ public class AdvancedTools
                 if (pathError != null) return pathError;
             }
 
-            var results = await searchService.FindReferencesAcrossSolutionsAsync(symbolName, paths, includeDefinition: true);
+            var results = await searchService.FindReferencesAcrossSolutionsAsync(symbolName, paths, includeDefinition);
 
+            // Group by the solution each reference was found in, keeping the order the solutions were given
             var groupedResults = results
-                .GroupBy(r => r.ProjectName)
+                .GroupBy(r => r.SolutionPath)
+                .OrderBy(g => Array.IndexOf(paths, g.Key))
                 .ToDictionary(g => g.Key, g => g.ToList());
 
-            return FormatCrossReferences(groupedResults, symbolName);
+            return FormatCrossReferences(groupedResults, symbolName, paths.Length);
         }
         catch (Exception ex)
         {
@@ -823,7 +830,7 @@ public class AdvancedTools
         {
             output.AppendLine($"**{Path.GetFileName(group.Key)}**");
             foreach (var r in group.Take(10))
-                output.AppendLine($"  Line {r.LineNumber}: {r.LineText.Trim()}");
+                output.AppendLine($"  Line {r.LineNumber}: {r.LineText.Trim()}{(r.IsDefinition ? " [definition]" : "")}");
             if (group.Count() > 10)
                 output.AppendLine($"  ... and {group.Count() - 10} more");
             output.AppendLine();
@@ -832,20 +839,21 @@ public class AdvancedTools
         return output.ToString();
     }
 
-    private static string FormatCrossReferences(Dictionary<string, List<ReferenceResult>> results, string symbolName)
+    private static string FormatCrossReferences(Dictionary<string, List<ReferenceResult>> results, string symbolName, int solutionsSearched)
     {
         if (!results.Any() || results.Values.All(v => !v.Any()))
-            return $"No references found for '{symbolName}' across solutions.";
+            return $"No references found for '{symbolName}' across {solutionsSearched} solutions.";
 
         var output = new StringBuilder();
         var total = results.Values.Sum(v => v.Count);
-        output.AppendLine($"Found {total} references to '{symbolName}' across {results.Count} solutions:\n");
+        var withReferences = results.Count(kv => kv.Value.Any());
+        output.AppendLine($"Found {total} references to '{symbolName}' in {withReferences} of {solutionsSearched} solutions:\n");
 
         foreach (var (solution, refs) in results.Where(kv => kv.Value.Any()))
         {
             output.AppendLine($"## {Path.GetFileName(solution)} ({refs.Count} refs)");
             foreach (var r in refs.Take(5))
-                output.AppendLine($"  - {Path.GetFileName(r.DocumentPath)}:{r.LineNumber}");
+                output.AppendLine($"  - {Path.GetFileName(r.DocumentPath)}:{r.LineNumber} ({r.ProjectName}){(r.IsDefinition ? " [definition]" : "")}");
             if (refs.Count > 5)
                 output.AppendLine($"  ... and {refs.Count - 5} more");
             output.AppendLine();

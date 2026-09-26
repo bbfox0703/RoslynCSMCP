@@ -33,13 +33,13 @@ Use SearchSymbols tool with:
 ---
 
 ### 2. FindReferences
-**Description**: Find all references to a specific symbol with configurable detail level
+**Description**: Find source references to the symbols declared in the solution that match a name, plus their declaration sites. One entry per file line. A name that matches no declared symbol is reported as not found (a symbol-not-found error in the Navigation module); a declared symbol with no references reports "No references found".
 
 **Parameters**:
-- `symbolName` (string): Exact symbol name to find references for
+- `symbolName` (string): Simple (`Save`) or qualified (`UserService.Save`, `MyApp.Services.UserService.Save`) name; generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match (never framework or package members); exact-case matches are preferred, otherwise case is ignored. A simple name combines every match (overloads, same-named members of different types).
 - `solutionPath` (string): Path to solution file (.sln)
 - `detailLevel` (string, optional): Detail level: summary (file stats only), locations (with code lines), full (with 5-line context). Default: locations
-- `includeDefinition` (bool, optional): Include symbol definition in results (default: true)
+- `includeDefinition` (bool, optional): Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true)
 
 **Example Usage**:
 ```
@@ -52,29 +52,29 @@ Use FindReferences tool with:
 ---
 
 ### 3. FindReferencesAcrossSolutions
-**Description**: Find all references to a symbol across multiple solutions
+**Description**: Run the FindReferences search in each listed solution and merge the results into one entry per file line (a line in a file shared by several solutions appears once, attributed to the first solution listed). The Advanced module groups its output by solution; the Full build groups by file.
 
 **Parameters**:
-- `symbolName` (string): Exact symbol name to find references for
+- `symbolName` (string): Simple (`Save`) or qualified (`UserService.Save`, `MyApp.Services.UserService.Save`) name; generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match (never framework or package members); exact-case matches are preferred, otherwise case is ignored. A simple name combines every match (overloads, same-named members of different types).
 - `solutionPaths` (string): Comma-separated list of solution file paths (.sln)
-- `detailLevel` (string, optional): Detail level: summary, locations, full (default: locations)
-- `includeDefinition` (bool, optional): Include symbol definition (default: true)
+- `detailLevel` (string, optional, Full build only): Detail level: summary, locations, full (default: locations)
+- `includeDefinition` (bool, optional): Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true)
 
 ---
 
 ### 4. FindReferencesFiltered
-**Description**: Find references with advanced filtering options to reduce noise and focus on specific usage patterns
+**Description**: Find references the way FindReferences does, then narrow them. Filters are applied to each reference before lines are merged, so a line that both reads and writes the symbol counts as a write. Declaration sites are subject to `projectFilter`, `excludeTests`, and `publicOnly`, and are dropped by `crossProjectOnly` and `writesOnly`.
 
 **Parameters**:
-- `symbolName` (string): Exact symbol name to find references for
+- `symbolName` (string): Simple (`Save`) or qualified (`UserService.Save`, `MyApp.Services.UserService.Save`) name; generic arguments and parameter lists are ignored. Only symbols declared in the solution's source match (never framework or package members); exact-case matches are preferred, otherwise case is ignored. A simple name combines every match (overloads, same-named members of different types).
 - `solutionPath` (string): Path to solution file (.sln)
 - `detailLevel` (string, optional): Detail level: summary, locations, full (default: locations)
-- `includeDefinition` (bool, optional): Include symbol definition (default: true)
-- `projectFilter` (string, optional): Filter by project name pattern (supports wildcards: * and ?)
-- `excludeTests` (bool, optional): Exclude test projects (default: false)
-- `writesOnly` (bool, optional): Only show write operations (assignments, increments, etc.) (default: false)
-- `publicOnly` (bool, optional): Only show references in public API contexts (default: false)
-- `crossProjectOnly` (bool, optional): Only show cross-project references (default: false)
+- `includeDefinition` (bool, optional): Also return each matching symbol's declaration sites (every part of a partial declaration), marked as definitions (default: true)
+- `projectFilter` (string, optional): Project name wildcard pattern (* and ?), matched case-insensitively against the whole name
+- `excludeTests` (bool, optional): Drop references in projects whose name contains "test" or "spec" (default: false)
+- `writesOnly` (bool, optional): Keep only references that write the symbol: assignment or compound-assignment target (including object initializers and deconstruction), `++`/`--` operand, or `out`/`ref` argument. Right-hand-side reads are not writes (default: false)
+- `publicOnly` (bool, optional): Keep only locations inside a type or member visible outside its assembly (it and every containing type are public, protected, or protected internal; an accessor's own modifier counts) (default: false)
+- `crossProjectOnly` (bool, optional): Keep only references in a project other than the one declaring the referenced symbol, checked per symbol (default: false)
 
 ---
 
